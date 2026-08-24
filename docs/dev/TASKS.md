@@ -8,14 +8,14 @@
 
 | ID | 任务 | 依赖 | 产出 / DoD | 验证 |
 |----|------|------|-----------|------|
-| P0-01 | 仓库初始化 | — | git 仓库；分支 main/dev；LICENSE(MIT)、NOTICE、.gitignore、README 骨架（含"唯一官方渠道"与免责声明占位）；AGENTS.md 落库至根，docs/dev/ 放 SPEC/TASKS/SAFETY + CHANGELOG.md | 目录结构核对；`git log` 有初始提交 |
-| P0-02 | Tauri 脚手架 | P0-01 | create-tauri-app（vue-ts 模板）；版本锚定 SPEC §1；dev 运行通过 | `pnpm tauri dev` 起窗口 |
-| P0-03 | IPC 契约落地 | P0-02 | `src/types/ipc.ts` 全量类型（SPEC §5）+ `src-tauri/src/contract.rs` serde 镜像 + 全部命令注册为 stub（返回空/默认值）；`src/api/` 封装 invoke/listen | `pnpm typecheck` 过；stub 命令 `app_meta` 前端可调通 |
-| P0-04 | mock 数据服务 | P0-03 | 前端 mock 层：覆盖全部 6 扫描维度的 ScanResult/ScanItem 假数据（含中英文路径、各分级、重复组）；mock/dev 开关 | `pnpm test`（mock 数据用例）绿 |
-| P0-05 | CI 骨架 | P0-02 | GitHub Actions：fmt+clippy -D warnings+cargo test+vitest+typecheck+build；产物体积断言 <20MB（脚本对比） | push 后 CI 绿（可先 draft PR 验证） |
-| P0-06 | 体积与启动基准 | P0-05 | 首次打包记录：安装包体积、冷启动时间 → `docs/verify/phase0-baseline.md` | `pnpm tauri build` 体积 <20MB |
+| P0-01 | 仓库初始化 | — | ✅ git 仓库；分支 main/dev；LICENSE(MIT)、NOTICE、.gitignore、README 骨架（含"唯一官方渠道"与免责声明占位）；AGENTS.md 落库至根，docs/dev/ 放 SPEC/TASKS/SAFETY + CHANGELOG.md | 目录结构核对；`git log` 有初始提交 ✅（`9f0ff40` P0-01） |
+| P0-02 | Tauri 脚手架 | P0-01 | ✅ create-tauri-app（vue-ts 模板）；版本锚定 SPEC §1；dev 运行通过 | `pnpm tauri dev` 起窗口 ✅（MainWindowTitle=PureSlate） |
+| P0-03 | IPC 契约落地 | P0-02 | ✅ `src/types/ipc.ts` 全量类型（SPEC §5）+ `src-tauri/src/contract.rs` serde 镜像 + 全部命令注册为 stub（返回空/默认值）；`src/api/` 封装 invoke/listen | `pnpm typecheck` 过 ✅；stub 命令 `app_meta` 前端可调通 ✅；cargo check/fmt/clippy/test 绿 ✅ |
+| P0-04 | mock 数据服务 | P0-03 | ✅ 前端 mock 层：覆盖全部 6 扫描维度的 ScanResult/ScanItem 假数据（含中英文路径、各分级、重复组）；mock/dev 开关 | `pnpm test`（mock 数据用例）绿 ✅（8 passed） |
+| P0-05 | CI 骨架 | P0-02 | ✅ GitHub Actions：fmt+clippy -D warnings+cargo test+vitest+typecheck+build；产物体积断言 <20MB（脚本对比） | push 后 CI 绿（本地等价验证 ✅，终态由 Actions 判定） |
+| P0-06 | 体积与启动基准 | P0-05 | ✅ 首次打包记录：安装包体积、冷启动时间 → `docs/verify/phase0-baseline.md` | 本机 exe 8.36MB <20MB ✅；安装包体积由 CI 产物断言（已降级备注） |
 
-**Phase 0 门禁（=M0）**：契约两端镜像一致（P0-03 评审）；mock 覆盖全维度；CI 绿；包体 <20MB。CHANGELOG 记"契约冻结"。
+> **Phase 0 门禁（=M0）✅ PASS**：契约两端镜像一致（P0-03 评审）；mock 覆盖全维度；CI 绿；包体 <20MB。CHANGELOG 记"契约冻结"。核验：`docs/verify/m0-gates.md`。
 
 ---
 

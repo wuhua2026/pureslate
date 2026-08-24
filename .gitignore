@@ -1,40 +1,24 @@
-# Node
-node_modules/
-dist/
-dist-ssr/
-*.local
-.pnpm-store/
-
-# Editor / OS
-.idea/
-.vscode/*
-!.vscode/extensions.json
-.DS_Store
-Thumbs.db
-
-# Rust / Tauri
-src-tauri/target/
-src-tauri/gen/schemas/
-src-tauri/release/
-*.rs.bk
-*.pdb
-*.pdb.idx
-*.pdb.trace.cache
-
-# Logs / temp
+# Logs
+logs
 *.log
 npm-debug.log*
-pnpm-debug.log*
+yarn-debug.log*
 yarn-error.log*
-logs/
-*.tmp
-*.temp
+pnpm-debug.log*
+lerna-debug.log*
 
-# Env
-.env
-.env.*
-!.env.example
+node_modules
+dist
+dist-ssr
+*.local
 
-# Verify artifacts (generated, not source)
-docs/verify/*.json
-!docs/verify/*.md
+# Editor directories and files
+.vscode/*
+!.vscode/extensions.json
+.idea
+.DS_Store
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?

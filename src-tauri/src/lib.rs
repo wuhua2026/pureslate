@@ -1,0 +1,37 @@
+// PureSlate 内核入口。M0 阶段：注册 IPC 契约 stub 与共享状态。
+
+pub mod contract;
+pub mod ipc;
+pub mod state;
+
+use crate::state::AppState;
+use tauri::Manager;
+
+#[cfg_attr(mobile, tauri::mobile_entry_point)]
+pub fn run() {
+    tauri::Builder::default()
+        .setup(|app| {
+            app.manage(AppState::new());
+            Ok(())
+        })
+        .invoke_handler(tauri::generate_handler![
+            ipc::commands::app_meta,
+            ipc::commands::scan_start,
+            ipc::commands::scan_cancel,
+            ipc::commands::scan_get_items,
+            ipc::commands::clean_execute,
+            ipc::commands::clean_cancel,
+            ipc::commands::quarantine_list,
+            ipc::commands::quarantine_restore,
+            ipc::commands::quarantine_purge,
+            ipc::commands::startup_list,
+            ipc::commands::startup_toggle,
+            ipc::commands::log_query,
+            ipc::commands::log_export,
+            ipc::commands::settings_get,
+            ipc::commands::settings_set,
+            ipc::commands::update_check,
+        ])
+        .run(tauri::generate_context!())
+        .expect("error while running tauri application");
+}
