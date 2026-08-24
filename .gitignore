@@ -1,0 +1,40 @@
+# Node
+node_modules/
+dist/
+dist-ssr/
+*.local
+.pnpm-store/
+
+# Editor / OS
+.idea/
+.vscode/*
+!.vscode/extensions.json
+.DS_Store
+Thumbs.db
+
+# Rust / Tauri
+src-tauri/target/
+src-tauri/gen/schemas/
+src-tauri/release/
+*.rs.bk
+*.pdb
+*.pdb.idx
+*.pdb.trace.cache
+
+# Logs / temp
+*.log
+npm-debug.log*
+pnpm-debug.log*
+yarn-error.log*
+logs/
+*.tmp
+*.temp
+
+# Env
+.env
+.env.*
+!.env.example
+
+# Verify artifacts (generated, not source)
+docs/verify/*.json
+!docs/verify/*.md
