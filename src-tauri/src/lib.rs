@@ -3,6 +3,8 @@
 pub mod contract;
 pub mod ipc;
 pub mod rules;
+pub mod safety;
+pub mod scanner;
 pub mod state;
 
 use crate::state::AppState;
