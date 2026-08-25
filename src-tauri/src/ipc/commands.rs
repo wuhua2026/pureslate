@@ -282,16 +282,17 @@ pub fn startup_toggle(_state: State<AppState>, _params: StartupToggleParams) -> 
     true
 }
 
-/// 查询审计日志。
+/// 查询审计日志（按 from/to/op 过滤、跨天合并）。
 #[tauri::command]
-pub fn log_query(_state: State<AppState>, _filter: LogQueryFilter) -> Vec<LogEntry> {
-    vec![]
+pub fn log_query(state: State<AppState>, filter: LogQueryFilter) -> Vec<LogEntry> {
+    let _ = state;
+    crate::logging::audit::query(filter.from, filter.to, filter.op.as_deref())
 }
 
-/// 导出日志。
+/// 导出日志：全量审计日志 → 指定文件（JSONL）。返回是否成功。
 #[tauri::command]
-pub fn log_export(_state: State<AppState>, _path: String) -> bool {
-    true
+pub fn log_export(_state: State<AppState>, path: String) -> bool {
+    crate::logging::audit::export_all(Path::new(&path)).is_ok()
 }
 
 /// 读取设置（从状态返回；状态在启动时已从 settings.json 恢复）。

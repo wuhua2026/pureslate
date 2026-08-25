@@ -2,6 +2,7 @@
 
 pub mod contract;
 pub mod ipc;
+pub mod logging;
 pub mod quarantine;
 pub mod rules;
 pub mod safety;
