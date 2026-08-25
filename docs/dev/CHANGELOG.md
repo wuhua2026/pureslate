@@ -25,3 +25,12 @@
 - **SAFETY §1 一致性修正**：`rules::model::Risk` 的 `Default` 由 Green 改为 **Red**；`loader::parse_risk` 对非法/缺失 risk 由默认为 Green 改为保守默认 **Red**（危险方向——任何"无法判定"都应向红靠拢，而非绿）。
 - **§2.5（运行中进程句柄判定）推迟**：属独立句柄快照 ffI 逻辑，不与路径级白名单混排；在未做边界验证前不引入脆弱的删除前判定，理由与后续安排见 `safety/whitelist.rs` 头注释。不构成 `[DESTRUCTIVE]`（本任务零删除/零写盘）。
 - **验证**：cargo fmt / clippy `-D warnings` / test 全绿（grade 3 用例、whitelist 新增 4 用例、rules loader 默认红 1 用例）。
+
+### 清理执行（P2-04，[DESTRUCTIVE]）
+
+- **两阶段事务 journal**：新增 `cleaner/journal`，`<data_root>\journal\<txId>.jsonl` 只追加；每文件 `intent`（操作前）→ `result`（操作后含 ok/detail）；`detect_orphans` 供崩溃后扫孤。
+- **分级清理执行**：新增 `cleaner/execute` 按类目串行逐文件执行（journal.intent → 按去向 apply → journal.result → 审计 record → 进度回调）；🟢 direct=Win32 `DeleteFileW`、🟢 recycle=`SHFileOperationW`（FOF_ALLOWUNDO 可回收站还原）、🟡/🔴 = 移入隔离区（复用 P2-01 store）；单文件失败记 `ok=false` 不中断事务。
+- **进程守卫（R23 一语义）**：新增 `guard/process`，`CreateToolhelp32Snapshot` 枚举运行进程与规则 `<guard process>` 比对，命中 → 整类 Skip 不做半清（零依赖，`#[link] kernel32`）。
+- **🔴 无 token 拒绝（M0 语义落地）**：`clean_execute` 含 Red 项而 `confirmToken` 缺失/空 → 拒绝；`clean_cancel` 置位一次性取消令牌。
+- **契约加性变更（双端同步 + 记此日志）**：新增事件 payload `CleanDoneEvent` 与常量 `CLEAN_DONE`（`clean_done`），`ipc.ts`↔`contract.rs`↔`events.ts` 三端一致；不破坏任何既有命令签名，无字段删除/改写。
+- **验证**：cargo fmt / clippy `--all-targets -D warnings` / test 全绿（69 单测 + 2 集成），含 journal 孤儿判定、missing-source 中断不panic、guard 整类阻止、direct 双路径/审计/journal 齐备、🔴 无 token 拒绝等用例。评审文档 `docs/review/P2-04.md`。

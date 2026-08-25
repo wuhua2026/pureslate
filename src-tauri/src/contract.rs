@@ -302,6 +302,17 @@ pub struct QuarantineExpiryWarningEvent {
     pub days_left: i64,
 }
 
+/// 清理事务完成事件 payload（done 时仅发一次；前端以此从执行页切到完成页）。
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CleanDoneEvent {
+    pub tx_id: String,
+    pub total: u64,
+    pub ok: u64,
+    pub fail: u64,
+    pub skip: u64,
+}
+
 // ---- 命令参数（与 TS api 层对应） ----
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -355,6 +366,7 @@ pub mod events {
     pub const SCAN_PROGRESS: &str = "scan_progress";
     pub const SCAN_DONE: &str = "scan_done";
     pub const CLEAN_PROGRESS: &str = "clean_progress";
+    pub const CLEAN_DONE: &str = "clean_done";
     pub const QUARANTINE_EXPIRY_WARNING: &str = "quarantine_expiry_warning";
     pub const UPDATE_AVAILABLE: &str = "update_available";
 }

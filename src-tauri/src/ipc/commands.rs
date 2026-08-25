@@ -2,18 +2,32 @@
 //! M0 阶段全部注册为 stub；P1-05 已实现 scan_start/scan_cancel/scan_get_items 业务，
 //! 其余命令保持 stub（对应 Phase 2/3 填充）。
 
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering as AtomicOrdering};
+use std::sync::{Mutex, OnceLock};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use tauri::{Emitter, Manager, State};
 
+use crate::cleaner::CleanTarget;
 use crate::contract::*;
 use crate::scanner::walk::CancelToken;
 use crate::state::{AppState, ScanContext};
 
 /// 已生成的扫描序号（保证 scanId 单调可区分）。
 static SCAN_SEQ: AtomicU64 = AtomicU64::new(0);
+
+/// 清理事务取消令牌（tx_id -> CancelToken）。同刻至多一个清理事务。
+static CLEAN_CANCELS: OnceLock<Mutex<HashMap<String, CancelToken>>> = OnceLock::new();
+
+/// 取清理取消登记表（惰性初始化）。
+fn clean_cancel_registry() -> std::sync::MutexGuard<'static, HashMap<String, CancelToken>> {
+    CLEAN_CANCELS
+        .get_or_init(|| Mutex::new(HashMap::new()))
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+}
 
 /// 应用元信息（首个打通命令）。
 #[tauri::command]
@@ -233,16 +247,151 @@ fn now_ms() -> i64 {
 
 // ---- 以下为 Phase 2/3 命令（stub） ----
 
-/// 执行清理。含 🔴 时 confirm_token 必填（P2 校验）。
+/// 执行清理。含 🔴 项而 confirm_token 缺失 → 拒绝（M0 语义落地，SAFETY §4.5）。
+/// 返回 tx_id；后台执行并推送 `clean_progress`/`clean_done`。
 #[tauri::command]
-pub fn clean_execute(_state: State<AppState>, _params: CleanExecuteParams) -> String {
-    "stub-tx-0001".into()
+pub fn clean_execute(
+    app: tauri::AppHandle,
+    state: State<AppState>,
+    params: CleanExecuteParams,
+) -> Result<String, String> {
+    // 1. 解析待清理项（按 item.id 跨会话定位）为 CleanTarget。
+    //    规则表用于回填各 category 的 guard 进程（进程守卫语义，R23 一语义）。
+    let rules_dir = resolve_rules_dir(&app);
+    let mut loader = crate::rules::loader::RuleLoader::new();
+    let guard_map = match loader.load_dir(&rules_dir) {
+        Ok(table) => table
+            .by_id
+            .iter()
+            .map(|(id, (_, cat))| (id.clone(), cat.guard_process.clone()))
+            .collect::<HashMap<String, Option<String>>>(),
+        // 规则加载失败：不阻塞清理，guard 守卫退化为"一律不查"（不安全的类目在 BP 侧已由规则保证）。
+        Err(_) => HashMap::new(),
+    };
+
+    let targets = {
+        let Ok(scans) = state.scans.lock() else {
+            return Err("扫描状态不可用".into());
+        };
+        let mut out: Vec<CleanTarget> = Vec::new();
+        for ctx in scans.finished.iter().chain(scans.current.iter()) {
+            for item in &ctx.items {
+                if params.items.contains(&item.id) {
+                    out.push(to_clean_target(item, &guard_map));
+                }
+            }
+        }
+        out
+    };
+
+    if targets.is_empty() {
+        return Err("无可清理项".into());
+    }
+
+    // 2. 🔴 校验：含 Red 项须 confirm_token 非空（专家态 + 二次确认的落地点在 UI，此处强制兜底）。
+    let has_red = targets.iter().any(|t| t.grade == Grade::Red);
+    if has_red && params.confirm_token.as_deref().is_none_or(|s| s.is_empty()) {
+        return Err("包含高风险（🔴）项，请二次确认后重试".into());
+    }
+
+    // 3. 生成 tx_id + 取消令牌并登记。
+    let tx_id = new_clean_id();
+    let cancel = CancelToken::new();
+    clean_cancel_registry().insert(tx_id.clone(), cancel.clone());
+
+    // 4. 取隔离保留期（quarantine 去向）→ spawn 后台执行。
+    let retention = clean_retention(&state);
+    let app2 = app.clone();
+    let cancel2 = cancel.clone();
+    let tx2 = tx_id.clone();
+
+    tauri::async_runtime::spawn_blocking(move || {
+        let mut last_emit = Instant::now();
+        let throttle = Duration::from_millis(200);
+        let app_emit = app2.clone();
+        let tx_emit = tx2.clone();
+        let mut progress = move |path: String,
+                                 disp: Disposition,
+                                 st0: CleanProgressState,
+                                 done: u64,
+                                 total: u64| {
+            let emit_now = done >= total || last_emit.elapsed() >= throttle;
+            if !emit_now {
+                return;
+            }
+            last_emit = Instant::now();
+            let evt = CleanProgressEvent {
+                tx_id: tx_emit.clone(),
+                item_path: path,
+                disposition: disp,
+                done_bytes: done,
+                total_bytes: total,
+                state: st0,
+            };
+            let _ = app_emit.emit(events::CLEAN_PROGRESS, evt);
+        };
+
+        let report =
+            crate::cleaner::execute::execute(&tx2, &targets, &cancel2, retention, &mut progress);
+
+        // 完成后清取消登记；推送 done。
+        clean_cancel_registry().remove(&tx2);
+        let _ = app2.emit(
+            events::CLEAN_DONE,
+            CleanDoneEvent {
+                tx_id: tx2,
+                total: report.total,
+                ok: report.ok,
+                fail: report.fail,
+                skip: report.skip,
+            },
+        );
+    });
+
+    Ok(tx_id)
 }
 
-/// 取消清理。
+/// 取消清理：定位并置位取消令牌。
 #[tauri::command]
-pub fn clean_cancel(_state: State<AppState>, _tx_id: String) -> bool {
-    true
+pub fn clean_cancel(_state: State<AppState>, tx_id: String) -> bool {
+    let cancels = clean_cancel_registry();
+    match cancels.get(&tx_id) {
+        Some(c) => {
+            c.cancel();
+            true
+        }
+        None => false,
+    }
+}
+
+/// 把 ScanItem 转成 CleanTarget，回填 category 的 guard 进程。
+fn to_clean_target(item: &ScanItem, guard_map: &HashMap<String, Option<String>>) -> CleanTarget {
+    CleanTarget {
+        path: PathBuf::from(&item.path),
+        grade: item.grade,
+        disposition: item.disposition,
+        category_id: item.category_id.clone(),
+        size_bytes: item.size_bytes,
+        guard_process: guard_map.get(&item.category_id).cloned().flatten(),
+    }
+}
+
+/// 取清理用隔离保留期（读当前设置；默认 14 天）。
+fn clean_retention(state: &State<AppState>) -> u32 {
+    state
+        .settings
+        .lock()
+        .map(|s| s.quarantine_retention_days)
+        .unwrap_or(14)
+}
+
+/// 生成唯一清理事务 id。
+fn new_clean_id() -> String {
+    let t = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_nanos())
+        .unwrap_or(0);
+    format!("clean-{t:020x}")
 }
 
 /// 隔离区列表（跨全部固定盘，仅返回待管理的已隔离项）。

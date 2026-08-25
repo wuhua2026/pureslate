@@ -173,6 +173,14 @@ export interface QuarantineExpiryWarningEvent {
   daysLeft: number;
 }
 
+export interface CleanDoneEvent {
+  txId: string;
+  total: number;
+  ok: number;
+  fail: number;
+  skip: number;
+}
+
 // ---- 命令参数（IPC 命令用 snake_case，TS 端参数对象用 camelCase，由 api 层转换）----
 export interface ScanGetItemsParams {
   scanId: string;
@@ -213,6 +221,7 @@ export const IPCEvents = {
   scanProgress: "scan_progress",
   scanDone: "scan_done",
   cleanProgress: "clean_progress",
+  cleanDone: "clean_done",
   quarantineExpiryWarning: "quarantine_expiry_warning",
   updateAvailable: "update_available",
 } as const;

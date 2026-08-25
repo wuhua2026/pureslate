@@ -1,6 +1,8 @@
 // PureSlate 内核入口。M0 阶段：注册 IPC 契约 stub 与共享状态。
 
+pub mod cleaner;
 pub mod contract;
+pub mod guard;
 pub mod ipc;
 pub mod logging;
 pub mod quarantine;

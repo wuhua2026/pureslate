@@ -3,6 +3,7 @@
  */
 import { IPCEvents } from "../types/ipc";
 import type {
+  CleanDoneEvent,
   CleanProgressEvent,
   QuarantineExpiryWarningEvent,
   ScanProgressEvent,
@@ -21,6 +22,10 @@ export function onScanDone(handler: (p: ScanResult) => void): Promise<() => void
 
 export function onCleanProgress(handler: (p: CleanProgressEvent) => void): Promise<() => void> {
   return listenApp<CleanProgressEvent>(IPCEvents.cleanProgress, handler);
+}
+
+export function onCleanDone(handler: (p: CleanDoneEvent) => void): Promise<() => void> {
+  return listenApp<CleanDoneEvent>(IPCEvents.cleanDone, handler);
 }
 
 export function onQuarantineExpiryWarning(
