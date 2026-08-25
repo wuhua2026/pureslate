@@ -7,7 +7,7 @@ const Placeholder = () => import("../pages/Placeholder.vue");
 const routes: RouteRecordRaw[] = [
   { path: "/", name: "home", component: () => import("../pages/Home.vue"), meta: { title: "首页" } },
   { path: "/scan", name: "scan", component: Placeholder, meta: { title: "一键体检" } },
-  { path: "/report", name: "report", component: Placeholder, meta: { title: "扫描报告" } },
+  { path: "/report", name: "report", component: () => import("../pages/Report.vue"), meta: { title: "扫描报告" } },
   { path: "/files", name: "files", component: Placeholder, meta: { title: "大文件" } },
   { path: "/startup", name: "startup", component: Placeholder, meta: { title: "启动项" } },
   { path: "/privacy", name: "privacy", component: Placeholder, meta: { title: "隐私资料" } },
