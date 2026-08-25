@@ -1,5 +1,6 @@
 //! 清理执行（R04 · SPEC §6.2 / SAFETY §3）。
 
+pub mod dup;
 pub mod execute;
 pub mod journal;
 pub mod recycle;

@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<ruleset id="dup-files" version="1" lang="zh-CN">
+  <category id="dup.file" label="重复文件" risk="yellow" disposition="quarantine"
+            description="用户目录下的内容相同副本，保留最早一份，其余进隔离区 14 天可还原">
+    <target type="knownFolder" value="Documents"/>
+    <target type="knownFolder" value="Downloads"/>
+    <target type="knownFolder" value="Pictures"/>
+    <target type="knownFolder" value="Desktop"/>
+    <target type="knownFolder" value="Videos"/>
+    <include pattern="*" recursive="true"/>
+    <guard process=""/>
+  </category>
+</ruleset>

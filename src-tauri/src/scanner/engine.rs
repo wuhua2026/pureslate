@@ -7,7 +7,7 @@
 //! 仅处理基于规则文件的文件类目目扫描；未注册的维度自动落空但不报错。
 
 use crate::contract::{
-    CategoryAggregate, Disposition, FoundBytes, ScanDimension, ScanItem, ScanPhase,
+    CategoryAggregate, Disposition, FoundBytes, Grade, ScanDimension, ScanItem, ScanPhase,
 };
 use crate::rules::model::RuleSetTable;
 use crate::safety::grade;
@@ -17,6 +17,7 @@ use super::expand::{expand_target, volume_of};
 use super::matcher::CompiledCategory;
 use super::walk::CancelToken;
 use super::walk_matching;
+use crate::cleaner::dup::{collect_candidates, find_duplicates, DupCandidate};
 
 /// 扫描进度回调：`(阶段, 已完成类目, 类目总数, 当前类目路径, 实时累计字节)`。
 pub type ProgressCb<'a> = dyn FnMut(ScanPhase, usize, usize, String, FoundBytes) + 'a;
@@ -89,31 +90,43 @@ pub fn run_scan(
         }
         let grade = grade::from_risk(cat.risk);
         let disposition = contract_disposition(cat.disposition);
-        let compiled = CompiledCategory::compile(cat);
 
+        // dup 维度走内容判重引擎（不是规则匹配）：按 target 范围收集全部文件 → 三级过滤 → 回填 dupGroup。
+        let is_dup = cat.id.starts_with("dup.");
         let mut cat_items: Vec<ScanItem> = Vec::new();
         let mut current_path = String::new();
-        for target in &cat.targets {
-            if cancel.is_cancelled() {
-                break;
-            }
-            let Some(start) = expand_target(target) else {
-                continue;
-            };
-            if out.volume.is_empty() {
-                if let Some(v) = volume_of(&start) {
+
+        if is_dup {
+            cat_items = scan_dup_category(cat, grade, disposition, cancel, &mut current_path);
+            if out.volume.is_empty() && !current_path.is_empty() {
+                if let Some(v) = volume_of(std::path::Path::new(&current_path)) {
                     out.volume = v;
                 }
             }
-            current_path = start.to_string_lossy().into_owned();
-            cat_items.extend(walk_matching(
-                &start,
-                &compiled,
-                grade,
-                disposition,
-                cancel,
-                None,
-            ));
+        } else {
+            let compiled = CompiledCategory::compile(cat);
+            for target in &cat.targets {
+                if cancel.is_cancelled() {
+                    break;
+                }
+                let Some(start) = expand_target(target) else {
+                    continue;
+                };
+                if out.volume.is_empty() {
+                    if let Some(v) = volume_of(&start) {
+                        out.volume = v;
+                    }
+                }
+                current_path = start.to_string_lossy().into_owned();
+                cat_items.extend(walk_matching(
+                    &start,
+                    &compiled,
+                    grade,
+                    disposition,
+                    cancel,
+                    None,
+                ));
+            }
         }
 
         // 累加进全局结果（按类目边界推进，聚合阶段单次汇总）。
@@ -165,6 +178,80 @@ pub fn run_scan(
         out.found.clone(),
     );
     out
+}
+
+/// dup 维度扫描：对类目全部 target 范围收集候选文件 → 三级过滤判重 → 产出带 `dup_group` 的 ScanItem。
+///
+/// 保留语义：同内容组内 **mtime 最早者（keeper）保留**，仅将冗余副本产出为可清理项，
+/// 从根上保证 keeper 永不是清理目标。顺带回填 `current_path`（用于扫描进度展示）。
+/// 全程只读（红线 #1），取消贯穿。
+fn scan_dup_category(
+    cat: &crate::rules::model::Category,
+    grade: Grade,
+    disposition: Disposition,
+    cancel: &CancelToken,
+    current_path: &mut String,
+) -> Vec<ScanItem> {
+    // ① 收集全部 target 下的候选文件（白名单过滤、跳过空文件）。
+    let mut cands: Vec<DupCandidate> = Vec::new();
+    for target in &cat.targets {
+        let Some(start) = expand_target(target) else {
+            continue;
+        };
+        current_path.clone_from(&start.to_string_lossy().into_owned());
+        if cancel.is_cancelled() {
+            break;
+        }
+        cands.extend(collect_candidates(&start, cancel));
+    }
+
+    // ② 三级过滤判重 → 组。
+    let groups = find_duplicates(&cands, cancel);
+
+    // ③ 仅产出每组冗余副本（keeper 不出现），回填 dup_group。
+    let mut items: Vec<ScanItem> = Vec::new();
+    let cand_by_path: std::collections::HashMap<&std::path::Path, &DupCandidate> =
+        cands.iter().map(|c| (c.path.as_path(), c)).collect();
+    for g in &groups {
+        if cancel.is_cancelled() {
+            break;
+        }
+        let keeper = g.keeper.to_string_lossy().into_owned();
+        for cpath in &g.candidates {
+            let Some(c) = cand_by_path.get(cpath.as_path()) else {
+                continue;
+            };
+            let label = cpath
+                .file_name()
+                .map(|n| n.to_string_lossy().into_owned())
+                .unwrap_or_else(|| "<unknown>".into());
+            items.push(ScanItem {
+                id: dup_stable_id(&cat.id, cpath),
+                category_id: cat.id.clone(),
+                label,
+                path: cpath.to_string_lossy().into_owned(),
+                size_bytes: c.size,
+                grade,
+                disposition,
+                reason: format!("与“{keeper}”内容相同，保留最早一份，副本可入隔离区 14 天可还原"),
+                mtime: Some(c.mtime_ms),
+                atime: None,
+                dup_group: Some(g.id.clone()),
+            });
+        }
+    }
+    // 确定性顺序：按路径字典序（可复现）。
+    items.sort_by(|a, b| a.path.cmp(&b.path));
+    items
+}
+
+/// 由 category_id + path 生成稳定条目 id（16 位十六进制，对齐 `walk::stable_id` 语义）。
+fn dup_stable_id(category_id: &str, path: &std::path::Path) -> String {
+    use std::hash::{Hash, Hasher};
+    let mut h = std::collections::hash_map::DefaultHasher::new();
+    category_id.hash(&mut h);
+    path.hash(&mut h);
+    format!("{:016x}", h.finish())
 }
 
 /// 规则去向 → 对外契约去向。green 仅 direct/recycle（loader 已校验），unreachable 兜底。

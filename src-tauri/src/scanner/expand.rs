@@ -72,6 +72,12 @@ fn expand_known_folder(value: &str) -> Option<PathBuf> {
         }
         // 缩略图缓存（Explorer 缩略图数据库/图标缓存目录）。
         "Thumbnail Cache" => local_app.map(|p| p.join("Microsoft\\Windows\\Explorer")),
+        // 用户内容目录（dup 维度扫描范围：重复文件普遍存于文档/下载/图片/桌面/视频）。
+        "Documents" => Some(user.join("Documents")),
+        "Downloads" => Some(user.join("Downloads")),
+        "Pictures" => Some(user.join("Pictures")),
+        "Desktop" => Some(user.join("Desktop")),
+        "Videos" => Some(user.join("Videos")),
         _ => {
             eprintln!("[expand] 未知 knownFolder `{value}`，跳过该 target");
             None
