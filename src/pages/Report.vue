@@ -1,16 +1,13 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from "vue";
-import { commands } from "../api";
+import { computed, ref } from "vue";
 import GradeBadge from "../components/GradeBadge.vue";
-import type { ScanItem } from "../types/ipc";
+import { useScanStore } from "../stores/scan";
 import { buildReportOverview, type ReportCategory, type ReportPlan } from "./reportModel";
 
-// mock 体检的 scanId（P1-07 纯 mock；P1-08 真数据联调时改取真实 scanId）。
-const MOCK_SCAN_ID = "mock-scan-0001";
-
-const items = ref<ScanItem[]>([]);
-const loading = ref(true);
-const error = ref("");
+// P1-08 真数据联调：报告直接读全局扫描会话（mock 开关在 store 层切换）。
+const store = useScanStore();
+const items = computed(() => store.items);
+const loading = computed(() => store.running);
 
 // 方案选择：给选项不给结论（A 保守 / B 激进），默认 A。
 const selectedPlan = ref<"A" | "B">("A");
@@ -41,17 +38,6 @@ const redExpanded = ref(false);
 function isIncluded(cat: ReportCategory): boolean {
   return includedCategoryIds.value.has(cat.categoryId);
 }
-
-onMounted(async () => {
-  try {
-    const res = await commands.scan_get_items({ scanId: MOCK_SCAN_ID, offset: 0, limit: 100000 });
-    items.value = res;
-  } catch (e) {
-    error.value = String(e);
-  } finally {
-    loading.value = false;
-  }
-});
 </script>
 
 <template>
@@ -61,8 +47,10 @@ onMounted(async () => {
     </header>
 
     <div v-if="loading" class="state">加载中…</div>
-    <div v-else-if="error" class="state err">加载失败：{{ error }}</div>
-
+    <div v-else-if="items.length === 0" class="state">
+      暂无扫描数据，请先「一键体检」。
+      <router-link to="/scan" class="go-scan">去体检 →</router-link>
+    </div>
     <template v-else>
       <!-- 总览 -->
       <section class="overview">
@@ -83,7 +71,7 @@ onMounted(async () => {
             <span class="y-r">🟡×{{ overview.riskItems.yellow }}</span>
             <span class="r-r">🔴×{{ overview.riskItems.red }}</span>
           </span>
-          <span class="metric-note">清理项 / 发件数</span>
+          <span class="metric-note">清理项 / 件数</span>
         </div>
       </section>
 
@@ -174,6 +162,11 @@ onMounted(async () => {
 }
 .state.err {
   color: var(--grade-red);
+}
+.go-scan {
+  margin-left: 0.75rem;
+  color: var(--accent);
+  font-weight: 600;
 }
 
 .overview {
