@@ -1,13 +1,32 @@
 <script setup lang="ts">
-import { computed, ref } from "vue";
+import { computed, onMounted, ref } from "vue";
+import { useRouter } from "vue-router";
 import GradeBadge from "../components/GradeBadge.vue";
+import ConfirmTokenModal from "../components/ConfirmTokenModal.vue";
+import { commands } from "../api";
 import { useScanStore } from "../stores/scan";
+import { useCleanStore } from "../stores/clean";
 import { buildReportOverview, type ReportCategory, type ReportPlan } from "./reportModel";
 
 // P1-08 真数据联调：报告直接读全局扫描会话（mock 开关在 store 层切换）。
 const store = useScanStore();
+const cleanStore = useCleanStore();
+const router = useRouter();
 const items = computed(() => store.items);
 const loading = computed(() => store.running);
+
+// 专家模式 & 二次确认：仅开启专家模式才允许纳入 🔴 危险项，且须弹 token 确认。
+const expertMode = ref(false);
+const modalOpen = ref(false);
+
+onMounted(async () => {
+  try {
+    const s = await commands.settings_get();
+    expertMode.value = s.expertMode;
+  } catch {
+    // 读取失败保持默认（专家模式关闭）。
+  }
+});
 
 // 方案选择：给选项不给结论（A 保守 / B 激进），默认 A。
 const selectedPlan = ref<"A" | "B">("A");
@@ -27,16 +46,45 @@ const includedCategoryIds = computed(() => {
 
 const planSummary = (p: ReportPlan) => `${p.items} 项 · ${formatBytes(p.bytes)}`;
 
-const selectedBytes = computed(() =>
-  overview.value.categories
-    .filter((c) => includedCategoryIds.value.has(c.categoryId))
-    .reduce((s, c) => s + c.totalBytes, 0),
-);
+// 本次实际待清理项：plan 内 + （专家模式下额外纳入 🔴 危险项）。
+const cleanItems = computed(() => {
+  const base = store.items.filter((i) => includedCategoryIds.value.has(i.categoryId));
+  if (!expertMode.value) return base;
+  return [...base, ...store.items.filter((i) => i.grade === "red" && !includedCategoryIds.value.has(i.categoryId))];
+});
+
+const selectedBytes = computed(() => cleanItems.value.reduce((s, i) => s + i.sizeBytes, 0));
+const hasRed = computed(() => cleanItems.value.some((i) => i.grade === "red"));
 
 const redExpanded = ref(false);
 
 function isIncluded(cat: ReportCategory): boolean {
   return includedCategoryIds.value.has(cat.categoryId);
+}
+
+// 「确认清理 →」：需二次确认（含 🔴 + 专家模式）或直接开始。
+function beginClean() {
+  if (selectedBytes.value <= 0) return;
+  if (hasRed.value) {
+    // 开启专家模式才允许；未开启则按钮已禁用（此处兜底）。
+    if (!expertMode.value) return;
+    modalOpen.value = true;
+  } else {
+    launchClean();
+  }
+}
+
+function launchClean(token?: string) {
+  void cleanStore.start(
+    cleanItems.value.map((i) => i.id),
+    token,
+  );
+  void router.push("/executing");
+}
+
+function onTokenConfirm(token: string) {
+  modalOpen.value = false;
+  launchClean(token);
 }
 </script>
 
@@ -106,9 +154,14 @@ function isIncluded(cat: ReportCategory): boolean {
           危险项（{{ overview.redCategoryCount }}）{{ redExpanded ? "收起" : "展开查看" }}
         </button>
         <p class="red-note">
-          🔴 危险项一律进<span class="em">隔离区（14 天可还原）</span>，默认灰禁；需<span class="em">专家模式</span>开启后才能勾选，并须二次确认。
+          🔴 危险项一律进<span class="em">隔离区（14 天可还原）</span>，默认灰禁；需在<span class="em">设置中开启专家模式</span>后才会纳入本次清理，并须<span class="em">二次确认 token</span>。
         </p>
       </section>
+
+      <!-- 专家模式下的危险项纳入提示 -->
+      <p v-if="hasRed" class="expert-note">
+        已开启专家模式 → 本次将连带清理 <strong>{{ overview.redCategoryCount }}</strong> 个 🔴 危险项（进隔离区），确认时需输入一次性令牌。
+      </p>
 
       <!-- A/B 方案对比：给选项不给结论 -->
       <section class="card">
@@ -139,10 +192,20 @@ function isIncluded(cat: ReportCategory): boolean {
         <p class="foot-note">
           你将释放 <strong>{{ formatBytes(selectedBytes) }}</strong>
           （🟢 立即释放 · 🟡/🔴 进隔离区）
+          <span v-if="hasRed && !expertMode" class="red-warn">· 含 🔴 危险项，需先开启专家模式</span>
         </p>
-        <button class="btn-primary" :disabled="selectedBytes <= 0">确认清理 →</button>
+        <button
+          class="btn-primary"
+          :disabled="selectedBytes <= 0 || (hasRed && !expertMode)"
+          @click="beginClean"
+        >
+          确认清理 →
+        </button>
       </footer>
     </template>
+
+    <!-- 🔴 二次确认（含危险项时弹窗） -->
+    <ConfirmTokenModal v-model="modalOpen" :has-red="hasRed" @confirm="onTokenConfirm" />
   </main>
 </template>
 
@@ -300,6 +363,20 @@ function isIncluded(cat: ReportCategory): boolean {
   margin: 0.75rem 0 0;
   font-size: 0.8rem;
   color: var(--text-2);
+}
+.expert-note {
+  margin: 0;
+  padding: 0.6rem 0.9rem;
+  font-size: 0.82rem;
+  color: var(--grade-red);
+  background: rgba(239, 68, 68, 0.08);
+  border: 1px solid var(--grade-red);
+  border-radius: 8px;
+  line-height: 1.5;
+}
+.red-warn {
+  color: var(--grade-red);
+  font-weight: 600;
 }
 .em {
   font-weight: 600;

@@ -5,6 +5,7 @@
  */
 import type {
   CategoryAggregate,
+  CleanProgressEvent,
   FoundBytes,
   Grade,
   QuarantineEntry,
@@ -149,3 +150,30 @@ export const StartupListStub: StartupEntry[] = [
   { id: "st-0001", name: "UpdateChecker", publisher: "某软件公司", command: "C:\\Program Files\\UpdateChecker\\uc.exe --background", source: "hkcu_run", impact: "low", enabled: true },
   { id: "st-0002", name: "影音伴侣", publisher: "未知", command: "C:\\Users\\17599\\AppData\\Roaming\\MediaBuddy\\mb.exe", source: "hkcu_run", impact: "medium", enabled: true },
 ];
+
+// ---- 清理进度假事件（P2-06 执行页联调，mock 模式） ----
+/**
+ * 从 mock ScanItem 派生一组 clean_progress 完成态事件（按可清理项逐条 ok），
+ * 另附 1 条 skip 以展示"跳过"计数。忽略 🔴（默认不进本次清理）。
+ */
+export function buildMockCleanProgressEvents(): CleanProgressEvent[] {
+  const src = buildMockScanResult().items;
+  const chosen = src.filter((i) => i.grade !== "red");
+  const evts: CleanProgressEvent[] = chosen.map((i) => ({
+    txId: "mock-tx-0001",
+    itemPath: i.path,
+    disposition: i.disposition,
+    doneBytes: i.sizeBytes,
+    totalBytes: i.sizeBytes,
+    state: "ok",
+  }));
+  evts.push({
+    txId: "mock-tx-0001",
+    itemPath: "C:\\Users\\17599\\AppData\\Local\\Temp\\占用_无法删除.sys",
+    disposition: "direct",
+    doneBytes: 0,
+    totalBytes: 9 * MB,
+    state: "skip",
+  });
+  return evts;
+}
