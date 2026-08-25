@@ -86,6 +86,11 @@ pub fn move_into_quarantine(
     }
 
     let moved_at = now;
+    let original_mtime_ms = meta
+        .modified()
+        .ok()
+        .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+        .map(|d| d.as_millis() as i64);
     let entry = ManifestEntry {
         id: uuid::Uuid::new_v4().to_string(),
         original_path: src.to_string_lossy().into_owned(),
@@ -96,6 +101,7 @@ pub fn move_into_quarantine(
         category_id: input.category_id,
         moved_at,
         expires_at: moved_at + (input.retention_days as i64) * 86_400_000,
+        original_mtime_ms,
         state: ManifestState::Quarantined,
     };
     add_manifest_entry(root, &entry)?;
@@ -103,7 +109,8 @@ pub fn move_into_quarantine(
 }
 
 /// 跨盘复制：复制 → fsync → 目标 sha256 == 源 → 删除源。校验失败中止（不清源）。
-fn copy_verify_delete(src: &Path, target: &Path) -> Result<(), QuarantineMoveError> {
+/// `pub(crate)`：还原引擎（restore.rs）复用。
+pub(crate) fn copy_verify_delete(src: &Path, target: &Path) -> Result<(), QuarantineMoveError> {
     fs::copy(src, target)?;
     // fsync 目标（尽力而为；失败不阻断，进 error 则中止）
     if let Ok(f) = fs::File::open(target) {
@@ -160,12 +167,12 @@ fn civil_from_days(z: i64) -> (i64, i32) {
     (y, m as i32)
 }
 
-/// 两个路径是否同一卷（盘符一致）。
-fn same_volume(a: &Path, b: &Path) -> bool {
+/// 两个路径是否同一卷（盘符一致）。`pub(crate)`：还原引擎复用。
+pub(crate) fn same_volume(a: &Path, b: &Path) -> bool {
     volume_of(a) == volume_of(b)
 }
 
-fn volume_of(p: &Path) -> Option<String> {
+pub(crate) fn volume_of(p: &Path) -> Option<String> {
     let s = p.to_string_lossy();
     let mut c = s.chars();
     let f = c.next()?;

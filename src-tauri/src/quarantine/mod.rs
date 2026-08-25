@@ -10,19 +10,75 @@
 //! 排除（SAFETY §2.6），隔离区文件绝不经通用清理路径。
 
 mod manifest;
+mod restore;
 mod store;
 
 pub use manifest::{
     add_manifest_entry, list_manifest, load_manifest, update_entry_state, ManifestEntry,
     ManifestState,
 };
-pub use store::{move_into_quarantine, QuarantineMoveError};
+pub use restore::{
+    list_quarantined_globally, manifest_to_contract, restore_globally, restore_one, RestoreOutcome,
+};
+pub use store::{move_into_quarantine, sha256_file, QuarantineInput, QuarantineMoveError};
 
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::time::{SystemTime, UNIX_EPOCH};
 
 /// 隔离区目录名（每卷根下）。
 pub const QUARANTINE_DIR: &str = ".pureslate-quarantine";
+
+/// 当前 epoch 毫秒探针（隔离区模块统一时钟入口；保留期/daysLeft 计算用）。
+pub(crate) fn now_ms() -> i64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_millis() as i64)
+        .unwrap_or(0)
+}
+
+/// 枚举全部**固定盘**根路径（`C:\`…）。Windows 用 `GetDriveTypeW == DRIVE_FIXED`；
+/// 非 Windows（测试/CI）返回空，调用方注入沙箱根。
+pub fn fixed_drive_roots() -> Vec<PathBuf> {
+    #[cfg(windows)]
+    {
+        let mut v = Vec::new();
+        for code in b'A'..=b'Z' {
+            let root = format!("{}:\\", code as char);
+            if drive_type_fixed(&root) {
+                v.push(PathBuf::from(root));
+            }
+        }
+        v
+    }
+    #[cfg(not(windows))]
+    {
+        Vec::new()
+    }
+}
+
+/// 全部**已存在**的隔离区根：`<固定盘>\.pureslate-quarantine`。
+pub fn all_quarantine_roots() -> Vec<PathBuf> {
+    fixed_drive_roots()
+        .into_iter()
+        .map(|r| r.join(QUARANTINE_DIR))
+        .filter(|p| p.is_dir())
+        .collect()
+}
+
+#[cfg(windows)]
+fn drive_type_fixed(root: &str) -> bool {
+    let wide: Vec<u16> = root.encode_utf16().collect();
+    let mut cstr = wide.clone();
+    cstr.push(0);
+    // DRIVE_FIXED = 3
+    unsafe { GetDriveTypeW(cstr.as_ptr()) == 3 }
+}
+
+#[cfg(windows)]
+unsafe extern "system" {
+    fn GetDriveTypeW(lp_root_path_name: *const u16) -> u32;
+}
 
 /// 计算某路径所属卷的隔离区根：`<卷根>\.pureslate-quarantine\`。
 /// 非盘符绝对路径（如相对路径）回退到系统盘 `C:`。

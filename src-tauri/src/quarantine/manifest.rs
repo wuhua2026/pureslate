@@ -38,6 +38,10 @@ pub struct ManifestEntry {
     pub moved_at: i64,
     /// 保留截止（epoch ms）。由创建时按保留天数计算，本模块不负责寿命，见 `lifecycle`。
     pub expires_at: i64,
+    /// 源文件被隔离前的 mtime（epoch ms）。还原时回写，保留取证信息（SAFETY §4.2）。
+    /// 可选：旧版 manifest 行缺少该字段时还原仅尽力回写。
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub original_mtime_ms: Option<i64>,
     pub state: ManifestState,
 }
 
@@ -166,6 +170,7 @@ mod tests {
             category_id: "cache.wechat".into(),
             moved_at: 1756000000000,
             expires_at: 1757200000000,
+            original_mtime_ms: None,
             state: ManifestState::Quarantined,
         }
     }

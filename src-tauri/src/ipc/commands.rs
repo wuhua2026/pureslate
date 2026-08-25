@@ -245,24 +245,19 @@ pub fn clean_cancel(_state: State<AppState>, _tx_id: String) -> bool {
     true
 }
 
-/// 隔离区列表。
+/// 隔离区列表（跨全部固定盘，仅返回待管理的已隔离项）。
 #[tauri::command]
 pub fn quarantine_list(_state: State<AppState>) -> Vec<QuarantineEntry> {
-    vec![]
+    crate::quarantine::list_quarantined_globally()
 }
 
-/// 还原隔离项。
+/// 还原隔离项（按 id；ids 为空 = 还原全部可还原项）。
 #[tauri::command]
 pub fn quarantine_restore(
     _state: State<AppState>,
-    _params: QuarantineRestoreParams,
+    params: QuarantineRestoreParams,
 ) -> RestoreReport {
-    RestoreReport {
-        requested: 0,
-        restored: 0,
-        conflict: 0,
-        failures: vec![],
-    }
+    crate::quarantine::restore_globally(&params.ids)
 }
 
 /// 硬删隔离项（需 confirm_token）。

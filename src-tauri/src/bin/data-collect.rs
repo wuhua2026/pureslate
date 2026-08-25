@@ -37,7 +37,9 @@ fn parse_args() -> Result<Args, String> {
     while let Some(a) = it.next() {
         match a.as_str() {
             "--rules-dir" => {
-                rules_dir = Some(PathBuf::from(it.next().ok_or("--rules-dir 缺少值".to_owned())?));
+                rules_dir = Some(PathBuf::from(
+                    it.next().ok_or("--rules-dir 缺少值".to_owned())?,
+                ));
             }
             "--tag" => {
                 tag = Some(it.next().ok_or("--tag 缺少值".to_owned())?);
@@ -65,7 +67,13 @@ fn default_tag() -> String {
         .or_else(|| std::env::var("HOSTNAME").ok())
         .unwrap_or_else(|| "unknown".into());
     host.chars()
-        .map(|c| if c.is_ascii_alphanumeric() || c == '-' || c == '_' { c.to_ascii_lowercase() } else { '-' })
+        .map(|c| {
+            if c.is_ascii_alphanumeric() || c == '-' || c == '_' {
+                c.to_ascii_lowercase()
+            } else {
+                '-'
+            }
+        })
         .collect()
 }
 
@@ -126,7 +134,9 @@ fn main() -> std::process::ExitCode {
 fn run() -> Result<Vec<DriveReport>, String> {
     let args = parse_args()?;
     let mut table = RuleLoader::new();
-    let table = table.load_dir(&args.rules_dir).map_err(|e| format!("规则加载失败: {e}"))?;
+    let table = table
+        .load_dir(&args.rules_dir)
+        .map_err(|e| format!("规则加载失败: {e}"))?;
 
     let drives = fixed_drives();
     if drives.is_empty() {
@@ -304,12 +314,10 @@ fn collect_categories(
                 }
             });
             let more = match mft {
-                Some(s) => s.walk_target(
-                    &start, &compiled, gg, dd, &cancel, Some(progress.as_ref()),
-                ),
-                None => walk_target(
-                    &start, &compiled, gg, dd, &cancel, Some(progress.as_ref()),
-                ),
+                Some(s) => {
+                    s.walk_target(&start, &compiled, gg, dd, &cancel, Some(progress.as_ref()))
+                }
+                None => walk_target(&start, &compiled, gg, dd, &cancel, Some(progress.as_ref())),
             };
             items += more.len() as u64;
             bytes += more.iter().map(|i| i.size_bytes).sum::<u64>();
@@ -358,11 +366,18 @@ fn to_disposition(d: pureslate_lib::rules::model::Disposition) -> Disposition {
 fn expand_target(target: &Target) -> Option<PathBuf> {
     let p = match target.ty {
         TargetType::Env => {
-            let var = target.value.trim().trim_start_matches('%').trim_end_matches('%');
+            let var = target
+                .value
+                .trim()
+                .trim_start_matches('%')
+                .trim_end_matches('%');
             if var.is_empty() {
                 return None;
             }
-            std::env::var(var).ok().filter(|s| !s.is_empty()).map(PathBuf::from)
+            std::env::var(var)
+                .ok()
+                .filter(|s| !s.is_empty())
+                .map(PathBuf::from)
         }
         TargetType::Path => {
             if target.value.trim().is_empty() {
