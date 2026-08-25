@@ -22,7 +22,8 @@ impl CancelToken {
     pub fn cancel(&self) {
         self.0.store(true, Ordering::SeqCst);
     }
-    fn is_cancelled(&self) -> bool {
+    /// 供 walk/mft 两个引擎读取取消状态。
+    pub fn is_cancelled(&self) -> bool {
         self.0.load(Ordering::SeqCst)
     }
 }

@@ -27,3 +27,9 @@ thiserror = "1"
 walkdir = "2"
 globset = "0.4"
 
+[target.'cfg(windows)'.dependencies]
+# P1-02b（MFT 直读枚举）：零第三方依赖。所需少量 Windows 原生 API
+# （卷句柄/USN 枚举/提权判定）以 `#[link]` extern "system" 薄封装直调
+# kernel32/advapi32，无 crate、无重量运行时、link 尺寸影响极小（维持 <20MB 门禁）。
+# 依赖决策依据 AGENTS §4.7，记入 TASKS.md P1-02b 备注。
+

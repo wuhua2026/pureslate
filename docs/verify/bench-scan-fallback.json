@@ -1,0 +1,27 @@
+{
+  "ts": "2026-08-25T07:39:38Z",
+  "appVersion": "0.1.0",
+  "drive": "C:",
+  "coldCacheBytes": 5368709120,
+  "dims": {
+    "temp": {
+      "ms": 15751,
+      "items": 3043,
+      "bytes": 639208762
+    },
+    "large": {
+      "ms": 249557,
+      "files": 828394,
+      "largeFiles": 23
+    },
+    "dup": {
+      "ms": 192638,
+      "candidates": 781638,
+      "candidateBytes": 37013061572
+    }
+  },
+  "totalMs": 457946,
+  "thresholdMs": 120000,
+  "pass": false,
+  "note": "枚举引擎=walk; 非管理员会话 → MftSession::try_open 返回 NotAdmin → walk_matching/bench 自动回退 walkdir（验证 P1-02b 降级路径）。debug 构建，计时仅作 fallback 正确性参考；MFT 性能达标复测需提权终端运行 tools/bench-scan.ps1."
+}

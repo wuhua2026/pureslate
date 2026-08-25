@@ -20,7 +20,8 @@ use pureslate_lib::rules::model::TargetType;
 use pureslate_lib::rules::{RuleLoader, RuleSetTable};
 use pureslate_lib::safety::is_whitelisted;
 use pureslate_lib::scanner::matcher::CompiledCategory;
-use pureslate_lib::scanner::walk::{walk_target, CancelToken};
+use pureslate_lib::scanner::mft::MftSession;
+use pureslate_lib::scanner::walk::{walk_target, CancelToken, ProgressFn};
 
 use serde::Serialize;
 
@@ -122,18 +123,24 @@ fn main() -> std::process::ExitCode {
 fn run() -> Result<BenchReport, String> {
     let args = parse_args()?;
     let drive = system_drive();
+    let root = drive_root(&drive);
 
     // 1) 冷缓存（SPEC §8：先读写释放 5GB 干扰文件）。
     let cold_cache_bytes = cold_cache();
 
-    // 2) temp 维度：真实规则引擎。
-    let temp = bench_temp(&args.rules_dir)?;
+    // 2) 尝试打开系统盘 MFT 会话（需管理员 + NTFS/USN 可用）；否则回退 walkdir。
+    //    单个会话打开一次即可复用于 temp/large/dup 三维度（避免重复全盘枚举）。
+    let mft = MftSession::try_open(&root).ok();
+    let engine = if mft.is_some() { "mft" } else { "walk" };
 
-    // 3) large 维度：全盘枚举（找 >=500MB）。
-    let large = bench_large(&drive)?;
+    // 3) temp 维度：真实规则引擎。
+    let temp = bench_temp(&args.rules_dir, mft.as_ref())?;
 
-    // 4) dup 维度：全盘枚举 + size 预分组（不做哈希）。
-    let dup = bench_dup(&drive)?;
+    // 4) large 维度：全盘枚举（找 >=500MB）。
+    let large = bench_large(&root, mft.as_ref())?;
+
+    // 5) dup 维度：全盘枚举 + size 预分组（不做哈希）。
+    let dup = bench_dup(&root, mft.as_ref())?;
 
     let total_ms = temp.ms + large.ms + dup.ms;
     let pass = total_ms <= 120_000;
@@ -147,7 +154,9 @@ fn run() -> Result<BenchReport, String> {
         total_ms,
         threshold_ms: 120_000,
         pass,
-        note: "三维度独立遍历(保守上界)；large/dup 同一次全盘枚举在 P1-05 可复用；dup 哈希延迟到 P2-07；磁盘总字节未查询(未引 Windows crate)".into(),
+        note: format!(
+            "枚举引擎={engine}; 三维度独立遍历(保守上界)；large/dup 同一次全盘枚举在 P1-05 可复用；dup 哈希延迟到 P2-07；磁盘总字节未查询"
+        ),
     })
 }
 
@@ -242,7 +251,7 @@ fn load_table(rules_dir: &Path) -> Result<RuleSetTable, String> {
 }
 
 // ---- temp 维度（真实引擎）----
-fn bench_temp(rules_dir: &Path) -> Result<TempDim, String> {
+fn bench_temp(rules_dir: &Path, mft: Option<&MftSession>) -> Result<TempDim, String> {
     let table = load_table(rules_dir)?;
     let mut items = 0u64;
     let mut bytes = 0u64;
@@ -266,18 +275,30 @@ fn bench_temp(rules_dir: &Path) -> Result<TempDim, String> {
                 eprintln!("[temp] 目标被白名单拦截: {start:?}，跳过");
                 continue;
             }
-            let more = walk_target(
-                &start,
-                &compiled,
-                Grade::Green,
-                Disposition::Direct,
-                &cancel,
-                Some(&move |done, byt| {
-                    if done % 4096 == 0 {
-                        eprintln!("[temp/{id}] 已处理 {done} 文件 / {byt} B");
-                    }
-                }),
-            );
+            // 进度回调：节流打印。闭包按值持有 id（&'static str）→ 无借用存活问题。
+            let progress: Box<ProgressFn> = Box::new(move |done, byt| {
+                if done % 4096 == 0 {
+                    eprintln!("[temp/{id}] 已处理 {done} 文件 / {byt} B");
+                }
+            });
+            let more = match mft {
+                Some(s) => s.walk_target(
+                    &start,
+                    &compiled,
+                    Grade::Green,
+                    Disposition::Direct,
+                    &cancel,
+                    Some(progress.as_ref()),
+                ),
+                None => walk_target(
+                    &start,
+                    &compiled,
+                    Grade::Green,
+                    Disposition::Direct,
+                    &cancel,
+                    Some(progress.as_ref()),
+                ),
+            };
             items += more.len() as u64;
             bytes += more.iter().map(|i| i.size_bytes).sum::<u64>();
         }
@@ -288,6 +309,15 @@ fn bench_temp(rules_dir: &Path) -> Result<TempDim, String> {
         items,
         bytes,
     })
+}
+
+/// MftScanStats 转换为全盘枚举的中间形态（files/large/buckets）。
+fn stats_to_walk(st: &pureslate_lib::scanner::mft::MftScanStats) -> DiskWalk {
+    DiskWalk {
+        files: st.files,
+        garbage: st.large_files,
+        buckets: st.buckets.clone(),
+    }
 }
 
 // ---- 全盘枚举（large 与 dup 共用 walkdir 逻辑）----
@@ -348,10 +378,12 @@ fn bucket_stat(w: &DiskWalk) -> (u64, u64) {
     (candidates, cand_bytes)
 }
 
-fn bench_large(drive: &str) -> Result<LargeDim, String> {
-    let root = drive_root(drive);
+fn bench_large(root: &Path, mft: Option<&MftSession>) -> Result<LargeDim, String> {
     let started = Instant::now();
-    let w = full_disk_walk(&root, true)?;
+    let w = match mft {
+        Some(s) => stats_to_walk(&s.full_disk_stats(500 * 1024 * 1024, true)),
+        None => full_disk_walk(root, true)?,
+    };
     Ok(LargeDim {
         ms: started.elapsed().as_millis() as u64,
         files: w.files,
@@ -359,10 +391,12 @@ fn bench_large(drive: &str) -> Result<LargeDim, String> {
     })
 }
 
-fn bench_dup(drive: &str) -> Result<DupDim, String> {
-    let root = drive_root(drive);
+fn bench_dup(root: &Path, mft: Option<&MftSession>) -> Result<DupDim, String> {
     let started = Instant::now();
-    let w = full_disk_walk(&root, false)?;
+    let w = match mft {
+        Some(s) => stats_to_walk(&s.full_disk_stats(500 * 1024 * 1024, false)),
+        None => full_disk_walk(root, false)?,
+    };
     let (candidates, cand_bytes) = bucket_stat(&w);
     Ok(DupDim {
         ms: started.elapsed().as_millis() as u64,
