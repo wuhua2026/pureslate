@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   buildMockScanResult,
+  DiskUsageStub,
   QuarantineListStub,
   StartupListStub,
 } from "../data";
@@ -72,6 +73,21 @@ describe("mock 扫描数据（P0-04）", () => {
   it("aggregates 聚合总数与 items 一致", () => {
     const sumFromAgg = result.aggregates.reduce((acc, a) => acc + a.itemCount, 0);
     expect(sumFromAgg).toBe(result.itemCount);
+  });
+
+  it("磁盘占用 stub（屏 1 Home）字段合法且未超量", () => {
+    expect(DiskUsageStub.length).toBeGreaterThan(0);
+    for (const d of DiskUsageStub) {
+      expect(d.letter).toMatch(/^[A-Z]$/);
+      expect(d.label).toBeTruthy();
+      expect(d.totalBytes).toBeGreaterThan(0);
+      expect(d.freeBytes).toBeGreaterThanOrEqual(0);
+      expect(d.freeBytes).toBeLessThanOrEqual(d.totalBytes);
+      // 占用比在合法区间
+      const pct = (d.totalBytes - d.freeBytes) / d.totalBytes;
+      expect(pct).toBeGreaterThanOrEqual(0);
+      expect(pct).toBeLessThanOrEqual(1);
+    }
   });
 
   it("隔离区与启动项 stub 字段对齐 Contract", () => {

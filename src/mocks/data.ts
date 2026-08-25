@@ -99,6 +99,25 @@ export function buildMockScanResult(): ScanResult & { items: ScanItem[] } {
   };
 }
 
+// ---- 磁盘占用（屏 1 Home）----
+/**
+ * 磁盘占用条目。P1-06 外壳期仅供 Home 展示，本地类型；
+ * 真实磁盘数据由 P1-08 真数据联调接入（届时再入契约，此地仍为 fallback）。
+ */
+export interface DiskUsageEntry {
+  letter: string; // 盘符 "C"
+  label: string; // 用途标签，如 "系统"
+  totalBytes: number;
+  freeBytes: number;
+}
+
+const GB = 1024 * 1024 * 1024;
+
+export const DiskUsageStub: DiskUsageEntry[] = [
+  { letter: "C", label: "系统", totalBytes: 512 * GB, freeBytes: 168 * GB },
+  { letter: "D", label: "工作盘", totalBytes: 2_000 * GB, freeBytes: 1_420 * GB },
+];
+
 // ---- 隔离区 stub ----
 export const QuarantineListStub: QuarantineEntry[] = [
   {
