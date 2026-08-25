@@ -132,8 +132,8 @@ mod tests {
         let c = cat();
         let cc = CompiledCategory::compile(&c);
         let root = std::path::Path::new(r"C:\x");
-        assert!(cc.matches_any(&std::path::Path::new(r"C:\x\foo\bar.tmp"), root));
-        assert!(cc.matches_any(&std::path::Path::new(r"C:\x\Cache\b.tmp"), root));
-        assert!(!cc.matches_any(&std::path::Path::new(r"C:\x\foo\a.keep.tmp"), root));
+        assert!(cc.matches_any(std::path::Path::new(r"C:\x\foo\bar.tmp"), root));
+        assert!(cc.matches_any(std::path::Path::new(r"C:\x\Cache\b.tmp"), root));
+        assert!(!cc.matches_any(std::path::Path::new(r"C:\x\foo\a.keep.tmp"), root));
     }
 }

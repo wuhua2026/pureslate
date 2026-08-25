@@ -41,14 +41,15 @@ impl RuleLoader {
         Self::default()
     }
 
-    /// 加载目录下全部 `*.xml` 规则包，合并为可见表。
+    /// 加载目录下全部规则包（根元素为 `<ruleset>` 的 `*.xml`），合并为可见表。
+    /// 白名单等非规则文件（如 `whitelist.xml`，由 safety 模块单独加载）会被跳过。
     pub fn load_dir(&mut self, rules_dir: &Path) -> Result<RuleSetTable, RulesError> {
         let mut table = RuleSetTable::default();
         let mut sorted = Vec::new();
         for entry in std::fs::read_dir(rules_dir)? {
             let entry = entry?;
             let path = entry.path();
-            if path.extension().and_then(|e| e.to_str()) == Some("xml") {
+            if path.extension().and_then(|e| e.to_str()) == Some("xml") && is_ruleset_xml(&path) {
                 sorted.push(path);
             }
         }
@@ -226,6 +227,30 @@ fn push_or_drop(pc: PartialCategory, categories: &mut Vec<Category>) {
     }
 }
 
+/// 判断某 XML 文件是否为规则包：首元素为 `<ruleset>`。
+/// 用于在 rules 目录中跳过白名单等非规则文件（白名单由 safety 模块单独加载），
+/// 避免 `parse_ruleset` 对非规则文件报错而中止整目录加载（P1-05 集成暴露）。
+fn is_ruleset_xml(path: &Path) -> bool {
+    let xml = match std::fs::read_to_string(path) {
+        Ok(x) => x,
+        Err(_) => return false,
+    };
+    let mut reader = Reader::from_str(&xml);
+    reader.config_mut().trim_text(true);
+    loop {
+        match reader.read_event() {
+            // 根元素（Start 或自闭合 Empty）名称即包类型。
+            Ok(Event::Start(e)) | Ok(Event::Empty(e)) => {
+                return e.local_name().as_ref().eq_ignore_ascii_case(b"ruleset");
+            }
+            // 跳过 XML 声明/注释/文本后仍未遇根元素则视为非法。
+            Ok(Event::Eof) => return false,
+            Err(_) => return false,
+            _ => {}
+        }
+    }
+}
+
 /// 解析 `<ruleset>` 顶层属性。
 fn parse_ruleset_attrs(
     e: &quick_xml::events::BytesStart<'_>,
@@ -318,10 +343,12 @@ fn parse_glob_attrs(e: &quick_xml::events::BytesStart<'_>) -> GlobRule {
 }
 
 fn parse_risk(s: &str) -> Risk {
+    // SAFETY §1：无法判定默认 🔴。非法/缺失的 risk 一律保守映射为 Red。
     match s {
         "red" => Risk::Red,
         "yellow" => Risk::Yellow,
-        _ => Risk::Green,
+        "green" => Risk::Green,
+        _ => Risk::Red,
     }
 }
 
@@ -491,6 +518,51 @@ mod tests {
     }
 
     #[test]
+    fn invalid_or_missing_risk_defaults_to_red() {
+        let xml = r#"<ruleset id="r" version="1">
+  <category id="c.bad-risk" label="l" risk="aggressive" disposition="quarantine">
+    <target type="path" value="C:\a"/>
+    <include pattern="*"/>
+  </category>
+  <category id="c.no-risk" label="l" disposition="quarantine" description="缺 risk 属性">
+    <target type="path" value="C:\b"/>
+    <include pattern="*"/>
+  </category>
+  <category id="c.green" label="l" risk="green" disposition="direct">
+    <target type="path" value="C:\c"/>
+    <include pattern="*"/>
+  </category>
+</ruleset>"#;
+        let rs = parse_ruleset(xml).expect("should parse");
+        assert_eq!(
+            rs.categories
+                .iter()
+                .find(|c| c.id == "c.bad-risk")
+                .unwrap()
+                .risk,
+            Risk::Red,
+            "非法 risk → 默认红"
+        );
+        assert_eq!(
+            rs.categories
+                .iter()
+                .find(|c| c.id == "c.no-risk")
+                .unwrap()
+                .risk,
+            Risk::Red,
+            "缺失 risk → 默认红"
+        );
+        assert_eq!(
+            rs.categories
+                .iter()
+                .find(|c| c.id == "c.green")
+                .unwrap()
+                .risk,
+            Risk::Green
+        );
+    }
+
+    #[test]
     fn load_dir_merges_and_overrides() {
         let dir = std::env::temp_dir().join(format!("pureslate-rules-test-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
@@ -509,7 +581,7 @@ mod tests {
         // temp.user 应被 override 覆盖。
         let (rsid, cat) = tbl.by_id.get("temp.user").expect("has temp.user");
         assert_eq!(rsid, "override");
-        assert_eq!(cat.includes[0].recursive, false);
+        assert!(!cat.includes[0].recursive);
         assert_eq!(cat.description.as_deref(), Some("覆盖版"));
         // cache.wechat 仍在（来自 a.xml）。
         assert!(tbl.by_id.contains_key("cache.wechat"));
