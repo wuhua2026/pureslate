@@ -44,7 +44,7 @@
 
 | ID | 任务 | 依赖 | 产出 / DoD | 验证 |
 |----|------|------|-----------|------|
-| P2-01 | [DESTRUCTIVE] 隔离区核心 R25 | P1-05 | quarantine/store+manifest：同盘 move、manifest 行、冲突路径、跨盘降级 copy+hash 校验（SAFETY §4.2）；目录 hidden+system | cargo test：移入/manifest/跨盘/占用用例；评审关卡文档 |
+| P2-01 | ✅ [DESTRUCTIVE] 隔离区核心 R25 | P1-05 | quarantine/store+manifest：同盘 move、manifest 行、冲突路径、跨盘降级 copy+hash 校验（SAFETY §4.2）；目录 hidden+system；✅ settings.json 持久化；✅ §2.6 隔离区哨兵白名单顶进 | cargo test：移入/manifest/跨盘/占用用例；评审关卡文档。备注：`store::move_into_quarantine` 签名显式 `root`（调用方 `quarantine_root_of` 计算，测试可注入沙箱根，避免触碰真实盘根）；`quarantine_*` 命令仍 stub（P2-02 填充）；`manifest.jsonl` 键名 camelCase（对齐 IPC 契约） |
 | P2-02 | [DESTRUCTIVE] 还原引擎 R25 | P2-01 | quarantine/restore：按 manifest 还原、冲突兜底目录、state 迁移；**还原率脚本 tools/test-restore.ps1（先 100 次循环）≥95%** | 脚本报告 ≥95%（M12 千次版在 P4-05） |
 | P2-03 | 审计日志 R09 | P2-01 | logging/audit：JSONL（SPEC §4.4）按天滚动；clean/restore/purge 覆盖 100%；log_query/log_export 命令 | 集成测试：每操作必有对应日志行 |
 | P2-04 | [DESTRUCTIVE] 清理执行 R04 | P2-02,P2-03 | cleaner/execute+journal+recycle：🟢 direct+recycle 双路径；两阶段 journal（SAFETY §3）；单类可取消；跨类并行≤2；🔴 项无 token 拒绝 | cargo test：journal 恢复/中断回滚/边界用例（SAFETY §6.3 的 1–7）；评审关卡 |

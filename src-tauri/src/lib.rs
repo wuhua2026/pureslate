@@ -2,10 +2,12 @@
 
 pub mod contract;
 pub mod ipc;
+pub mod quarantine;
 pub mod rules;
 pub mod safety;
 pub mod scanner;
 pub mod state;
+pub mod storage;
 
 use crate::state::AppState;
 use tauri::Manager;

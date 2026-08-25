@@ -11,7 +11,8 @@ const RETAIN_FINISHED: usize = 8;
 pub struct AppState {
     pub version: String,
     pub rules_version: String,
-    pub settings: AppSettings,
+    /// 应用设置（Mutex 以支持跨命令原地更新）。
+    pub settings: Mutex<AppSettings>,
     /// 扫描会话存储（current：进行中；finished：已完成的滚动历史）。
     pub scans: Mutex<ScanStore>,
 }
@@ -21,7 +22,8 @@ impl AppState {
         Self {
             version: env!("CARGO_PKG_VERSION").to_string(),
             rules_version: "0".to_string(),
-            settings: AppSettings::default(),
+            // P2-01：启动从 settings.json 恢复设置（信任底座持久化）。
+            settings: Mutex::new(crate::storage::load_settings()),
             scans: Mutex::new(ScanStore::default()),
         }
     }

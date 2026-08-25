@@ -299,15 +299,26 @@ pub fn log_export(_state: State<AppState>, _path: String) -> bool {
     true
 }
 
-/// 读取设置。
+/// 读取设置（从状态返回；状态在启动时已从 settings.json 恢复）。
 #[tauri::command]
 pub fn settings_get(state: State<AppState>) -> AppSettings {
-    state.settings.clone()
+    match state.settings.lock() {
+        Ok(s) => s.clone(),
+        Err(_) => AppSettings::default(),
+    }
 }
 
-/// 写入设置（全量覆盖）。
+/// 写入设置（全量覆盖）并持久化到 settings.json。
 #[tauri::command]
-pub fn settings_set(_state: State<AppState>, settings: AppSettings) -> AppSettings {
+pub fn settings_set(state: State<AppState>, settings: AppSettings) -> AppSettings {
+    // 优先持久化（信任底座：即使内存更新失败也不丢配置）。
+    if let Err(e) = crate::storage::save_settings(&settings) {
+        eprintln!("[settings] 持久化失败: {e}");
+    }
+    match state.settings.lock() {
+        Ok(mut s) => *s = settings.clone(),
+        Err(_) => eprintln!("[settings] 内存更新失败（锁不可用）"),
+    }
     settings
 }
 

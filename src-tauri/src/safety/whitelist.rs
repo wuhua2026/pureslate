@@ -176,6 +176,17 @@ pub fn is_whitelisted(path: &Path) -> bool {
         }
     }
 
+    // §2.6 隔离区哨兵：任何卷根下的 `<drive>:\.pureslate-quarantine` 整棵子树
+    // 一律白名单（隔离区文件绝不经通用清理路径；SAFETY §2.6）。
+    if let Some(drive) = drive_letter(&p_lower) {
+        let sentinel = format!(r"{drive}\.pureslate-quarantine");
+        if p_lower.trim_end_matches('\\') == sentinel
+            || p_lower.starts_with(&format!(r"{sentinel}\"))
+        {
+            return true;
+        }
+    }
+
     // 其余白名单根：常量根 + XML 附加根，段级前缀匹配（避免 `C:\a` 误配 `C:\ab`）。
     if any_root_matches(&p_lower, const_roots()) {
         return true;
@@ -250,6 +261,17 @@ mod tests {
             r"C:\System Volume Information\cat"
         )));
         assert!(is_whitelisted(Path::new(r"C:\$Recycle.Bin\S-1-5-21")));
+    }
+
+    #[test]
+    fn quarantine_sentinel_whitelisted() {
+        // §2.6 隔离区哨兵：任意盘根的 `.pureslate-quarantine` 子树整棵白名单。
+        assert!(is_whitelisted(Path::new(r"C:\.pureslate-quarantine")));
+        assert!(is_whitelisted(Path::new(
+            r"D:\.pureslate-quarantine\202608\abc\def.tmp"
+        )));
+        // 相邻名字不应被哨兵误配。
+        assert!(!is_whitelisted(Path::new(r"C:\.pureslate-quarantine2")));
     }
 
     #[test]
