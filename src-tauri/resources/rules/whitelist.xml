@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  PureSlate 附加白名单（SAFETY §2 白名单维护）。
+  本文件的路径根会与 safety/whitelist.rs 的常量根合并，共同构成路径级强制排除：
+  命中任一者，无论规则如何声明都不得进入删除候选。
+  说明：
+  - 常量根（系统目录/程序目录/引导目录/用户核心数据目录/自身设施）不在本文件重复；
+  - 本文件仅列常量根无法表达的、需随规则包更新的附加路径；
+  - 变更须走 [DESTRUCTIVE] 评审关卡（AGENTS §6 / SAFETY §2）。
+-->
+<whitelist>
+  <!-- 系统关键根文件：虚拟内存/休眠/系统交换文件，规则可能以"大文件/占位"命中，禁止误删。 -->
+  <path>C:\pagefile.sys</path>
+  <path>C:\hiberfil.sys</path>
+  <path>C:\swapfile.sys</path>
+</whitelist>

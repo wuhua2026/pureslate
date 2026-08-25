@@ -3,12 +3,14 @@
 use serde::Serialize;
 
 /// 风险分级。与 `contract::Grade` 语义一致；此处为规则侧元数据独立定义。
+///
+/// `Default` 为 `Red`（SAFETY §1：无法判定时默认 🔴，保守原则）。
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub enum Risk {
-    #[default]
     Green,
     Yellow,
+    #[default]
     Red,
 }
 
