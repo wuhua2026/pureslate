@@ -25,7 +25,7 @@
 |----|------|------|-----------|------|
 | P1-01 | 规则引擎 R01：模型+加载 | P0-03 | ✅ rules/model+loader：解析 SPEC §4.1 XML；非法 category 丢弃+日志；规则缓存（mtime 失效）；至少 2 个真实 ruleset：system-temp(green)、cache.wechat(yellow 含 guard) | cargo test：合法/非法/覆盖加载用例 ✅（check/fmt/clippy/test 全绿，test 7 passed） |
 | P1-02 | 规则引擎 R01：遍历+匹配 | P1-01 | ✅ scanner/walk：walkdir 遍历 target、白名单过滤（SAFETY §2.1-4/6）、glob 匹配（include/exclude + 相对 target 根）、取消令牌、进度回调；reparse point 不跟随（follow_links(false)） | cargo test：临时目录沙盒匹配/排除/取消用例（walk 3 + matcher 1 + whitelist 5）✅ |
-| P1-03 | **DG-1 性能决策门** | P1-02 | tools/bench-scan：真机 1TB SSD 三维度计时 → `docs/verify/bench-scan.json`。**≤120s → 记录通过；>120s → 在本表插入 P1-02b（MFT 直读）并执行，完成后再判** | 基准报告落盘 + 结论记 CHANGELOG |
+| P1-03 | **DG-1 性能决策门** | P1-02 | tools/bench-scan：真机 1TB SSD 三维度计时 → `docs/verify/bench-scan.json`。**≤120s → 记录通过；>120s → 在本表插入 P1-02b（MFT 直读）并执行，完成后再判** | ≥120s → 已跑 P1-02b 再判 | `docs/verify/bench-scan.json` ✅ 已落盘（totalMs=191978，temp 9.0s/large 115.8s/dup 67.1s，C: 82.6 万文件）。**>120s 未达标 → 判定触发 P1-02b（MFT 直读），完成复测后再判**。结论记 CHANGELOG |
 | P1-02b | （条件）MFT 直读枚举 | P1-03 | scanner/mft：管理员权限声明+降级回退 walkdir；MFT 枚举替代遍历供 target 匹配 | bench 复测达标；无管理员时自动回退 |
 | P1-04 | 安全分级 R02 | P1-01 | safety/grade+whitelist：按规则 risk 判定；无法判定默认 red；白名单常量+whitelist.xml 加载 | cargo test：三档/默认红/白名单拦截用例 |
 | P1-05 | 扫描编排 R03 | P1-02,P1-04 | scan 编排：profile→各维度执行→聚合→事件推送（scan_progress 节流/scan_done）；**全程零写盘**（审计验证：对扫描目标目录做前后快照对比） | 集成测试 + 快照对比脚本绿 |
