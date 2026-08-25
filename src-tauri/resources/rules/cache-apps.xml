@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<ruleset id="cache-apps" version="1" lang="zh-CN">
+  <category id="cache.wechat" label="微信缓存" risk="yellow" disposition="quarantine"
+            description="聊天内图片/视频/文件缓存；清理后需重新下载，14 天内可从隔离区还原">
+    <target type="knownFolder" value="WeChat Files"/>
+    <include pattern="FileStorage\Cache\**" recursive="true" maxAgeDays="30"/>
+    <guard process="WeChat.exe"/>
+  </category>
+  <category id="cache.browser" label="浏览器缓存" risk="yellow" disposition="quarantine"
+            description="网页缓存资源；清理后浏览器自动重建，不影响收藏与历史">
+    <target type="knownFolder" value="Local AppData"/>
+    <include pattern="**\Google\Chrome\User Data\Default\Cache\**" recursive="true"/>
+    <include pattern="**\Microsoft\Edge\User Data\Default\Cache\**" recursive="true"/>
+    <guard process="chrome.exe"/>
+    <guard process="msedge.exe"/>
+  </category>
+</ruleset>

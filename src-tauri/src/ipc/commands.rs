@@ -57,16 +57,22 @@ pub fn quarantine_restore(
     _state: State<AppState>,
     _params: QuarantineRestoreParams,
 ) -> RestoreReport {
-    RestoreReport { requested: 0, restored: 0, conflict: 0, failures: vec![] }
+    RestoreReport {
+        requested: 0,
+        restored: 0,
+        conflict: 0,
+        failures: vec![],
+    }
 }
 
 /// 硬删隔离项（需 confirm_token）。
 #[tauri::command]
-pub fn quarantine_purge(
-    _state: State<AppState>,
-    _params: QuarantinePurgeParams,
-) -> PurgeReport {
-    PurgeReport { requested: 0, purged: 0, failures: vec![] }
+pub fn quarantine_purge(_state: State<AppState>, _params: QuarantinePurgeParams) -> PurgeReport {
+    PurgeReport {
+        requested: 0,
+        purged: 0,
+        failures: vec![],
+    }
 }
 
 /// 启动项列表。

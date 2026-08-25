@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<ruleset id="system-temp" version="1" lang="zh-CN">
+  <category id="temp.user" label="用户临时文件" risk="green" disposition="direct"
+            description="程序临时文件，删除后自动重建">
+    <target type="env" value="%TEMP%"/>
+    <include pattern="*" recursive="true" maxAgeDays="7"/>
+    <exclude pattern="*.lock"/>
+    <guard process=""/>
+  </category>
+  <category id="temp.system" label="系统临时目录" risk="green" disposition="recycle"
+            description="Windows 系统临时目录中的过期文件">
+    <target type="path" value="C:\Windows\Temp"/>
+    <include pattern="*" recursive="true" maxAgeDays="3"/>
+    <exclude pattern="*.tmp.lock"/>
+    <guard process=""/>
+  </category>
+  <category id="temp.thumb" label="缩略图缓存" risk="green" disposition="recycle"
+            description="图片/视频缩略图缓存，可自动重建">
+    <target type="knownFolder" value="Thumbnail Cache"/>
+    <include pattern="*" recursive="true"/>
+    <guard process=""/>
+  </category>
+</ruleset>

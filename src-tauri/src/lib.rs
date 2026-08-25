@@ -2,6 +2,7 @@
 
 pub mod contract;
 pub mod ipc;
+pub mod rules;
 pub mod state;
 
 use crate::state::AppState;
