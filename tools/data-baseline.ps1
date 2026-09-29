@@ -1,4 +1,4 @@
-<#
+﻿<#
 .SYNOPSIS
   PureSlate P1-09 数据采集基线：扫描（data-collect 只读二进制）+ Windows 容量/盘型，
   合并为 docs/verify/raw/<tag>.json，并汇总渲染 docs/verify/data-baseline.md。

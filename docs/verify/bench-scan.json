@@ -1,27 +1,28 @@
-﻿{
-  "ts": "2026-08-25T06:57:37Z",
+{
+  "ts": "2026-09-29T14:30:10Z",
   "appVersion": "0.1.0",
   "drive": "C:",
   "coldCacheBytes": 5368709120,
+  "mftOpenMs": 12643,
   "dims": {
     "temp": {
-      "ms": 9041,
-      "items": 2954,
-      "bytes": 639015912
+      "ms": 10330,
+      "items": 22037,
+      "bytes": 11881969557
     },
     "large": {
-      "ms": 115801,
-      "files": 826622,
-      "largeFiles": 23
+      "ms": 23519,
+      "files": 874854,
+      "largeFiles": 14
     },
     "dup": {
-      "ms": 67136,
-      "candidates": 780186,
-      "candidateBytes": 36989037031
+      "ms": 0,
+      "candidates": 827247,
+      "candidateBytes": 44957439340
     }
   },
-  "totalMs": 191978,
+  "totalMs": 46492,
   "thresholdMs": 120000,
-  "pass": false,
-  "note": "三维度独立遍历(保守上界)；large/dup 同一次全盘枚举在 P1-05 可复用；dup 哈希延迟到 P2-07；磁盘总字节未查询(未引 Windows crate)"
+  "pass": true,
+  "note": "鏋氫妇寮曟搸=mft+parallel-walk; MFT 鏋氫妇 12643ms 宸茶鍏?totalMs; large/dup 鍏辩敤涓€娆″苟琛屽叏鐩橀亶鍘?鏃堕暱璁″叆 large); dup sha256 鍝堝笇鏈惈(TASKS P2-07 澶囨敞); 纾佺洏鎬诲瓧鑺傛湭鏌ヨ"
 }

@@ -1,4 +1,4 @@
-<#
+﻿<#
 .SYNOPSIS
   PureSlate 安装包体积断言脚本。SPEC §1 体积预算：安装包 <20MB。
 .DESCRIPTION

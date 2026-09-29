@@ -1,0 +1,27 @@
+{
+  "ts": "2026-09-29T12:04:48Z",
+  "goldenTotal": 37,
+  "mustKeepTotal": 15,
+  "fp": {},
+  "rates": {
+    "green": 0.0,
+    "red": 0.0,
+    "yellow": 0.0
+  },
+  "thresholds": {
+    "green": 0.005,
+    "red": 0.0,
+    "yellow": 0.02
+  },
+  "tempItems": 15,
+  "dupGroups": 3,
+  "guardSwept": false,
+  "unicodeTempSwept": 3,
+  "readonlySwept": 2,
+  "zeroByteSwept": 1,
+  "longpathSupported": true,
+  "longpathGuardSwept": false,
+  "junctionCreated": true,
+  "junctionFollowed": false,
+  "pass": true
+}

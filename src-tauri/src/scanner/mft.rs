@@ -88,8 +88,9 @@ impl MftSession {
         cancel: &CancelToken,
         progress: Option<&ProgressFn>,
     ) -> Vec<ScanItem> {
+        // 根判定在 resolve_path 内按"低 48 位记录号 == 5"处理（序列号任意），
+        // 无需预置 cache 种子。
         let mut cache: HashMap<u64, PathBuf> = HashMap::new();
-        cache.insert(ROOT_REF, self.volume_root.clone());
 
         let min_size = compiled.min_size_bytes();
         let mut out = Vec::new();
@@ -103,7 +104,8 @@ impl MftSession {
             if e.is_dir {
                 continue;
             }
-            let Some(path) = resolve_path(&self.index, &mut cache, &self.volume_root, e.reference)
+            let Some(path) =
+                resolve_path(&self.index, &mut cache, &self.volume_root, e.reference, 64)
             else {
                 continue;
             };
@@ -117,7 +119,13 @@ impl MftSession {
             if !compiled.matches_any(&path, target_start) {
                 continue;
             }
-            let size = e.file_len;
+            // USN 记录无长度/mtime：命中项补一次 stat（命中集远小于全盘，代价可控；
+            // stat 失败=文件已消失/不可达，软跳过）。
+            let meta = match std::fs::metadata(&path) {
+                Ok(m) => m,
+                Err(_) => continue,
+            };
+            let size = meta.len();
             if size < min_size {
                 continue;
             }
@@ -130,9 +138,8 @@ impl MftSession {
                 grade,
                 disposition,
                 reason: "匹配规则".into(),
-                // USN 记录不带文件 mtime/atime；age 过滤在本链路不强制（与 walk 一致，walk 只按 size 剪枝）。
-                mtime: None,
-                atime: None,
+                mtime: to_epoch_ms(meta.modified().ok()),
+                atime: to_epoch_ms(meta.accessed().ok()),
                 dup_group: None,
             });
             done += 1;
@@ -166,6 +173,45 @@ impl MftSession {
             *stats.buckets.entry(size).or_insert(0u64) += 1;
         }
         stats
+    }
+
+    /// 排障诊断（探针专用）：(总记录, 目录数, 文件数, 前 n 条样本)。
+    pub fn diag(&self, n: usize) -> (usize, usize, usize, Vec<MftEntry>) {
+        let dirs = self.entries.iter().filter(|e| e.is_dir).count();
+        let samples = self.entries.iter().take(n).cloned().collect();
+        (self.entries.len(), dirs, self.entries.len() - dirs, samples)
+    }
+
+    /// 排障（探针专用）：target 前缀下的文件记录统计。
+    /// 返回 (大小写敏感 strip_prefix 命中数, 不敏感前缀命中数, 不敏感样本路径)。
+    /// 用于诊断 MFT 拼装路径与目标展开路径的组件差异（大小写/拼写）。
+    pub fn diag_target(&self, target: &Path, n: usize) -> (usize, usize, Vec<String>) {
+        let mut cache: HashMap<u64, PathBuf> = HashMap::new();
+        let t_norm = target.to_string_lossy().replace('\\', "/").to_lowercase();
+        let t_norm = t_norm.trim_end_matches('/').to_owned();
+        let mut cs = 0usize;
+        let mut ci = 0usize;
+        let mut samples = Vec::new();
+        for e in &self.entries {
+            if e.is_dir {
+                continue;
+            }
+            let Some(p) = resolve_path(&self.index, &mut cache, &self.volume_root, e.reference, 64)
+            else {
+                continue;
+            };
+            if p.strip_prefix(target).is_ok() {
+                cs += 1;
+            }
+            let pl = p.to_string_lossy().replace('\\', "/").to_lowercase();
+            if pl == t_norm || pl.starts_with(&format!("{t_norm}/")) {
+                ci += 1;
+                if samples.len() < n {
+                    samples.push(p.to_string_lossy().into_owned());
+                }
+            }
+        }
+        (cs, ci, samples)
     }
 }
 
@@ -226,6 +272,20 @@ fn enumerate_volume(volume_root: &Path) -> Result<Vec<MftEntry>, MftError> {
     }
 }
 
+/// 排障探针：首批记录原始字节（前 128）+ 前 n 批的返回大小（沿用现有续批策略）。
+/// 非生产路径，仅供 probe-mft 诊断真实 USN 记录解析。
+pub fn debug_first_records(volume_root: &Path, n_batches: usize) -> Option<(Vec<u8>, Vec<u32>)> {
+    #[cfg(windows)]
+    {
+        imp::debug_first_batches(volume_root, n_batches)
+    }
+    #[cfg(not(windows))]
+    {
+        let _ = (volume_root, n_batches);
+        None
+    }
+}
+
 /// 从绝对路径提取卷根（`C:\`）。非绝对路径返回 None。
 fn volume_root_of(path: &Path) -> Option<PathBuf> {
     let s = path.to_string_lossy();
@@ -240,21 +300,31 @@ fn volume_root_of(path: &Path) -> Option<PathBuf> {
 }
 
 /// 拼装引用号对应全路径，逐层沿父引用上溯，结果缓存在 `cache`。
+/// `depth` 为递归深度上限（防御异常父环导致栈溢出；正常 NTFS 层级远小于此）。
 fn resolve_path(
     index: &HashMap<u64, MftEntry>,
     cache: &mut HashMap<u64, PathBuf>,
     volume_root: &Path,
     reference: u64,
+    depth: u32,
 ) -> Option<PathBuf> {
     if let Some(p) = cache.get(&reference) {
         return Some(p.clone());
     }
-    if reference == ROOT_REF {
-        cache.insert(ROOT_REF, volume_root.to_path_buf());
-        return Some(volume_root.to_path_buf());
+    // MFT 引用 = (序列号<<48)|记录号；根目录记录号固定 5、序列号任意——必须按
+    // 低 48 位判根：根记录本身可能不在枚举结果里，且子记录存的父引用带序列号
+    // （2026-09-29 probe 取证：parent=0x0005_0000_0000_0005，裸比较 ==5 永不命中，
+    // 导致所有路径解析在最后一跳断裂、MFT 模式全维度 0 项）。
+    if (reference & 0x0000_FFFF_FFFF_FFFF) == ROOT_REF {
+        let vr = volume_root.to_path_buf();
+        cache.insert(reference, vr.clone());
+        return Some(vr);
+    }
+    if depth == 0 {
+        return None; // 异常父环防御
     }
     let entry = index.get(&reference)?;
-    let parent_p = resolve_path(index, cache, volume_root, entry.parent)?;
+    let parent_p = resolve_path(index, cache, volume_root, entry.parent, depth - 1)?;
     let p = parent_p.join(&entry.name);
     cache.insert(reference, p.clone());
     Some(p)
@@ -272,6 +342,12 @@ fn stable_id(category_id: &str, path: &Path) -> String {
     category_id.hash(&mut h);
     path.hash(&mut h);
     format!("{:016x}", h.finish())
+}
+
+/// 同 walk.rs：SystemTime → epoch 毫秒。
+fn to_epoch_ms(t: Option<std::time::SystemTime>) -> Option<i64> {
+    t.and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+        .map(|d| d.as_millis() as i64)
 }
 
 /// Windows 平台 FFI 实现。
@@ -298,7 +374,9 @@ mod imp {
     const INVALID_HANDLE: isize = -1;
     // Token access / token information class。
     const TOKEN_QUERY: u32 = 0x0000_0008;
-    const TOKEN_ELEVATION_CLASS: i32 = 22;
+    // TokenInformationClass::TokenElevation = 20（判定是否提权）。
+    // 注意：22 是 TokenElevationClass/LinkedToken，会查错对象，必须用 20。
+    const TOKEN_ELEVATION: i32 = 20;
 
     /// `MFT_ENUM_DATA_V0`：FSCTL_ENUM_USN_DATA 的输入结构。
     #[repr(C)]
@@ -306,12 +384,6 @@ mod imp {
         start_file_reference: u64,
         low_usn: i64,
         high_usn: i64,
-    }
-
-    /// `TOKEN_ELEVATION`：TokenElevation 查询输出。
-    #[repr(C)]
-    struct TokenElevation {
-        token_is_elevated: u32,
     }
 
     #[link(name = "kernel32")]
@@ -372,23 +444,15 @@ mod imp {
             if end > data.len() {
                 break;
             }
-            let major = le_u16(data, off + 4)?;
             let file_ref = le_u64(data, off + 8)?;
             let parent = le_u64(data, off + 16)?;
             let attr = le_u32(data, off + 52)?;
             let name_len = le_u16(data, off + 56)? as usize;
             let name_off = le_u16(data, off + 58)? as usize;
             let is_dir = attr & DIR_ATTR != 0;
-            // V3 起 FileLength 在固定偏移 60；V2 无长度 → 0（调用方可按需补 stat）。
-            let file_len = if major >= 3 {
-                if off + 68 <= data.len() {
-                    le_u64(data, off + 60)?
-                } else {
-                    0
-                }
-            } else {
-                0
-            };
+            // USN 记录（V2/V3）不含文件长度：V3 是 ReFS 128 位引用号变体，同样无
+            // size 字段。长度统一 0，由调用方按需 stat（walk_target 对命中项已补）。
+            let file_len = 0u64;
             if let Some(nbytes) = data.get(off + name_off..off + name_off + name_len) {
                 let mut u16v = Vec::with_capacity(name_len / 2);
                 let mut i = 0;
@@ -431,8 +495,11 @@ mod imp {
     }
 
     pub(super) fn enumerate_ffi(volume_root: &Path) -> Result<Vec<MftEntry>, MftError> {
+        // 卷设备路径必须用 `\\.\C:` 形式（无尾反斜杠）：带尾 `\` 会打开卷根目录
+        // 而非卷设备——句柄能开但 FSCTL_ENUM_USN_DATA 报 os error 5（2026-09-29
+        // probe-fsctl 矩阵取证：无尾斜杠形式下五种访问掩码组合全部枚举成功）。
         let vol = format!(
-            r"\\.\{}\",
+            r"\\.\{}",
             volume_root.to_string_lossy().trim_end_matches('\\')
         );
         let wide: Vec<u16> = vol.encode_utf16().chain(std::iter::once(0)).collect();
@@ -489,12 +556,20 @@ mod imp {
                 if returned == 0 {
                     break;
                 }
-                let mut refs = Vec::new();
-                collect_records(&buf[..returned as usize], &mut out, &mut refs)?;
-                match refs.last() {
-                    Some(r) => start_ref = *r,
-                    None => break,
+                // 输出布局 = [8 字节 NextFileReferenceNumber][USN 记录...]：
+                // 前 8 字节是下一批的 StartFileReferenceNumber，记录从 +8 起。
+                // （2026-09-29 probe 取证修正：旧实现从偏移 0 解析，首条"伪记录"
+                // rec_len=631 吞掉整批真实记录；且用末记录 ref 续批，一轮即断。）
+                if (returned as usize) < 8 {
+                    break;
                 }
+                let next_ref = le_u64(&buf, 0)?;
+                let mut refs = Vec::new();
+                collect_records(&buf[8..returned as usize], &mut out, &mut refs)?;
+                if next_ref == 0 || next_ref <= start_ref {
+                    break; // 防御：续批引用号未前进即终止，防死循环
+                }
+                start_ref = next_ref;
             }
             Ok(())
         })();
@@ -507,6 +582,87 @@ mod imp {
         Ok(out)
     }
 
+    /// 排障探针：打开卷设备，取首批记录原始字节（前 128）+ 前 n 批返回大小，
+    /// 续批策略与 `enumerate_ffi` 一致（末记录引用号），用于诊断真实记录解析。
+    pub(super) fn debug_first_batches(
+        volume_root: &Path,
+        n_batches: usize,
+    ) -> Option<(Vec<u8>, Vec<u32>)> {
+        let vol = format!(
+            r"\\.\{}",
+            volume_root.to_string_lossy().trim_end_matches('\\')
+        );
+        let wide: Vec<u16> = vol.encode_utf16().chain(std::iter::once(0)).collect();
+        // unsafe：kernel32,CreateFileW 打开卷设备句柄。
+        let handle = unsafe {
+            CreateFileW(
+                wide.as_ptr(),
+                GENERIC_READ,
+                FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+                std::ptr::null(),
+                OPEN_EXISTING,
+                FILE_FLAG_BACKUP_SEMANTICS,
+                std::ptr::null(),
+            )
+        };
+        if handle as isize == INVALID_HANDLE {
+            return None;
+        }
+        let mut buf = vec![0u8; 64 * 1024];
+        let mut sizes: Vec<u32> = Vec::new();
+        let mut first_bytes: Vec<u8> = Vec::new();
+        let mut start_ref: u64 = 0;
+        for _ in 0..n_batches {
+            let mft_enum = MftEnumData {
+                start_file_reference: start_ref,
+                low_usn: i64::MIN,
+                high_usn: i64::MAX,
+            };
+            let mut returned = 0u32;
+            // unsafe：kernel32,DeviceIoControl(FSCTL_ENUM_USN_DATA) 取一批记录。
+            let ok = unsafe {
+                DeviceIoControl(
+                    handle,
+                    FSCTL_ENUM_USN_DATA,
+                    &mft_enum as *const _ as *const c_void,
+                    std::mem::size_of::<MftEnumData>() as u32,
+                    buf.as_mut_ptr() as *mut c_void,
+                    buf.len() as u32,
+                    &mut returned,
+                    std::ptr::null(),
+                )
+            } != 0;
+            if !ok || returned == 0 {
+                break;
+            }
+            sizes.push(returned);
+            if first_bytes.is_empty() {
+                first_bytes.extend_from_slice(&buf[..(returned as usize).min(128)]);
+            }
+            if (returned as usize) < 8 {
+                break;
+            }
+            // 与 enumerate_ffi 同规：前 8 字节为续批引用号，记录从 +8 起。
+            let next_ref = le_u64(&buf, 0).ok()?;
+            let mut entries = Vec::new();
+            let mut refs = Vec::new();
+            let _ = collect_records(&buf[8..returned as usize], &mut entries, &mut refs);
+            if next_ref == 0 || next_ref <= start_ref {
+                break;
+            }
+            start_ref = next_ref;
+        }
+        // unsafe：kernel32,CloseHandle 释放卷句柄。
+        unsafe {
+            let _ = CloseHandle(handle);
+        }
+        if sizes.is_empty() {
+            None
+        } else {
+            Some((first_bytes, sizes))
+        }
+    }
+
     /// 提权判定：TokenElevation。
     pub(super) fn is_elevated_ffi() -> bool {
         let mut token: *mut c_void = std::ptr::null_mut();
@@ -515,21 +671,21 @@ mod imp {
         if !ok {
             return false;
         }
-        let mut elevation = TokenElevation {
-            token_is_elevated: 0,
-        };
+        // TokenElevation 查询须恰好传 DWORD(4 字节) 缓冲区；传 8+ 字节会触发
+        // ERROR_BAD_LENGTH。取偏移 0 的 DWORD 即 TokenIsElevated。
+        let buf = 0u32;
         let mut ret = 0u32;
         // unsafe：advapi32,GetTokenInformation(TokenElevation) 判定是否提权。
         let elevated = unsafe {
             GetTokenInformation(
                 token,
-                TOKEN_ELEVATION_CLASS,
-                &mut elevation as *mut _ as *mut c_void,
-                std::mem::size_of::<TokenElevation>() as u32,
+                TOKEN_ELEVATION,
+                &buf as *const u32 as *mut c_void,
+                std::mem::size_of::<u32>() as u32,
                 &mut ret,
             )
         } != 0
-            && elevation.token_is_elevated != 0;
+            && buf != 0;
         // unsafe：kernel32,CloseHandle 释放 token 句柄。
         unsafe {
             let _ = CloseHandle(token);
@@ -586,20 +742,20 @@ mod tests {
     }
 
     #[test]
-    fn parse_v3_record_extracts_size_and_name() {
-        // 记录长度需覆盖 NameOffset(68) + NameLength(10)，即至少 78 字节。
-        let mut buf = vec![0u8; 78];
-        buf[0..4].copy_from_slice(&78u32.to_le_bytes());
-        buf[4..6].copy_from_slice(&3u16.to_le_bytes()); // MajorVersion = 3
+    fn parse_v2_record_extracts_name_no_size() {
+        // 真实 V2 记录布局（2026-09-29 probe 取证）：NameOffset=60，USN 记录
+        // 不含文件长度（file_len 恒 0，长度由调用方 stat 补）。
+        let mut buf = vec![0u8; 72];
+        buf[0..4].copy_from_slice(&72u32.to_le_bytes());
+        buf[4..6].copy_from_slice(&2u16.to_le_bytes()); // MajorVersion = 2
         buf[8..16].copy_from_slice(&0x100u64.to_le_bytes());
         buf[16..24].copy_from_slice(&5u64.to_le_bytes()); // parent = root
         buf[52..56].copy_from_slice(&0u32.to_le_bytes()); // 普通文件
-        buf[58..60].copy_from_slice(&68u16.to_le_bytes()); // NameOffset = 68
-        buf[60..68].copy_from_slice(&123u64.to_le_bytes()); // FileLength
-        buf[56..58].copy_from_slice(&10u16.to_le_bytes()); // NameLength = "a.tmp"(5 wchar) = 10 bytes
+        buf[56..58].copy_from_slice(&10u16.to_le_bytes()); // NameLength = 10 字节
+        buf[58..60].copy_from_slice(&60u16.to_le_bytes()); // NameOffset = 60
         let name: Vec<u16> = "a.tmp".encode_utf16().collect();
         for (i, ch) in name.iter().enumerate() {
-            let o = 68 + i * 2;
+            let o = 60 + i * 2;
             buf[o..o + 2].copy_from_slice(&ch.to_le_bytes());
         }
         #[cfg(windows)]
@@ -607,7 +763,7 @@ mod tests {
             let parsed = imp::parse_records_test(&buf).unwrap();
             assert_eq!(parsed.len(), 1);
             assert_eq!(parsed[0].reference, 0x100);
-            assert_eq!(parsed[0].file_len, 123);
+            assert_eq!(parsed[0].file_len, 0, "USN 记录无长度字段");
             assert_eq!(parsed[0].name, "a.tmp");
             assert!(!parsed[0].is_dir);
         }
@@ -615,47 +771,68 @@ mod tests {
 
     #[test]
     fn resolve_path_builds_full_path() {
+        // 父引用带序列号（(seq<<48)|ref）：根目录须按低 48 位记录号识别——
+        // 2026-09-29 修复的回归锁定（裸比较 ==5 会让所有路径解析在根处断裂）。
+        let seq_root = 0x0005_0000_0000_0005u64; // 序列号 5 的根引用
         let index: HashMap<u64, MftEntry> = HashMap::from([
-            (0x10, entry(0x10, 5, "Users", true, 0)),
+            (0x10, entry(0x10, seq_root, "Users", true, 0)),
             (0x20, entry(0x20, 0x10, "alice", true, 0)),
             (0x30, entry(0x30, 0x20, "a.tmp", false, 9)),
         ]);
         let vol = PathBuf::from(r"C:\");
         let mut cache = HashMap::new();
-        cache.insert(ROOT_REF, vol.clone());
-        let p = resolve_path(&index, &mut cache, &vol, 0x30).unwrap();
+        let p = resolve_path(&index, &mut cache, &vol, 0x30, 64).unwrap();
         assert_eq!(p, PathBuf::from(r"C:\Users\alice\a.tmp"));
     }
 
     #[test]
     fn walk_target_filters_and_matches() {
-        let vol = PathBuf::from(r"C:\");
+        // USN 记录无长度：walk_target 对命中项补 stat——用真实临时文件构造索引，
+        // 同时验证 size_bytes 来自真实 stat 而非（恒 0 的）记录长度。
+        let dir = std::env::temp_dir().join(format!(
+            "pureslate-mft-walk-test-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_nanos())
+                .unwrap_or(0)
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("a.tmp"), "0123456789abcde").unwrap(); // 15 字节
+        std::fs::write(dir.join("b.log"), "blog").unwrap();
+        let dir_name = dir.file_name().unwrap().to_string_lossy().into_owned();
+        let vol = std::env::temp_dir();
+
         let entries = vec![
-            entry(0x20, 5, "alice", true, 0),
-            entry(0x30, 0x20, "a.tmp", false, 15),
-            entry(0x31, 0x20, "b.log", false, 3),
+            entry(0x20, 5, &dir_name, true, 0),
+            entry(0x30, 0x20, "a.tmp", false, 0),
+            entry(0x31, 0x20, "b.log", false, 0),
         ];
+        let index: HashMap<u64, MftEntry> =
+            entries.iter().map(|e| (e.reference, e.clone())).collect();
         let session = MftSession {
             volume_root: vol,
             entries,
-            index: HashMap::from([
-                (0x20, entry(0x20, 5, "alice", true, 0)),
-                (0x30, entry(0x30, 0x20, "a.tmp", false, 15)),
-                (0x31, entry(0x31, 0x20, "b.log", false, 3)),
-            ]),
+            index,
         };
         let cc = CompiledCategory::compile(&test_category());
         let cancel = CancelToken::new();
-        let items = session.walk_target(
-            &PathBuf::from(r"C:\alice"),
-            &cc,
-            Grade::Green,
-            Disposition::Direct,
-            &cancel,
-            None,
-        );
+        let items =
+            session.walk_target(&dir, &cc, Grade::Green, Disposition::Direct, &cancel, None);
         let paths: Vec<String> = items.iter().map(|i| i.path.clone()).collect();
-        assert!(paths.contains(&r"C:\alice\a.tmp".to_string()));
-        assert!(!paths.contains(&r"C:\alice\b.log".to_string()));
+        assert!(
+            paths.iter().any(|p| p.ends_with("a.tmp")),
+            "a.tmp 应命中: {paths:?}"
+        );
+        assert!(!paths.iter().any(|p| p.ends_with("b.log")));
+        assert_eq!(
+            items
+                .iter()
+                .find(|i| i.path.ends_with("a.tmp"))
+                .map(|i| i.size_bytes),
+            Some(15),
+            "size 应来自 stat 补齐"
+        );
+        std::fs::remove_dir_all(&dir).ok();
     }
 }

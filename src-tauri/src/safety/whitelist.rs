@@ -155,8 +155,10 @@ pub fn load_from_dir(rules_dir: &Path) -> Result<(), WhitelistError> {
 /// 但 `C:\Boot`、`C:\EFI`、`C:\Recovery`、`System Volume Information`、
 /// `$Recycle.Bin` 均不可触碰。
 pub fn is_whitelisted(path: &Path) -> bool {
-    let p = path.to_string_lossy();
-    let p_lower = p.to_lowercase();
+    // 候选路径与白名单根两侧必须同规（/ → \ + 小写）：规则 XML 常以正斜杠声明
+    // target，walkdir 产物为混合分隔符路径；此前候选侧只小写不归一，会导致
+    // 段级前缀匹配整体失配 → 白名单被绕过（2026-09-29 黄金集扩测发现）。
+    let p_lower = normalize_lower(path);
 
     // §2.3 盘根下的系统/引导卷信息目录（必须最优先判断，早于 roots 前缀）。
     if let Some(drive) = drive_letter(&p_lower) {
@@ -277,6 +279,27 @@ mod tests {
     #[test]
     fn case_insensitive_prefix() {
         assert!(is_whitelisted(Path::new(r"c:\windows\system32")));
+    }
+
+    #[test]
+    fn forward_slash_target_paths_do_not_bypass_whitelist() {
+        // 2026-09-29 黄金集扩测发现：规则 XML 以正斜杠声明 target 时，walkdir 产物
+        // 为混合分隔符路径，候选侧若不做分隔符归一，段级前缀匹配整体失配 → 白名单
+        // 被绕过。修复后正斜杠路径必须同样命中白名单根。
+        set_xml_roots(vec![PathBuf::from(r"C:\Users\u\AppData\Local\Temp\keep")]);
+        assert!(
+            is_whitelisted(Path::new(r"C:/Users/u/AppData/Local/Temp/keep/guard.keep")),
+            "正斜杠路径必须命中 XML 白名单根"
+        );
+        set_xml_roots(vec![]);
+        // 常量根同理：SystemRoot 以正斜杠形式出现也不得绕过。
+        if let Ok(root) = std::env::var("SystemRoot") {
+            let fwd = format!("{}/System32/drivers", root.replace('\\', "/"));
+            assert!(
+                is_whitelisted(Path::new(&fwd)),
+                "正斜杠系统目录不得绕过常量根"
+            );
+        }
     }
 
     #[test]

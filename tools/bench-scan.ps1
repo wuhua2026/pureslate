@@ -1,4 +1,4 @@
-<#
+﻿<#
 .SYNOPSIS
   PureSlate DG-1 perf-decision-gate benchmark wrapper. SPEC §8: time read-only
   traversal of temp+large+dup dimensions.
