@@ -22,3 +22,12 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+
+# 诊断排障输出（tools/diag 下 elevate runner 的落盘产物，见 LESSONS §③）
+.*-out.txt
+
+# Trae 工作区（会话计划文档，仅本地）
+.trae/
+
+# 净室隔离（红线5）：竞品研究素材仅本地参考，禁止入库
+docs/research/

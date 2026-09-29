@@ -13,9 +13,11 @@ PureSlate：Windows 开源（MIT）PC 清理工具。Tauri 2（Rust 内核 + Vue
 ## 1. 文档读取顺序（强制）
 
 1. 本文件（每次会话开始）
-2. `docs/dev/SPEC.md` —— 架构、模块、全部数据结构与 IPC 契约
-3. `docs/dev/TASKS.md` —— 定位当前 Phase 当前任务，**只精读该任务及其直接依赖**
-4. 任务标注 `[DESTRUCTIVE]` 或涉及删除/移动/注册表/进程操作时，**必读 `docs/dev/SAFETY.md`**
+2. `docs/dev/SESSIONS.md` **最近 1-2 条** —— 接续上次对话的进度与思路（每次会话开始；禁止通读全文）
+3. `docs/dev/SPEC.md` —— 架构、模块、全部数据结构与 IPC 契约
+4. `docs/dev/TASKS.md` —— 定位当前 Phase 当前任务，**只精读该任务及其直接依赖**
+5. 任务标注 `[DESTRUCTIVE]` 或涉及删除/移动/注册表/进程操作时，**必读 `docs/dev/SAFETY.md`**
+6. `docs/dev/LESSONS.md` —— 踩坑/决策/环境结论/门禁趋势；**按需检索相关条目，禁止通读**
 
 纪律：禁止一次性通读全部文档；禁止读取后续 Phase 的任务细节（避免上下文污染与超前设计）。
 
@@ -24,9 +26,10 @@ PureSlate：Windows 开源（MIT）PC 清理工具。Tauri 2（Rust 内核 + Vue
 1. 从 TASKS.md 取当前任务 → 读 SPEC 对应章节；
 2. 实现 → 跑任务列出的**全部验证命令**，必须全绿；
 3. 更新 TASKS.md：任务行打 `✅`，实际偏差写入任务行的 `备注`；
-4. 按 commit 规范提交（见 §6）；
-5. `[DESTRUCTIVE]` 任务额外走 SAFETY.md §5 的评审关卡；
-6. 一个任务一次提交，不跨任务混提。
+4. 更新记忆文档（见 §9）：SESSIONS.md 顶部追加/更新本次对话条目；出现新踩坑/新决策/新基准数值时写入 LESSONS.md 对应小节；
+5. 按 commit 规范提交（见 §6）；
+6. `[DESTRUCTIVE]` 任务额外走 SAFETY.md §5 的评审关卡；
+7. 一个任务一次提交，不跨任务混提。
 
 ## 3. 常用命令
 
@@ -82,3 +85,9 @@ M0 契约冻结 → M1 只读 Demo → M2 清理闭环+性能门禁 → M3 功�
 1. 同步两端；
 2. 在 `docs/dev/CHANGELOG.md` 记录变更；
 3. 不破坏既有命令签名（新增字段须 optional）。
+
+## 9. 记忆文档（SESSIONS / LESSONS）
+
+- `docs/dev/SESSIONS.md`：项目对话记忆，每次对话一条摘要（最新在最上）：做了什么 / 关键结论 / 下一步。任务完成时更新（§2 步骤 4），随任务同一提交入库。
+- `docs/dev/LESSONS.md`：踩坑复利日志，四小节——① 踩坑记录（现象→根因→修复）② 决策记录（选型理由）③ 本机环境结论 ④ 门禁/基准趋势。新条目置于小节顶部，只增不删。
+- 两文件由 agent 在任务完成时自动维护；人类评审时可对照检查是否漏记。
