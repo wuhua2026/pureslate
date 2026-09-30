@@ -5,6 +5,13 @@
 > 维护（AGENTS.md §9）：任务完成时 agent 自动追加/更新当前会话条目，随任务同一提交。格式：`## YYYY-MM-DD | 主题`。
 > 本初版由历史会话记忆回溯整理（截至 2026-09-29），细节以 git 历史与 TASKS.md 为准。
 
+## 2026-10-01 | P4-01 更新机制 R22 交付（Phase 4 开工）
+
+- **做了什么**：`updates/{mod,http}`：WinHTTP 直调 HTTPS（零依赖）+ 通道回退链（jsDelivr→ghproxy→GitHub raw，mirrorFirst 反转）+ manifest 解析/分段数值版本比较（非数值段保守判无更新）+ 规则包 sha256 校验（失败丢弃+审计，通过才落盘到 `<data_root>\rules`）+ opt-in 7 天周查（last-check.json + 启动钩子）+ `update_check` stub→业务 + Settings.vue（更新开关/手动检查/专家模式，路由 /settings Placeholder 退场）。loader 增 `load_dirs` 叠加（用户目录覆盖资源目录；白名单只随资源目录），scan/clean_execute 全部切到叠加链。
+- **关键结论**：①WinHTTP 层不单测（无网络沙箱），回退/校验/周查门控全在注入式纯函数（fetch/download 闭包注入）；②规则包是远端内容——文件名白名单校验（仅 [A-Za-z0-9._-]）防路径穿越 + "校验全通过才落盘"；③契约零改动（update_check 增 AppHandle/State 为 Tauri 注入参数，IPC 不变）；④REPO_SLUG 为占位常量，P4-06 定稿。
+- **验证**：cargo fmt/clippy/test 全绿（120 lib+8 集成，updates 11 + loader 叠加 1 新增）；typecheck/vitest(47)/build 全绿。真机手动：Settings"立即检查"应优雅失败（repo 未发布）。
+- **下一步**：P4-02 [DESTRUCTIVE] 兼容加固 R23（SAFETY §6.3 八项边界 + guard 单实例 + 安全审计 T-1/T-2/T-3/F-1/F-2 预置项，任务备注已列）。
+
 ## 2026-09-30 | P3-06 隔离区生命周期+管理页交付（Phase 3 收官）
 
 - **做了什么**：`quarantine/lifecycle`（到期自动清除+审计 auto_purge、3 天 `quarantine_expiry_warning`、restored 行 30 天清理[restoredAt 加性字段]、容量 min(5GB,盘剩余10%) 超限不自动删+最早批次建议）；`quarantine_purge` stub→业务（token 拒绝）；新增 `quarantine_status` 命令（契约加性，双端同步+CHANGELOG+SPEC §5）；启动钩子跑生命周期；`Quarantine.vue` 屏 8 全要素 + `quarantineModel.ts`；mock 有状态化（list 过滤/restore/purge 翻转）。

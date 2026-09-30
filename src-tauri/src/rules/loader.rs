@@ -92,6 +92,20 @@ impl RuleLoader {
         Ok(source)
     }
 
+    /// 加载多目录并按序叠加（R22 规则包更新语义：**后目录 category 覆盖先目录**）。
+    /// 生产顺序 = 资源规则目录 → `<data_root>\rules`（更新包安装目标）。
+    pub fn load_dirs(&mut self, dirs: &[std::path::PathBuf]) -> Result<RuleSetTable, RulesError> {
+        let mut table = RuleSetTable::default();
+        for dir in dirs {
+            if !dir.is_dir() {
+                continue;
+            }
+            let t = self.load_dir(dir)?;
+            table.by_id.extend(t.by_id);
+        }
+        Ok(table)
+    }
+
     /// 清除全部缓存（供测试/热重载）。
     pub fn invalidate(&mut self) {
         self.cache.clear();
@@ -431,6 +445,42 @@ mod records {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// R22 规则包叠加：`load_dirs` 后目录（更新包安装目标）的同 id category 覆盖前目录。
+    #[test]
+    fn load_dirs_overlay_overrides_base() {
+        let base = std::env::temp_dir().join(format!(
+            "ps-loader-base-{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let overlay = base.join("overlay");
+        std::fs::create_dir_all(&overlay).unwrap();
+        std::fs::write(
+            base.join("base.xml"),
+            r#"<ruleset id="base" version="1"><category id="temp.user" label="旧" risk="green" disposition="direct" description="d"><target type="path" value="C:\x"/><include pattern="*" recursive="true"/></category></ruleset>"#,
+        )
+        .unwrap();
+        std::fs::write(
+            overlay.join("update.xml"),
+            r#"<ruleset id="update" version="2"><category id="temp.user" label="新" risk="yellow" disposition="quarantine" description="d"><target type="path" value="C:\x"/><include pattern="*" recursive="true"/></category></ruleset>"#,
+        )
+        .unwrap();
+
+        let mut loader = RuleLoader::new();
+        let table = loader.load_dirs(&[base.clone(), overlay.clone()]).unwrap();
+        let (_, cat) = table.by_id.get("temp.user").unwrap();
+        assert_eq!(cat.label, "新", "overlay 目录须覆盖 base 同 id category");
+        assert_eq!(cat.risk, crate::rules::model::Risk::Yellow);
+        // 仅 base 目录时仍是旧定义。
+        let mut loader2 = RuleLoader::new();
+        let t2 = loader2.load_dirs(&[base.clone()]).unwrap();
+        assert_eq!(t2.by_id.get("temp.user").unwrap().1.label, "旧");
+
+        let _ = std::fs::remove_dir_all(&base);
+    }
 
     const VALID_XML: &str = r#"<?xml version="1.0" encoding="UTF-8"?>
 <ruleset id="system-temp" version="1" lang="zh-CN">

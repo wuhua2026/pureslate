@@ -12,6 +12,7 @@ pub mod scanner;
 pub mod startup;
 pub mod state;
 pub mod storage;
+pub mod updates;
 
 use crate::state::AppState;
 use tauri::Manager;
@@ -25,6 +26,29 @@ pub fn run() {
             let handle = app.handle().clone();
             tauri::async_runtime::spawn(async move {
                 crate::ipc::commands::emit_lifecycle_warnings(&handle);
+            });
+            // R22 opt-in 周查：距上次检查 ≥7 天且开启 updateOptIn 才联网（红线 #4）。
+            let handle2 = app.handle().clone();
+            tauri::async_runtime::spawn(async move {
+                let settings = crate::storage::load_settings();
+                let now = crate::logging::audit::now_ms();
+                if crate::updates::should_auto_check(
+                    settings.update_opt_in,
+                    crate::updates::read_last_check(),
+                    now,
+                ) {
+                    let state = handle2.state::<AppState>();
+                    let status = crate::updates::check(
+                        &state.version,
+                        &state.rules_version,
+                        settings.mirror_first,
+                    );
+                    crate::updates::record_last_check(now);
+                    if status.has_update {
+                        use tauri::Emitter as _;
+                        let _ = handle2.emit(crate::contract::events::UPDATE_AVAILABLE, status);
+                    }
+                }
             });
             Ok(())
         })

@@ -1,9 +1,6 @@
 import { createRouter, createWebHashHistory, type RouteRecordRaw } from "vue-router";
 
-// SPEC §7 页面集合。除 Home 外均由后续 Phase 逐个构建，
-// 未构建页面先落到 Placeholder（显示占位，保持外壳导航可用）。
-const Placeholder = () => import("../pages/Placeholder.vue");
-
+// SPEC §7 页面集合。Phase 3 收官后全部为真实页面（Placeholder 已退场）。
 const routes: RouteRecordRaw[] = [
   { path: "/", name: "home", component: () => import("../pages/Home.vue"), meta: { title: "首页" } },
   { path: "/scan", name: "scan", component: () => import("../pages/Scan.vue"), meta: { title: "一键体检" } },
@@ -14,7 +11,7 @@ const routes: RouteRecordRaw[] = [
   { path: "/privacy", name: "privacy", component: () => import("../pages/Privacy.vue"), meta: { title: "隐私资料" } },
   { path: "/quarantine", name: "quarantine", component: () => import("../pages/Quarantine.vue"), meta: { title: "隔离区" } },
   { path: "/log", name: "log", component: () => import("../pages/Log.vue"), meta: { title: "操作日志" } },
-  { path: "/settings", name: "settings", component: Placeholder, meta: { title: "设置" } },
+  { path: "/settings", name: "settings", component: () => import("../pages/Settings.vue"), meta: { title: "设置" } },
 ];
 
 export const router = createRouter({

@@ -62,14 +62,14 @@ pub async fn scan_start(
         });
     }
 
-    let rules_dir = resolve_rules_dir(&app);
+    let dirs = rules_dirs(&app);
     let app2 = app.clone();
     let cancel2 = cancel.clone();
     let scan_id2 = scan_id.clone();
     let started2 = started_at;
 
     tauri::async_runtime::spawn_blocking(move || {
-        do_scan(&app2, &rules_dir, &scan_id2, &profile, started2, &cancel2);
+        do_scan(&app2, &dirs, &scan_id2, &profile, started2, &cancel2);
     });
 
     Ok(scan_id)
@@ -124,7 +124,7 @@ pub fn scan_get_items(state: State<AppState>, params: ScanGetItemsParams) -> Vec
 /// 后台执行扫描：加载规则 → 白名单 → 逐维度 → 节流推送进度 → 落结果 → 推送完成。
 fn do_scan(
     app: &tauri::AppHandle,
-    rules_dir: &Path,
+    dirs: &[PathBuf],
     scan_id: &str,
     profile: &ScanProfile,
     started_at: i64,
@@ -134,7 +134,7 @@ fn do_scan(
 
     // 规则加载失败：不中断流程，推送空结果让前端安全收场。
     let mut loader = crate::rules::loader::RuleLoader::new();
-    let table = match loader.load_dir(rules_dir) {
+    let table = match loader.load_dirs(dirs) {
         Ok(t) => t,
         Err(e) => {
             eprintln!("[scan] 规则加载失败，返回空结果: {e}");
@@ -142,7 +142,8 @@ fn do_scan(
             return;
         }
     };
-    let _ = crate::safety::whitelist::load_from_dir(rules_dir);
+    // 白名单只随资源规则目录（更新包不含白名单）。
+    let _ = crate::safety::whitelist::load_from_dir(&dirs[0]);
 
     let mut last_emit = Instant::now();
     let throttle = Duration::from_millis(200);
@@ -215,16 +216,21 @@ fn finish_empty(
     let _ = app.emit(events::SCAN_DONE, result);
 }
 
-/// 定位规则目录：优先资源目录（打包后），否则退回源码目录（开发态）。
-fn resolve_rules_dir(app: &tauri::AppHandle) -> PathBuf {
-    if let Ok(res) = app.path().resource_dir() {
+/// 规则目录链（R22 更新包叠加语义）：资源规则目录 → `<data_root>\rules`（更新包安装目标，
+/// 同 id category 覆盖资源目录）。资源目录优先打包目录，开发态回退源码目录。
+fn rules_dirs(app: &tauri::AppHandle) -> Vec<PathBuf> {
+    let base = if let Ok(res) = app.path().resource_dir() {
         let in_res = res.join("rules");
         if in_res.is_dir() {
-            return in_res;
+            in_res
+        } else {
+            // 开发态：src-tauri/resources/rules
+            PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("resources/rules")
         }
-    }
-    // 开发态：src-tauri/resources/rules
-    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("resources/rules")
+    } else {
+        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("resources/rules")
+    };
+    vec![base, crate::updates::user_rules_dir()]
 }
 
 /// 生成单调可区分的 scanId（时间戳纳秒 + 序号，不引入 uuid 依赖）。
@@ -257,9 +263,8 @@ pub fn clean_execute(
 ) -> Result<String, String> {
     // 1. 解析待清理项（按 item.id 跨会话定位）为 CleanTarget。
     //    规则表用于回填各 category 的 guard 进程（进程守卫语义，R23 一语义）。
-    let rules_dir = resolve_rules_dir(&app);
     let mut loader = crate::rules::loader::RuleLoader::new();
-    let guard_map = match loader.load_dir(&rules_dir) {
+    let guard_map = match loader.load_dirs(&rules_dirs(&app)) {
         Ok(table) => table
             .by_id
             .iter()
@@ -499,15 +504,28 @@ pub fn settings_set(state: State<AppState>, settings: AppSettings) -> AppSetting
     settings
 }
 
-/// 检查更新。
+/// 检查更新（R22 · SPEC §6.5）：手动检查无视 optIn；自动路径仅 optIn 开启时联网
+/// （红线 #4：联网仅限 R22 更新检查）。规则包 sha256 校验失败即丢弃（rulesPackHashOk=false）。
 #[tauri::command]
-pub fn update_check(_state: State<AppState>, _manual: bool) -> UpdateStatus {
-    UpdateStatus {
-        current_version: "0.1.0".into(),
-        latest_version: None,
-        has_update: false,
-        rules_pack_hash_ok: None,
-        channel: Channel::Github,
-        checked_at: 0,
+pub fn update_check(app: tauri::AppHandle, state: State<AppState>, manual: bool) -> UpdateStatus {
+    let (opt_in, mirror_first) = match state.settings.lock() {
+        Ok(s) => (s.update_opt_in, s.mirror_first),
+        Err(_) => (false, true),
+    };
+    if !manual && !opt_in {
+        return UpdateStatus {
+            current_version: state.version.clone(),
+            latest_version: None,
+            has_update: false,
+            rules_pack_hash_ok: None,
+            channel: Channel::Github,
+            checked_at: 0,
+        };
     }
+    let status = crate::updates::check(&state.version, &state.rules_version, mirror_first);
+    crate::updates::record_last_check(crate::logging::audit::now_ms());
+    if !manual && status.has_update {
+        let _ = app.emit(events::UPDATE_AVAILABLE, status.clone());
+    }
+    status
 }
