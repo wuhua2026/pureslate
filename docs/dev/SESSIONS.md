@@ -5,6 +5,13 @@
 > 维护（AGENTS.md §9）：任务完成时 agent 自动追加/更新当前会话条目，随任务同一提交。格式：`## YYYY-MM-DD | 主题`。
 > 本初版由历史会话记忆回溯整理（截至 2026-09-29），细节以 git 历史与 TASKS.md 为准。
 
+## 2026-09-30 | P3-03 启动项 UI 交付
+
+- **做了什么**：`pages/startupModel.ts`（纯函数：影响降序/启用禁用分组/来源·影响·发布者文案/禁用风险文案/HKLM 失败文案）+ `pages/Startup.vue`（摘要计数、影响三色档表格、未知发布者标黄、禁用轻量风险确认面板、已禁用区恢复入口、toggle 失败提示）；路由 `/startup` Placeholder→真组件；mock 增强（stub 补 hklm 高影响/计划任务/已禁用样本，startup_toggle 有状态翻转，data.test 断言放宽）。
+- **关键结论**：①禁用确认用轻量面板而非 token 流（token 留给 🔴 清理/quarantine_purge 语义）；②mock toggle 翻转 stub 状态使 dev 走查能真实看到禁用→恢复循环；③契约零改动、Rust 零改动。
+- **验证**：pnpm typecheck/vitest(36)/build 全绿（startupModel 7 用例）。走查（禁用→恢复流）待人类 `pnpm tauri dev` 执行。
+- **下一步**：P3-04 [DESTRUCTIVE] 隐私清理 R08（浏览器历史+RecentDocs，进程守卫，评审关卡）。
+
 ## 2026-09-30 | P3-02 启动项 R07 交付
 
 - **做了什么**：新建 `src-tauri/src/startup/`（winreg=advapi32 直调、regfile=regedit v5 .reg 生成/解析、backup=startup-backup manifest、tasks=Tasks\*.xml+quick-xml+schtasks、version=version.dll CompanyName、impact=纯函数启发式）；`startup_list/startup_toggle` stub→业务；lib.rs 挂载。禁用流=备份先行（.reg/文件移入/manifest）→移除原项→审计 disable_startup；启用=按备份还原+审计 enable_startup。

@@ -148,7 +148,10 @@ export const QuarantineListStub: QuarantineEntry[] = [
 // ---- 启动项 stub ----
 export const StartupListStub: StartupEntry[] = [
   { id: "st-0001", name: "UpdateChecker", publisher: "某软件公司", command: "C:\\Program Files\\UpdateChecker\\uc.exe --background", source: "hkcu_run", impact: "low", enabled: true },
-  { id: "st-0002", name: "影音伴侣", publisher: "未知", command: "C:\\Users\\17599\\AppData\\Roaming\\MediaBuddy\\mb.exe", source: "hkcu_run", impact: "medium", enabled: true },
+  { id: "st-0002", name: "影音伴侣", command: "C:\\Users\\u\\AppData\\Roaming\\MediaBuddy\\mb.exe", source: "hkcu_run", impact: "medium", enabled: true },
+  { id: "st-0003", name: "CloudSync Agent", publisher: "CloudSoft Ltd.", command: "C:\\Program Files\\CloudSync\\agent.exe --autostart", source: "hklm_run", impact: "high", enabled: true },
+  { id: "st-0004", name: "登录统计任务", command: "C:\\Windows\\System32\\log.bat", source: "task_scheduler", impact: "low", enabled: true },
+  { id: "st-0005", name: "旧输入法快捷助手", publisher: "未知", command: "C:\\Users\\u\\AppData\\Roaming\\Microsoft\\Windows\\Start Menu\\Programs\\Startup\\ime-helper.lnk", source: "startup_folder", impact: "medium", enabled: false },
 ];
 
 // ---- 清理进度假事件（P2-06 执行页联调，mock 模式） ----

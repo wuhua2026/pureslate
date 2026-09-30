@@ -98,9 +98,12 @@ describe("mock 扫描数据（P0-04）", () => {
       expect(q.state).oneOf(["quarantined", "restored", "purged"]);
     }
     expect(StartupListStub.length).toBeGreaterThan(0);
+    // P3-03：stub 同时含启用与已禁用（备份可恢复）样本，enabled 只要求布尔。
+    expect(StartupListStub.some((s) => s.enabled)).toBe(true);
+    expect(StartupListStub.some((s) => !s.enabled)).toBe(true);
     for (const s of StartupListStub) {
       expect(s.id).toBeTruthy();
-      expect(s.enabled).toStrictEqual(true);
+      expect(typeof s.enabled).toBe("boolean");
       expect(s.source).oneOf(["hkcu_run", "hklm_run", "startup_folder", "task_scheduler"]);
     }
   });

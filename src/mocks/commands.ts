@@ -53,7 +53,13 @@ export const mockCommands = {
 
   startup_list: (): Promise<StartupEntry[]> => Promise.resolve(StartupListStub),
 
-  startup_toggle: (_params: { id: string; enabled: boolean }): Promise<boolean> => Promise.resolve(true),
+  startup_toggle: (params: { id: string; enabled: boolean }): Promise<boolean> => {
+    // mock 有状态翻转（dev 走查用）：直接改 stub 条目，同会话内 list 可见变化。
+    const e = StartupListStub.find((x) => x.id === params.id);
+    if (!e) return Promise.resolve(false);
+    e.enabled = params.enabled;
+    return Promise.resolve(true);
+  },
 
   log_query: (_filter: LogQueryFilter): Promise<LogEntry[]> => Promise.resolve([]),
 
