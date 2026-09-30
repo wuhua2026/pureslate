@@ -19,10 +19,10 @@ import type {
 
 const ALL_DIMENSIONS: ScanDimension[] = ["temp", "large", "dup", "cache", "startup", "privacy"];
 
-/** 默认体检维度：除 🔴 privacy（需专家模式）外全开。 */
+/** 默认体检维度：全开（privacy 已按 P3-04 🟡 决策纳入常规体检；红档项由规则侧控制）。 */
 function defaultProfile(): ScanProfile {
   const dimensions: Partial<Record<ScanDimension, boolean>> = {};
-  for (const d of ALL_DIMENSIONS) dimensions[d] = d !== "privacy";
+  for (const d of ALL_DIMENSIONS) dimensions[d] = true;
   return { dimensions };
 }
 

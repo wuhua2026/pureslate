@@ -5,6 +5,13 @@
 > 维护（AGENTS.md §9）：任务完成时 agent 自动追加/更新当前会话条目，随任务同一提交。格式：`## YYYY-MM-DD | 主题`。
 > 本初版由历史会话记忆回溯整理（截至 2026-09-29），细节以 git 历史与 TASKS.md 为准。
 
+## 2026-09-30 | P3-05 隐私 UI 交付
+
+- **做了什么**：`pages/privacyModel.ts`（纯函数：privacy 条目过滤/类目分组/守卫提示/可恢复标注/选中合计）+ `pages/Privacy.vue`（类目分组卡片、逐项 checkbox 默认全不勾、底部操作条→clean_execute→/executing）；路由 `/privacy` Placeholder→真组件；mock 对齐：privacy 种子 🔴→🟡、categoryId 与 privacy-traces.xml 一致（补 Chrome 样本）、startup.registry 种子改 🔴（SAFETY §1 注册表归红档+保住三档断言与 token 演示流）、`defaultProfile` 纳入 privacy 维度。
+- **关键结论**：①"逐项独立确认"落地为默认全不勾的 checkbox（与报告页批量默认勾选区分）；②mock 启动项种子语义过时（R07 已独立成页不走扫描维度）但保留作 🔴 演示样本，reason 注明引导去 /startup 页；③契约零改动、Rust 零改动。
+- **验证**：pnpm typecheck/vitest(42)/build 全绿（privacyModel 7 用例）。走查（勾选→清理→隔离区）待人类 `pnpm tauri dev` 执行。
+- **下一步**：P3-06 [DESTRUCTIVE] 隔离区生命周期+管理页 R25（lifecycle 时间注入单测+Quarantine.vue 屏 8+评审关卡）。另：P3-04 评审关卡的正式人类评审（对照 docs/review/P3-04.md）尚未做。
+
 ## 2026-09-30 | P3-04 隐私清理 R08 交付（规则驱动，[DESTRUCTIVE] 评审关卡）
 
 - **做了什么**：`resources/rules/privacy-traces.xml` 三类目（edge-history/chrome-history/recent-docs，全 🟡/quarantine，浏览器带进程守卫）+ `expand.rs` knownFolder 增 3 个源映射；隐私项完全走既有 rules→engine→clean_execute→journal→隔离区→审计管线，零新破坏性代码路径、契约零改动。集成测试 4 例：端到端扫描（中文/emoji/空格/0字节/非递归排除+零写盘快照）、守卫正例（测试进程自身 exe 作运行中浏览器→整类 skip 文件原样）、隔离区 roundtrip（沙箱根+manifest 类目）、出厂规则包加载回归。
