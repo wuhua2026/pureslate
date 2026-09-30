@@ -5,6 +5,13 @@
 > 维护（AGENTS.md §9）：任务完成时 agent 自动追加/更新当前会话条目，随任务同一提交。格式：`## YYYY-MM-DD | 主题`。
 > 本初版由历史会话记忆回溯整理（截至 2026-09-29），细节以 git 历史与 TASKS.md 为准。
 
+## 2026-09-30 | P3-06 隔离区生命周期+管理页交付（Phase 3 收官）
+
+- **做了什么**：`quarantine/lifecycle`（到期自动清除+审计 auto_purge、3 天 `quarantine_expiry_warning`、restored 行 30 天清理[restoredAt 加性字段]、容量 min(5GB,盘剩余10%) 超限不自动删+最早批次建议）；`quarantine_purge` stub→业务（token 拒绝）；新增 `quarantine_status` 命令（契约加性，双端同步+CHANGELOG+SPEC §5）；启动钩子跑生命周期；`Quarantine.vue` 屏 8 全要素 + `quarantineModel.ts`；mock 有状态化（list 过滤/restore/purge 翻转）。
+- **关键结论**：①时间+剩余空间双注入使 lifecycle 单测完全不依赖真实时钟/磁盘；②自动清除的可追溯面=manifest purged 行恒在+审计（journal 等价物，评审文档 §2 论证）；③`purge_across(roots,...)` roots 可注入——全局函数遍历真实固定盘，沙箱测试必须走可注入核心（与 P2-01 store 同教训）；④测试坑：seed 双写同 id manifest 行导致断言错乱（Quarantined+Restored 同 id 并存）。
+- **验证**：cargo fmt/clippy -D warnings/test 全绿（109 lib+8 集成，lifecycle 6）；pnpm typecheck/vitest(47)/build 全绿；评审关卡 `docs/review/P3-06.md`。走查（还原/清空 token/到期横幅）待人类。
+- **下一步**：Phase 3 任务全部 ✅；门禁自查（startup/privacy 页联调+生命周期自动化=已绿）后可进 Phase 4。遗留：P3-04/P3-06 两个 [DESTRUCTIVE] 评审关卡的人类正式评审、三批真机走查（启动项禁用→重启→恢复、Edge 运行中阻止、隔离区清空 token 流）。
+
 ## 2026-09-30 | P3-05 隐私 UI 交付
 
 - **做了什么**：`pages/privacyModel.ts`（纯函数：privacy 条目过滤/类目分组/守卫提示/可恢复标注/选中合计）+ `pages/Privacy.vue`（类目分组卡片、逐项 checkbox 默认全不勾、底部操作条→clean_execute→/executing）；路由 `/privacy` Placeholder→真组件；mock 对齐：privacy 种子 🔴→🟡、categoryId 与 privacy-traces.xml 一致（补 Chrome 样本）、startup.registry 种子改 🔴（SAFETY §1 注册表归红档+保住三档断言与 token 演示流）、`defaultProfile` 纳入 privacy 维度。

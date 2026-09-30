@@ -12,6 +12,7 @@ import type {
   PurgeReport,
   QuarantineEntry,
   QuarantineRestoreParams,
+  QuarantineStatus,
   RestoreReport,
   ScanGetItemsParams,
   ScanItem,
@@ -43,13 +44,65 @@ export const mockCommands = {
 
   clean_cancel: (_txId: string): Promise<boolean> => Promise.resolve(true),
 
-  quarantine_list: (): Promise<QuarantineEntry[]> => Promise.resolve(QuarantineListStub),
+  // P3-06：mock 有状态（dev 走查）——list 只回可管理项；restore/purge 翻转状态。
+  quarantine_list: (): Promise<QuarantineEntry[]> =>
+    Promise.resolve(QuarantineListStub.filter((q) => q.state === "quarantined")),
 
-  quarantine_restore: (_params: QuarantineRestoreParams): Promise<RestoreReport> =>
-    Promise.resolve({ requested: 0, restored: 0, conflict: 0, failures: [] }),
+  quarantine_restore: (params: QuarantineRestoreParams): Promise<RestoreReport> => {
+    const targets = QuarantineListStub.filter(
+      (q) => q.state === "quarantined" && (params.ids.length === 0 || params.ids.includes(q.id)),
+    );
+    const failures = params.ids
+      .filter((id) => !QuarantineListStub.some((q) => q.id === id))
+      .map((id) => ({ id, reason: "未找到该条目" }));
+    for (const q of targets) q.state = "restored";
+    return Promise.resolve({
+      requested: targets.length + failures.length,
+      restored: targets.length,
+      conflict: 0,
+      failures,
+    });
+  },
 
-  quarantine_purge: (_params: { ids: string[]; confirmToken: string }): Promise<PurgeReport> =>
-    Promise.resolve({ requested: 0, purged: 0, failures: [] }),
+  quarantine_purge: (params: { ids: string[]; confirmToken: string }): Promise<PurgeReport> => {
+    if (!params.confirmToken.trim()) {
+      return Promise.resolve({
+        requested: params.ids.length,
+        purged: 0,
+        failures: params.ids.map((id) => ({ id, reason: "缺少确认令牌（需二次确认）" })),
+      });
+    }
+    let purged = 0;
+    const failures: { id: string; reason: string }[] = [];
+    for (const q of QuarantineListStub) {
+      if (!params.ids.includes(q.id)) continue;
+      if (q.state === "quarantined") {
+        q.state = "purged";
+        purged += 1;
+      } else {
+        failures.push({ id: q.id, reason: "该条目已处理（非已隔离状态）" });
+      }
+    }
+    for (const id of params.ids) {
+      if (!QuarantineListStub.some((q) => q.id === id)) {
+        failures.push({ id, reason: "未找到该条目" });
+      }
+    }
+    return Promise.resolve({ requested: params.ids.length, purged, failures });
+  },
+
+  quarantine_status: (): Promise<QuarantineStatus> => {
+    const used = QuarantineListStub.filter((q) => q.state === "quarantined").reduce(
+      (acc, q) => acc + q.sizeBytes,
+      0,
+    );
+    return Promise.resolve({
+      usedBytes: used,
+      quotaBytes: 5 * 1024 * 1024 * 1024,
+      overQuota: false,
+      earliestBatchIds: [],
+    });
+  },
 
   startup_list: (): Promise<StartupEntry[]> => Promise.resolve(StartupListStub),
 

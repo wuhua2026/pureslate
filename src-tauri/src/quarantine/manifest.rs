@@ -42,6 +42,10 @@ pub struct ManifestEntry {
     /// 可选：旧版 manifest 行缺少该字段时还原仅尽力回写。
     #[serde(skip_serializing_if = "Option::is_none")]
     pub original_mtime_ms: Option<i64>,
+    /// 还原发生时间（epoch ms）。P3-06：restored 行保留 30 天后由 lifecycle 清理
+    /// （SPEC §4.3）。可选：旧版行缺失时 lifecycle 不清理（保守保留）。
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub restored_at: Option<i64>,
     pub state: ManifestState,
 }
 
@@ -98,7 +102,7 @@ pub fn list_manifest(root: &Path) -> std::io::Result<(Vec<ManifestEntry>, u64)> 
 }
 
 /// 按 id 更新条目状态为终态（restored/purged）。行替换而非追加（state 迁移语义）。
-/// 仅覆盖 state 字段，其余原样保留。
+/// 仅覆盖 state 字段，其余原样保留；迁移到 Restored 时补记 `restored_at`（P3-06 生命周期行清理依据）。
 pub fn update_entry_state(root: &Path, id: &str, state: ManifestState) -> std::io::Result<bool> {
     let p = manifest_path_of(root);
     if !p.exists() {
@@ -110,6 +114,9 @@ pub fn update_entry_state(root: &Path, id: &str, state: ManifestState) -> std::i
     for mut e in entries {
         if e.id == id {
             e.state = state;
+            if state == ManifestState::Restored {
+                e.restored_at = Some(super::now_ms());
+            }
             changed = true;
         }
         out.push_str(&serde_json::to_string(&e)?);
@@ -120,6 +127,32 @@ pub fn update_entry_state(root: &Path, id: &str, state: ManifestState) -> std::i
         f.write_all(out.as_bytes())?;
     }
     Ok(changed)
+}
+
+/// 清理"已还原且还原时间早于 cutoff"的 manifest 行（SPEC §4.3：restored 行保留 30 天）。
+/// 只删行不动文件（文件早已还原回原路径）；缺 `restored_at` 的旧版行保守保留。
+pub fn prune_restored_before(root: &Path, cutoff_ms: i64) -> std::io::Result<usize> {
+    let p = manifest_path_of(root);
+    if !p.exists() {
+        return Ok(0);
+    }
+    let (entries, _) = load_manifest(root)?;
+    let mut removed = 0usize;
+    let mut out = String::new();
+    for e in entries {
+        let drop =
+            e.state == ManifestState::Restored && e.restored_at.is_some_and(|t| t < cutoff_ms);
+        if drop {
+            removed += 1;
+        } else {
+            out.push_str(&serde_json::to_string(&e)?);
+            out.push('\n');
+        }
+    }
+    if removed > 0 {
+        std::fs::write(&p, out)?;
+    }
+    Ok(removed)
 }
 
 /// 清除全部行（隔离区整卷清空用）。返回被清理行数。
@@ -171,6 +204,7 @@ mod tests {
             moved_at: 1756000000000,
             expires_at: 1757200000000,
             original_mtime_ms: None,
+            restored_at: None,
             state: ManifestState::Quarantined,
         }
     }

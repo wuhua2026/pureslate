@@ -21,6 +21,11 @@ pub fn run() {
     tauri::Builder::default()
         .setup(|app| {
             app.manage(AppState::new());
+            // 启动即跑一遍隔离区生命周期（到期自动清除+审计；到期提醒事件推送）。
+            let handle = app.handle().clone();
+            tauri::async_runtime::spawn(async move {
+                crate::ipc::commands::emit_lifecycle_warnings(&handle);
+            });
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -33,6 +38,7 @@ pub fn run() {
             ipc::commands::quarantine_list,
             ipc::commands::quarantine_restore,
             ipc::commands::quarantine_purge,
+            ipc::commands::quarantine_status,
             ipc::commands::startup_list,
             ipc::commands::startup_toggle,
             ipc::commands::log_query,

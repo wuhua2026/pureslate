@@ -11,6 +11,7 @@ import type {
   PurgeReport,
   QuarantineEntry,
   QuarantineRestoreParams,
+  QuarantineStatus,
   RestoreReport,
   ScanGetItemsParams,
   ScanItem,
@@ -60,6 +61,11 @@ export const quarantine_purge = (params: { ids: string[]; confirmToken: string }
   useMock()
     ? mockCommands.quarantine_purge(params)
     : invokeApp<PurgeReport>("quarantine_purge", params);
+
+export const quarantine_status = () =>
+  useMock()
+    ? mockCommands.quarantine_status()
+    : invokeApp<QuarantineStatus>("quarantine_status");
 
 export const startup_list = () =>
   useMock() ? mockCommands.startup_list() : invokeApp<StartupEntry[]>("startup_list");

@@ -169,6 +169,7 @@ export interface AppSettings {
 | `quarantine_list` | — → `QuarantineEntry[]` | 含剩余天数 |
 | `quarantine_restore` | `ids: string[]` → `RestoreReport` | 冲突兜底见 SAFETY §4.3 |
 | `quarantine_purge` | `ids: string[]`, `confirmToken` → `PurgeReport` | 硬删+审计 |
+| `quarantine_status` | — → `QuarantineStatus` | 容量上限状态（P3-06 加性新增） |
 | `startup_list` | — → `StartupEntry[]` | |
 | `startup_toggle` | `id, enabled` → `boolean` | 禁用=备份后移除启动项，不删源程序 |
 | `log_query` | `{from, to, op?}` → `LogEntry[]` | |

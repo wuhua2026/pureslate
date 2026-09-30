@@ -171,6 +171,17 @@ pub struct PurgeReport {
     pub failures: Vec<RestoreFailure>,
 }
 
+/// 隔离区容量状态（P3-06 加性新增，`quarantine_status` 返回）。
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct QuarantineStatus {
+    pub used_bytes: u64,
+    pub quota_bytes: u64,
+    pub over_quota: bool,
+    /// 超限时"释放最早批次"建议 id（不超限为空）。
+    pub earliest_batch_ids: Vec<String>,
+}
+
 // ---- 启动项 ----
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]

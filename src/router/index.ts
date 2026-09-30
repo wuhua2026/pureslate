@@ -12,7 +12,7 @@ const routes: RouteRecordRaw[] = [
   { path: "/files", name: "files", component: () => import("../pages/Files.vue"), meta: { title: "大文件" } },
   { path: "/startup", name: "startup", component: () => import("../pages/Startup.vue"), meta: { title: "启动项" } },
   { path: "/privacy", name: "privacy", component: () => import("../pages/Privacy.vue"), meta: { title: "隐私资料" } },
-  { path: "/quarantine", name: "quarantine", component: Placeholder, meta: { title: "隔离区" } },
+  { path: "/quarantine", name: "quarantine", component: () => import("../pages/Quarantine.vue"), meta: { title: "隔离区" } },
   { path: "/log", name: "log", component: () => import("../pages/Log.vue"), meta: { title: "操作日志" } },
   { path: "/settings", name: "settings", component: Placeholder, meta: { title: "设置" } },
 ];

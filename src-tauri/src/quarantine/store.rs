@@ -102,6 +102,7 @@ pub fn move_into_quarantine(
         moved_at,
         expires_at: moved_at + (input.retention_days as i64) * 86_400_000,
         original_mtime_ms,
+        restored_at: None,
         state: ManifestState::Quarantined,
     };
     add_manifest_entry(root, &entry)?;

@@ -92,6 +92,15 @@ export interface PurgeReport {
   failures: RestoreFailure[];
 }
 
+/** 隔离区容量状态（P3-06 加性新增，`quarantine_status` 返回）。 */
+export interface QuarantineStatus {
+  usedBytes: number;
+  quotaBytes: number;
+  overQuota: boolean;
+  /** 超限时"释放最早批次"建议 id（不超限为空）。 */
+  earliestBatchIds: string[];
+}
+
 // ---- 启动项 ----
 export interface StartupEntry {
   id: string;

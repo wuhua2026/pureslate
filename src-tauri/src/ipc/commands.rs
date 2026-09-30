@@ -394,10 +394,46 @@ fn new_clean_id() -> String {
     format!("clean-{t:020x}")
 }
 
-/// 隔离区列表（跨全部固定盘，仅返回待管理的已隔离项）。
+/// 隔离区列表：先跑一遍生命周期（到期自动清除+审计+restored 行清理），
+/// 有到期提醒则推 `quarantine_expiry_warning` 事件。
 #[tauri::command]
-pub fn quarantine_list(_state: State<AppState>) -> Vec<QuarantineEntry> {
+pub fn quarantine_list(app: tauri::AppHandle, _state: State<AppState>) -> Vec<QuarantineEntry> {
+    emit_lifecycle_warnings(&app);
     crate::quarantine::list_quarantined_globally()
+}
+
+/// 生命周期一遍 + 到期提醒事件（list 与启动钩子共用）。
+pub fn emit_lifecycle_warnings(app: &tauri::AppHandle) {
+    let report = crate::quarantine::lifecycle::run_pass_globally(crate::quarantine::now_ms());
+    if !report.warning_ids.is_empty() {
+        let _ = app.emit(
+            events::QUARANTINE_EXPIRY_WARNING,
+            QuarantineExpiryWarningEvent {
+                ids: report.warning_ids,
+                days_left: report.days_left_min,
+            },
+        );
+    }
+    if report.over_quota {
+        eprintln!(
+            "[quarantine] 容量超限：used={} quota={} earliest_batch={}",
+            report.used_bytes,
+            report.quota_bytes,
+            report.earliest_batch_ids.len()
+        );
+    }
+}
+
+/// 隔离区容量状态（容量上限策略，SAFETY §4.4）。
+#[tauri::command]
+pub fn quarantine_status(_state: State<AppState>) -> QuarantineStatus {
+    let r = crate::quarantine::lifecycle::run_pass_globally(crate::quarantine::now_ms());
+    QuarantineStatus {
+        used_bytes: r.used_bytes,
+        quota_bytes: r.quota_bytes,
+        over_quota: r.over_quota,
+        earliest_batch_ids: r.earliest_batch_ids,
+    }
 }
 
 /// 还原隔离项（按 id；ids 为空 = 还原全部可还原项）。
@@ -409,14 +445,10 @@ pub fn quarantine_restore(
     crate::quarantine::restore_globally(&params.ids)
 }
 
-/// 硬删隔离项（需 confirm_token）。
+/// 硬删隔离项（确认清空/释放最早批次；🔴 语义须 confirm_token，缺失全部拒绝）。
 #[tauri::command]
-pub fn quarantine_purge(_state: State<AppState>, _params: QuarantinePurgeParams) -> PurgeReport {
-    PurgeReport {
-        requested: 0,
-        purged: 0,
-        failures: vec![],
-    }
+pub fn quarantine_purge(_state: State<AppState>, params: QuarantinePurgeParams) -> PurgeReport {
+    crate::quarantine::lifecycle::purge_globally(&params.ids, &params.confirm_token)
 }
 
 /// 启动项列表（活动项 + 已禁用备份项，按影响降序）。

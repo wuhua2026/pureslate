@@ -9,13 +9,17 @@
 //! 目录哨兵：隔离区根路径由 `quarantine_root_of()` 计算；白名单已在 `safety/whitelist` 强制
 //! 排除（SAFETY §2.6），隔离区文件绝不经通用清理路径。
 
+pub mod lifecycle;
 mod manifest;
 mod restore;
 mod store;
 
+pub use lifecycle::{
+    purge_across, purge_globally, run_pass_at_root, run_pass_globally, LifecycleReport,
+};
 pub use manifest::{
-    add_manifest_entry, list_manifest, load_manifest, update_entry_state, ManifestEntry,
-    ManifestState,
+    add_manifest_entry, list_manifest, load_manifest, prune_restored_before, update_entry_state,
+    ManifestEntry, ManifestState,
 };
 pub use restore::{
     list_quarantined_globally, manifest_to_contract, restore_globally, restore_one, RestoreOutcome,

@@ -329,6 +329,7 @@ mod tests {
             moved_at: now,
             expires_at: now + 3 * 86_400_000,
             original_mtime_ms: Some(now),
+            restored_at: None,
             state: ManifestState::Quarantined,
         };
         let c = manifest_to_contract(&e);
