@@ -5,6 +5,13 @@
 > 维护（AGENTS.md §9）：任务完成时 agent 自动追加/更新当前会话条目，随任务同一提交。格式：`## YYYY-MM-DD | 主题`。
 > 本初版由历史会话记忆回溯整理（截至 2026-09-29），细节以 git 历史与 TASKS.md 为准。
 
+## 2026-09-30 | P3-04 隐私清理 R08 交付（规则驱动，[DESTRUCTIVE] 评审关卡）
+
+- **做了什么**：`resources/rules/privacy-traces.xml` 三类目（edge-history/chrome-history/recent-docs，全 🟡/quarantine，浏览器带进程守卫）+ `expand.rs` knownFolder 增 3 个源映射；隐私项完全走既有 rules→engine→clean_execute→journal→隔离区→审计管线，零新破坏性代码路径、契约零改动。集成测试 4 例：端到端扫描（中文/emoji/空格/0字节/非递归排除+零写盘快照）、守卫正例（测试进程自身 exe 作运行中浏览器→整类 skip 文件原样）、隔离区 roundtrip（沙箱根+manifest 类目）、出厂规则包加载回归。
+- **关键结论**：①`**/History*` 连 WAL 伴随文件一并移入（防残留 WAL 恢复历史）；②分级决策 🟡 而非 mock 的 🔴（SAFETY §1 表格：单应用+可逆；🔴灰禁会让功能不可用，mock 对齐留 P3-05）；③守卫正例测试技巧=用测试进程自身 exe 基名当"运行中进程"（确定命中）；④集成测试进程与 lib 单测进程分离，DATA_ROOT_OVERRIDE 只需文件内串行。
+- **验证**：cargo fmt/clippy -D warnings/test 全绿（103+4+4）；评审关卡文档 `docs/review/P3-04.md`（含 §6.3 边界对照：1/4/8 本任务复测，2/3/5/6/7 继承 P2-04）。真机黑盒（Edge 运行中阻止）待人类。
+- **下一步**：P3-05 隐私 UI（Privacy.vue：逐项独立确认/可恢复标注；顺带把 mock privacy 分级 🔴→🟡 对齐）。
+
 ## 2026-09-30 | P3-03 启动项 UI 交付
 
 - **做了什么**：`pages/startupModel.ts`（纯函数：影响降序/启用禁用分组/来源·影响·发布者文案/禁用风险文案/HKLM 失败文案）+ `pages/Startup.vue`（摘要计数、影响三色档表格、未知发布者标黄、禁用轻量风险确认面板、已禁用区恢复入口、toggle 失败提示）；路由 `/startup` Placeholder→真组件；mock 增强（stub 补 hklm 高影响/计划任务/已禁用样本，startup_toggle 有状态翻转，data.test 断言放宽）。

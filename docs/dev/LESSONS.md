@@ -76,6 +76,12 @@
 
 ## ② 决策记录
 
+### 隐私清理走规则驱动而非独立 privacy/ 模块（2026-09-30，P3-04）
+- 背景：SPEC §2 列有 `privacy/` 模块（R08 枚举），但隐私项本质是文件类目（History 数据库/.lnk），guard/quarantine/journal/审计全在既有管线里。
+- 决策：`resources/rules/privacy-traces.xml` 三类目（edge-history/chrome-history/recent-docs）+ `expand.rs` knownFolder 增 3 个源映射；不建 Rust 模块、不加 IPC、零新破坏性代码路径——[DESTRUCTIVE] 评审面缩到"新规则类目使 clean_execute 可作用于新文件集合"一条。
+- 关键参数：`**/History*` 连 WAL/journal 伴随文件一并移入（只移主库会留残留 WAL，SQLite 打开新库时可能从 WAL 恢复历史，等于白清）；RecentDocs 仅顶层 `*.lnk`（`*` globset 不跨 `/`，非递归由模式语义保证）。
+- 复利结论：能被规则引擎表达的新类目就别写代码——规则包可随发版更新（SPEC §1"改 XML 即改行为"），且引擎/守卫/事务的评审成本一次摊销。
+
 ### 启动项计划任务源：读 Tasks\*.xml + schtasks 启停，不引入 COM（2026-09-30，P3-02）
 - 背景：SPEC §6.4 要求枚举登录触发计划任务；ITaskService COM 链路（CoInitialize→GetFolder→GetTasks→GetState）大量 unsafe vtable 调用，且计划任务备份无法用 `.reg`/`.lnk` 形态。
 - 决策：枚举直接读 `%SystemRoot%\System32\Tasks\**\*.xml`（quick-xml 解析 LogonTrigger/Exec/Command，locale 无关、只读、零依赖沿用 P1-02b）；启停走 `schtasks /change /tn <name> /enable|/disable`（CREATE_NO_WINDOW，任务本体保留在系统=天然"不删源"）；备份记录用 startup-backup manifest.jsonl（registry 项另存 regedit v5 可导入的 `<id>.reg`，文件夹项移入 `<id>.<ext>`，满足 SPEC 路径约定）。排除 `\Microsoft\` 系统命名空间任务（几十条系统维护任务，非用户可控启动项）。

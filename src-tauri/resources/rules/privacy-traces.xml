@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  PureSlate 隐私痕迹规则包（R08 · P3-04，自研参数，净室合规）。
+  范围：Edge/Chrome 浏览历史数据库 + 最近文档记录（RecentDocs）。
+  安全语义：
+  - 全部 🟡 yellow / quarantine：单应用影响面、隔离区 14 天可还原（SAFETY §1）；
+  - 浏览器类目带进程守卫：浏览器运行中整类阻止（SAFETY §5.1 不做半清）；
+  - History* 一并移入（主库 + WAL/journal 伴随文件），避免残留 WAL 导致历史恢复。
+-->
+<ruleset id="privacy-traces" version="1" lang="zh-CN">
+  <category id="privacy.edge-history" label="Edge 浏览历史" risk="yellow" disposition="quarantine"
+            description="Edge 历史记录数据库（含访问记录与伴随文件）；移入隔离区 14 天内可还原，执行前需退出 Edge">
+    <target type="knownFolder" value="Edge User Data"/>
+    <include pattern="**/History*" recursive="true"/>
+    <guard process="msedge.exe"/>
+  </category>
+  <category id="privacy.chrome-history" label="Chrome 浏览历史" risk="yellow" disposition="quarantine"
+            description="Chrome 历史记录数据库（含访问记录与伴随文件）；移入隔离区 14 天内可还原，执行前需退出 Chrome">
+    <target type="knownFolder" value="Chrome User Data"/>
+    <include pattern="**/History*" recursive="true"/>
+    <guard process="chrome.exe"/>
+  </category>
+  <category id="privacy.recent-docs" label="最近文档记录" risk="yellow" disposition="quarantine"
+            description="资源管理器最近访问的文档/文件快捷方式记录；移入隔离区 14 天内可还原">
+    <target type="knownFolder" value="RecentDocs"/>
+    <include pattern="*.lnk" recursive="false"/>
+    <guard process=""/>
+  </category>
+</ruleset>

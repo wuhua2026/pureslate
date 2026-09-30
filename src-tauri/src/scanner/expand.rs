@@ -72,6 +72,22 @@ fn expand_known_folder(value: &str) -> Option<PathBuf> {
         }
         // 缩略图缓存（Explorer 缩略图数据库/图标缓存目录）。
         "Thumbnail Cache" => local_app.map(|p| p.join("Microsoft\\Windows\\Explorer")),
+        // ---- R08 隐私痕迹源（P3-04）：目录不存在视为未安装/未启用，跳过该 target ----
+        // Edge 用户数据（历史记录数据库所在）。
+        "Edge User Data" => local_app
+            .map(|p| p.join("Microsoft\\Edge\\User Data"))
+            .filter(|p| p.exists()),
+        // Chrome 用户数据（历史记录数据库所在）。
+        "Chrome User Data" => local_app
+            .map(|p| p.join("Google\\Chrome\\User Data"))
+            .filter(|p| p.exists()),
+        // 最近文档记录（RecentDocs，资源管理器最近访问 .lnk）。
+        "RecentDocs" => std::env::var("APPDATA")
+            .ok()
+            .map(PathBuf::from)
+            .or_else(|| Some(user.join("AppData\\Roaming")))
+            .map(|r| r.join("Microsoft\\Windows\\Recent"))
+            .filter(|p| p.exists()),
         // 用户内容目录（dup 维度扫描范围：重复文件普遍存于文档/下载/图片/桌面/视频）。
         "Documents" => Some(user.join("Documents")),
         "Downloads" => Some(user.join("Downloads")),
