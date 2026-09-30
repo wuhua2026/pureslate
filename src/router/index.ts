@@ -9,7 +9,7 @@ const routes: RouteRecordRaw[] = [
   { path: "/scan", name: "scan", component: () => import("../pages/Scan.vue"), meta: { title: "一键体检" } },
   { path: "/report", name: "report", component: () => import("../pages/Report.vue"), meta: { title: "扫描报告" } },
   { path: "/executing", name: "executing", component: () => import("../pages/Executing.vue"), meta: { title: "清理执行" } },
-  { path: "/files", name: "files", component: Placeholder, meta: { title: "大文件" } },
+  { path: "/files", name: "files", component: () => import("../pages/Files.vue"), meta: { title: "大文件" } },
   { path: "/startup", name: "startup", component: Placeholder, meta: { title: "启动项" } },
   { path: "/privacy", name: "privacy", component: Placeholder, meta: { title: "隐私资料" } },
   { path: "/quarantine", name: "quarantine", component: Placeholder, meta: { title: "隔离区" } },

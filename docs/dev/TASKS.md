@@ -60,7 +60,7 @@
 
 | ID | 任务 | 依赖 | 产出 / DoD | 验证 |
 |----|------|------|-----------|------|
-| P3-01 | 大文件 R05 | P1-05 | scanner large 维度：≥500MB 标记大小/路径/atime；pages/Files 列表排序 | 真机抽查排序与标记正确 |
+| P3-01 | ✅ 大文件 R05 | P1-05 | ✅ scanner large 维度：`engine::scan_large_items`（复用 `parallel_walk_stats`，≥500MB 标记大小/路径/atime，🟡/quarantine）；pages/Files 列表排序 | ✅ 真机抽查两轮：首轮抓出 **pagefile.sys 漏进候选**（whitelist.xml 加载时序缺口）→ 卷根系统文件改常量拦截+回归单测；复测 13 项、榜首 6.3GB 排序正确；cargo 81 测试/clippy 全绿，pnpm typecheck/vitest(29)/build 全绿。备注：①分级依据 SAFETY §1"下载目录大文件"归 🟡/隔离区（14 天可还原），mock seed 已从 green/recycle 对齐；②large 遍历期间无中间进度事件（UX 缺口，分片级进度留待后续）；③dup 生产引擎复用同一遍历留待后续任务 |
 | P3-02 | 启动项 R07 | P0-03 | startup 枚举 5 源（SPEC §6.4）+发布者（版本信息）+影响估算（启发式：位置+命令特征）；startup_toggle 禁用=备份后移除，可恢复 | 手动：禁用→重启验证→恢复；备份文件存在 |
 | P3-03 | 启动项 UI | P3-02 | pages/Startup：影响排序/发布者/禁用风险提示/恢复入口 | vitest + 走查 |
 | P3-04 | [DESTRUCTIVE] 隐私清理 R08 | P2-04 | privacy 枚举：浏览器历史（Edge/Chrome，进程守卫）+最近文档（RecentDocs）；逐项「删了什么/能否恢复」；执行进隔离区+日志 | guard 用例：浏览器运行中阻止；评审关卡 |
@@ -76,7 +76,7 @@
 | ID | 任务 | 依赖 | 产出 / DoD | 验证 |
 |----|------|------|-----------|------|
 | P4-01 | 更新机制 R22 | P0-03 | updates：手动检查+opt-in 周查+镜像回退链（jsDelivr→ghproxy→GitHub）+sha256 校验+失败丢弃+审计（SPEC §6.5） | 单测：通道回退/校验失败路径 |
-| P4-02 | [DESTRUCTIVE] 兼容加固 R23 | P2-04 | 全链路过 SAFETY §6.3 八项边界（中文/emoji 用户名、>260 长路径、junction 环、占用文件、只读/ACL、盘满、中途 kill、空/超长名）；guard 双语义（目标进程+单实例互斥量） | 边界用例脚本全绿（tests/compat） |
+| P4-02 | [DESTRUCTIVE] 兼容加固 R23 | P2-04 | 全链路过 SAFETY §6.3 八项边界（中文/emoji 用户名、>260 长路径、junction 环、占用文件、只读/ACL、盘满、中途 kill、空/超长名）；guard 双语义（目标进程+单实例互斥量） | 边界用例脚本全绿（tests/compat）。备注（安全审计预置，2026-09-30，依据 docs/verify/security-audit-ipc-toctou.md）：①T-1 执行前最终复核——execute.rs apply_one 删除/移动前重跑 is_whitelisted + 逐级父目录 reparse 校验（FILE_FLAG_OPEN_REPARSE_POINT）+ size/mtime 与扫描记录比对；八项边界第 3 项由"junction 环"扩为"环 + 扫描后替换"双用例；②T-2 还原路径信任——restore_one 校验 sha256、quarantine_path 须位于对应隔离区根内、original_path 规范化且不得落白名单禁区、create_dir_all 限原路径父链（须先于 P4-05 千次还原）；③T-3 隔离区根 reparse 校验——ensure_quarantine_root 创建/打开时命中 reparse 即拒绝；④F-1 guard fail-open → fail-closed——规则加载失败时该类目整体阻止（不得"退化为不查"）；⑤F-2 whitelist.xml 加载失败不得静默——记审计日志 + 清理前 UI 明示降级 |
 | P4-03 | 崩溃安全 R24 | P2-04 | crash/minidump 本地落盘+启动孤儿 journal 恢复+opt-in 上传预览 UI | kill 测试：dump 生成、journal 恢复执行 |
 | P4-04 | 测试体系 R21 | P2-07 | 黄金文件集扩至 100+ 样本（fixture 生成器）+tools/vm-regression.md（微软开发版 VM 快照步骤：清理→重启→关键功能点检） | 误删率全档达标复跑 |
 | P4-05 | M12 千次还原 | P2-02 | tools/test-restore.ps1 全量 1000 次：**成功率 ≥99.9%**，失败项出兜底指引 | 报告 docs/verify/restore-1000.json |

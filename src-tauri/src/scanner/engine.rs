@@ -6,6 +6,8 @@
 //! startup 维度（R07 注册表枚举）与 dup/large（R06/R05）属后续 Phase，本任务
 //! 仅处理基于规则文件的文件类目目扫描；未注册的维度自动落空但不报错。
 
+use std::path::{Path, PathBuf};
+
 use crate::contract::{
     CategoryAggregate, Disposition, FoundBytes, Grade, ScanDimension, ScanItem, ScanPhase,
 };
@@ -15,9 +17,12 @@ use crate::safety::grade;
 use super::aggregate::{category_aggregate, found_bytes};
 use super::expand::{expand_target, volume_of};
 use super::matcher::CompiledCategory;
-use super::walk::CancelToken;
+use super::walk::{parallel_walk_stats, CancelToken};
 use super::walk_matching;
 use crate::cleaner::dup::{collect_candidates, find_duplicates, DupCandidate};
+
+/// R05 大文件阈值（SPEC §3：large = ≥500MB）。
+pub const LARGE_MIN_BYTES: u64 = 500 * 1024 * 1024;
 
 /// 扫描进度回调：`(阶段, 已完成类目, 类目总数, 当前类目路径, 实时累计字节)`。
 pub type ProgressCb<'a> = dyn FnMut(ScanPhase, usize, usize, String, FoundBytes) + 'a;
@@ -154,12 +159,41 @@ pub fn run_scan(
         );
     }
 
-    out.found = found_bytes(&out.items);
     out.volume = if out.volume.is_empty() {
         "C:".into()
     } else {
         out.volume
     };
+
+    // large 维度（R05）：与规则类目无关的全卷并行遍历（P2-07 五层分片口径，
+    // 87 万文件冷缓存约 23.5s）；卷取首个已展开 target 所在卷，兜底系统盘。
+    // 已知 UX 缺口：large 遍历期间无中间进度事件（分片级进度回调留待后续）。
+    if dims.contains(&ScanDimension::Large) && !cancel.is_cancelled() {
+        let vol_root = volume_root_of(&out.volume);
+        let items = scan_large_items(&vol_root, LARGE_MIN_BYTES, cancel);
+        let count = items.len();
+        if count > 0 {
+            out.items.extend(items);
+            let cat_slice = &out.items[out.items.len() - count..];
+            out.aggregates.push(category_aggregate(
+                "large.file",
+                "大文件",
+                Grade::Yellow,
+                Disposition::Quarantine,
+                "≥500MB 的大文件清单（信息展示为主，确认后入隔离区 14 天可还原）",
+                cat_slice,
+            ));
+        }
+        progress(
+            ScanPhase::Walking,
+            done,
+            total,
+            vol_root.to_string_lossy().into_owned(),
+            found_bytes(&out.items),
+        );
+    }
+
+    out.found = found_bytes(&out.items);
     // 聚合阶段：一次性收尾，占比体现为总进度。
     if done < total && cancel.is_cancelled() {
         progress(
@@ -226,7 +260,7 @@ fn scan_dup_category(
                 .map(|n| n.to_string_lossy().into_owned())
                 .unwrap_or_else(|| "<unknown>".into());
             items.push(ScanItem {
-                id: dup_stable_id(&cat.id, cpath),
+                id: stable_item_id(&cat.id, cpath),
                 category_id: cat.id.clone(),
                 label,
                 path: cpath.to_string_lossy().into_owned(),
@@ -245,8 +279,65 @@ fn scan_dup_category(
     items
 }
 
+/// large 维度扫描（R05）：对卷根做一次并行全盘遍历，产出 ≥large_min 的条目。
+///
+/// 分级（SAFETY §1）："下载目录大文件"归 🟡 → yellow/quarantine（14 天可还原）；
+/// 大文件多为用户数据，Files 页以信息展示为主，清理走报告页勾选确认。
+/// 顺序：大小降序、同大小按路径字典序（确定性，与 Files 页默认排序一致）。
+pub fn scan_large_items(vol_root: &Path, large_min: u64, cancel: &CancelToken) -> Vec<ScanItem> {
+    let stats = parallel_walk_stats(vol_root, large_min, true, cancel);
+    let mut items: Vec<ScanItem> = stats
+        .large
+        .into_iter()
+        .map(|f| ScanItem {
+            id: stable_item_id("large.file", &f.path),
+            category_id: "large.file".into(),
+            label: "大文件".into(),
+            path: f.path.to_string_lossy().into_owned(),
+            size_bytes: f.size,
+            grade: Grade::Yellow,
+            disposition: Disposition::Quarantine,
+            reason: format!(
+                "≥{} 的大文件，请确认是否仍需保留（入隔离区 14 天可还原）",
+                human_bytes(large_min)
+            ),
+            mtime: f.mtime_ms,
+            atime: f.atime_ms,
+            dup_group: None,
+        })
+        .collect();
+    items.sort_by(|a, b| b.size_bytes.cmp(&a.size_bytes).then(a.path.cmp(&b.path)));
+    items
+}
+
+/// 卷字符串（"C:" / "C:\"）→ 卷根路径；非法则回退系统盘。
+fn volume_root_of(vol: &str) -> PathBuf {
+    let v = vol.trim_end_matches([':', '\\']);
+    let valid = v.len() == 1 && v.as_bytes()[0].is_ascii_alphabetic();
+    let drive = if valid {
+        v.to_owned()
+    } else {
+        std::env::var("SystemDrive")
+            .unwrap_or_else(|_| "C:".into())
+            .trim_end_matches(':')
+            .to_owned()
+    };
+    PathBuf::from(format!("{drive}:\\"))
+}
+
+/// 字节数人类可读（reason 文案用）。
+fn human_bytes(n: u64) -> String {
+    const MB: u64 = 1024 * 1024;
+    const GB: u64 = 1024 * MB;
+    if n >= GB {
+        format!("{:.1}GB", n as f64 / GB as f64)
+    } else {
+        format!("{}MB", n / MB)
+    }
+}
+
 /// 由 category_id + path 生成稳定条目 id（16 位十六进制，对齐 `walk::stable_id` 语义）。
-fn dup_stable_id(category_id: &str, path: &std::path::Path) -> String {
+fn stable_item_id(category_id: &str, path: &std::path::Path) -> String {
     use std::hash::{Hash, Hasher};
     let mut h = std::collections::hash_map::DefaultHasher::new();
     category_id.hash(&mut h);
@@ -260,5 +351,67 @@ fn contract_disposition(d: crate::rules::model::Disposition) -> Disposition {
         crate::rules::model::Disposition::Direct => Disposition::Direct,
         crate::rules::model::Disposition::Recycle => Disposition::Recycle,
         crate::rules::model::Disposition::Quarantine => Disposition::Quarantine,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn scan_large_items_marks_size_path_atime() {
+        // 沙箱 + 小阈值：≥large_min 的文件被标记（大小/路径/atime/分级/去向/降序）。
+        let root = std::env::temp_dir().join(format!(
+            "pureslate-large-test-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(root.join("d1")).unwrap();
+        std::fs::write(root.join("small.txt"), "abc").unwrap(); // 3B < 4
+        std::fs::write(root.join("d1/mid.bin"), "abcd").unwrap(); // 4B ≥ 4
+        std::fs::write(root.join("d1/big.bin"), "abcdef").unwrap(); // 6B ≥ 4
+
+        let cancel = CancelToken::new();
+        let items = scan_large_items(&root, 4, &cancel);
+        assert_eq!(items.len(), 2, "仅 ≥large_min 的文件入列");
+        assert!(items[0].path.ends_with("big.bin"), "大小降序");
+        assert_eq!(items[0].size_bytes, 6);
+        assert_eq!(items[1].size_bytes, 4);
+        assert!(items.iter().all(|i| i.category_id == "large.file"));
+        assert!(items.iter().all(|i| i.grade == Grade::Yellow));
+        assert!(items
+            .iter()
+            .all(|i| i.disposition == Disposition::Quarantine));
+        assert!(items.iter().all(|i| i.mtime.is_some() && i.atime.is_some()));
+        std::fs::remove_dir_all(&root).ok();
+    }
+
+    #[test]
+    fn volume_root_normalizes() {
+        assert_eq!(volume_root_of("C:"), PathBuf::from(r"C:\"));
+        assert_eq!(volume_root_of("D:\\"), PathBuf::from(r"D:\"));
+        // 非法卷回退系统盘（不硬编码盘符，跨机可跑）。
+        let sys = std::env::var("SystemDrive").unwrap_or_else(|_| "C:".into());
+        let expect = PathBuf::from(format!("{}:\\", sys.trim_end_matches([':', '\\'])));
+        assert_eq!(volume_root_of(""), expect);
+    }
+
+    #[test]
+    #[ignore = "真机抽查（P3-01 验证列）：扫真实系统盘 C:，人工核对排序与标记"]
+    fn real_machine_large_spot_check() {
+        let cancel = CancelToken::new();
+        let items = scan_large_items(Path::new(r"C:\"), LARGE_MIN_BYTES, &cancel);
+        eprintln!("large files on C: {}", items.len());
+        for it in items.iter().take(10) {
+            eprintln!("  {}  {}", human_bytes(it.size_bytes), it.path);
+        }
+        let sorted = items.windows(2).all(|w| w[0].size_bytes >= w[1].size_bytes);
+        assert!(sorted, "必须按大小降序");
+        assert!(items
+            .iter()
+            .all(|i| i.size_bytes >= LARGE_MIN_BYTES && i.atime.is_some()));
     }
 }

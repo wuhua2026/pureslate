@@ -178,6 +178,29 @@ pub fn is_whitelisted(path: &Path) -> bool {
         }
     }
 
+    // §2.1 卷根系统关键文件（pagefile/hiberfil/swapfile/dumpstack 等）：
+    // 任何盘根下这些名字永不入候选——常量判定，不依赖 whitelist.xml 的加载时序
+    // （2026-09-30 真机抽查发现：XML 未加载时 pagefile.sys 曾漏进 large 候选）。
+    // 仅匹配卷根一层，子目录同名用户文件不受影响。
+    if let Some(drive) = drive_letter(&p_lower) {
+        let root_file = p_lower
+            .strip_prefix(&drive)
+            .unwrap_or("")
+            .trim_start_matches('\\');
+        if !root_file.contains('\\')
+            && matches!(
+                root_file,
+                "pagefile.sys"
+                    | "hiberfil.sys"
+                    | "swapfile.sys"
+                    | "dumpstack.log"
+                    | "dumpstack.log.tmp"
+            )
+        {
+            return true;
+        }
+    }
+
     // §2.6 隔离区哨兵：任何卷根下的 `<drive>:\.pureslate-quarantine` 整棵子树
     // 一律白名单（隔离区文件绝不经通用清理路径；SAFETY §2.6）。
     if let Some(drive) = drive_letter(&p_lower) {
@@ -266,6 +289,26 @@ mod tests {
     }
 
     #[test]
+    fn volume_root_critical_files_whitelisted_without_xml() {
+        // 卷根关键系统文件走常量判定（不依赖 whitelist.xml 加载）：
+        // 2026-09-30 真机抽查发现 XML 未加载时 pagefile.sys 漏进 large 候选。
+        set_xml_roots(vec![]);
+        for f in [
+            "pagefile.sys",
+            "hiberfil.sys",
+            "swapfile.sys",
+            "dumpstack.log",
+        ] {
+            assert!(is_whitelisted(Path::new(&format!(r"C:\{f}"))), "{f}");
+            assert!(is_whitelisted(Path::new(&format!(r"D:\{f}"))), "D:\\{f}");
+        }
+        // 子目录同名用户文件不受影响。
+        assert!(!is_whitelisted(Path::new(
+            r"C:\Users\u\Documents\pagefile.sys"
+        )));
+    }
+
+    #[test]
     fn quarantine_sentinel_whitelisted() {
         // §2.6 隔离区哨兵：任意盘根的 `.pureslate-quarantine` 子树整棵白名单。
         assert!(is_whitelisted(Path::new(r"C:\.pureslate-quarantine")));
@@ -328,10 +371,13 @@ mod tests {
     #[test]
     fn xml_added_root_blocks_path() {
         // 一处常量根未见过的路径：注入 XML 根后应被白名单拦截。
-        let target = Path::new(r"C:\pagefile.sys");
+        // （样本避开卷根系统文件名——pagefile.sys 等 2026-09-30 起为常量拦截。）
+        let target = Path::new(r"C:\Users\u\AppData\Local\Temp\keepme.dat");
         set_xml_roots(vec![]);
         assert!(!is_whitelisted(target), "未注入前不应被拦截");
-        set_xml_roots(vec![PathBuf::from(r"C:\pagefile.sys")]);
+        set_xml_roots(vec![PathBuf::from(
+            r"C:\Users\u\AppData\Local\Temp\keepme.dat",
+        )]);
         assert!(is_whitelisted(target), "注入 XML 根后应被拦截");
         // 子树也应被拦截（段级前缀）。
         set_xml_roots(vec![PathBuf::from(r"D:\safe\stuff")]);

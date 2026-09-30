@@ -112,6 +112,15 @@ pub fn walk_target(
     out
 }
 
+/// 大文件记录（large 维度产出用，R05）。
+#[derive(Debug, Clone)]
+pub struct LargeFile {
+    pub path: PathBuf,
+    pub size: u64,
+    pub mtime_ms: Option<i64>,
+    pub atime_ms: Option<i64>,
+}
+
 /// 全盘遍历统计（large/dup 维度共用）。
 #[derive(Debug, Default)]
 pub struct WalkStats {
@@ -119,6 +128,8 @@ pub struct WalkStats {
     pub large_files: u64,
     /// size → count（dup 一级分组）。
     pub buckets: HashMap<u64, u64>,
+    /// ≥ large_min 的文件明细（want_large 时收集，large 维度产出用）。
+    pub large: Vec<LargeFile>,
 }
 
 /// 并行全盘遍历统计（DG-1 门禁 Plan B，2026-09-29 决策）。
@@ -208,6 +219,7 @@ pub fn parallel_walk_stats(
                 for (k, v) in l.buckets {
                     *total.buckets.entry(k).or_insert(0) += v;
                 }
+                total.large.extend(l.large);
             }
         }
     });
@@ -241,14 +253,32 @@ fn walk_shard(
             continue;
         }
         let Ok(meta) = entry.metadata() else { continue };
-        add_stat(local, meta.len(), large_min, want_large);
+        let size = meta.len();
+        add_stat(local, size, large_min, want_large);
+        if want_large && size >= large_min {
+            add_large(local, entry.path(), &meta, size);
+        }
     }
 }
 
 /// 单文件就地统计（主线程直属文件用）。
 fn add_file_stat(total: &mut WalkStats, p: &Path, large_min: u64, want_large: bool) {
     let Ok(md) = std::fs::metadata(p) else { return };
-    add_stat(total, md.len(), large_min, want_large);
+    let size = md.len();
+    add_stat(total, size, large_min, want_large);
+    if want_large && size >= large_min {
+        add_large(total, p, &md, size);
+    }
+}
+
+/// 大文件明细收集（调用方已确认 want_large && size >= large_min，R05）。
+fn add_large(s: &mut WalkStats, path: &Path, meta: &std::fs::Metadata, size: u64) {
+    s.large.push(LargeFile {
+        path: path.to_path_buf(),
+        size,
+        mtime_ms: to_epoch_ms(meta.modified().ok()),
+        atime_ms: to_epoch_ms(meta.accessed().ok()),
+    });
 }
 
 fn add_stat(s: &mut WalkStats, size: u64, large_min: u64, want_large: bool) {
@@ -392,6 +422,20 @@ mod tests {
         assert_eq!(st.large_files, 2, "5B 与 7B >= large_min(5)");
         assert_eq!(st.buckets.get(&3), Some(&2));
         assert_eq!(st.buckets.len(), 4);
+        // 大文件明细（R05）：≥large_min 的路径/大小/时间被收集。
+        assert_eq!(st.large.len(), 2);
+        assert!(st
+            .large
+            .iter()
+            .any(|f| f.path.ends_with("f3") && f.size == 5));
+        assert!(st
+            .large
+            .iter()
+            .any(|f| f.path.ends_with("f4") && f.size == 7));
+        assert!(st
+            .large
+            .iter()
+            .all(|f| f.mtime_ms.is_some() && f.atime_ms.is_some()));
 
         let c2 = CancelToken::new();
         c2.cancel();

@@ -5,6 +5,18 @@
 > 维护（AGENTS.md §9）：任务完成时 agent 自动追加/更新当前会话条目，随任务同一提交。格式：`## YYYY-MM-DD | 主题`。
 > 本初版由历史会话记忆回溯整理（截至 2026-09-29），细节以 git 历史与 TASKS.md 为准。
 
+## 2026-09-30 | 安全审计（方案 A）：引入 cloudflare/security-audit-skill 对照，产出 IPC/TOCTOU 缺口清单
+
+- **做了什么**：评估 cloudflare/security-audit-skill（MIT，AI agent 安全审计技能包）对本项目的适用性 → 结论"方法论可借鉴、不解决误删主线"；随后按方案 A 以其 DESKTOP-MOBILE-AND-LOCAL-IPC 攻击类别为对照框架，审计两端契约、命令层、清理执行、隔离区/还原、journal、白名单与 Tauri 配置，产出 `docs/verify/security-audit-ipc-toctou.md`（13 条缺口 + 正面确认 + P4 归属映射）。
+- **关键结论**：①新增主要发现——T-1 执行期无最终路径复核（提权+junction 中间目录替换，高）、T-2 还原信任可写 manifest 且不校验 sha256（提权任意文件移动，高）、F-1/F-2 规则/白名单加载失败 fail-open（中）、I-1 log_export 任意路径 truncate 写入（中）、I-2 🔴 token 仅查非空（中）；②严重度前提为"应用以管理员运行"（DG-1），asInvoker 形态下 T-1/T-2 降为中；③单实例（P4-02）、journal 恢复（P4-03）为已计划项，清单补充了安全语义要求（数据目录独占锁、恢复协议防 confused deputy）；④T-4 白名单字符串旁路（短名/尾随点/`..`）待黄金集验证定级。
+- **下一步**：处置按清单 §6 顺序（T-2/T-3 → T-1 → F-1/F-2 → I-1/I-2）；已把 T-1/T-2/T-3/F-1/F-2 的修复要求与验证口径预置为 TASKS.md P4-02 任务备注（清单总览表同步）；P4-03 备注并入 T-6，T-4 待黄金集验证。
+
+## 2026-09-30 | P3-01 大文件维度交付：真机抽查再抓一个红线缺口
+
+- **做了什么**：①`engine::scan_large_items` 接线 `parallel_walk_stats`（large 维度 ≥500MB，标记大小/路径/atime，🟡/quarantine per SAFETY §1"下载目录大文件"）；②pages/Files 列表页（filesModel 纯函数 + 大小降序 + GradeBadge）；③mock seed large 从 green/recycle 对齐为 yellow/quarantine；④真机抽查两轮。
+- **关键结论**：首轮真机抽查抓出 **pagefile.sys（21.7GB）漏进 large 候选**——白名单 XML 加载时序缺口，卷根系统文件已改常量拦截（含回归单测），复测 13 项干净、榜首 6.3GB 排序正确。全链路绿：cargo 81 测试 + clippy 零警告，pnpm typecheck/vitest(29)/build。
+- **下一步**：P3-02 启动项 R07（枚举 5 源 + toggle 备份恢复）；遗留备忘：large 遍历无中间进度事件、dup 生产引擎复用并行遍历。
+
 ## 2026-09-29 | 素材归集：竞品研究资料本地化（非开发任务）
 
 - **做了什么**：经用户拍板（本地参考+git 隔离 / 完整范围），将外部工作区研究素材复制到 `docs/research/`：联想电脑管家 Launcher 逆向 case（20 文件）+ Dism++ 架构拆解 1 份，共 21 文件约 121KB，`diff -r` 逐字节校验一致；`.gitignore` 追加 `docs/research/`；生成 `MANIFEST.md`（含 SHA-256 清单与使用边界）。素材原位置完整保留，未做移动/删除。

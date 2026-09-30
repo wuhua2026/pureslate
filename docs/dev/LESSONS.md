@@ -6,6 +6,12 @@
 
 ## ① 踩坑记录
 
+### 白名单防线不应依赖 XML 加载时序——卷根系统文件须常量拦截（2026-09-30，P3-01 真机抽查）
+- 现象：P3-01 真机抽查 large 清单榜首是 `C:\pagefile.sys`（21.7GB）——SAFETY §2 明令禁碰的系统关键文件。
+- 根因：pagefile.sys 只存在于 whitelist.xml（P1-04），whitelist.rs 常量根无文件级条目；引擎级直接调用（`scan_large_items`）在 XML 未加载时防线失效。
+- 修复：[whitelist.rs](../../src-tauri/src/safety/whitelist.rs) `is_whitelisted` 增加卷根关键文件**常量判定**（pagefile/hiberfil/swapfile/dumpstack*，仅卷根一层，子目录同名用户文件不受影响）+ 回归单测。
+- 复利结论：①安全关键条目必须在最内层常量固化，外置配置（XML）只做增量；②"真机抽查"验证列不是走过场——沙箱单测造不出 pagefile.sys 这种真实系统形态，第二轮抽查确认榜首变为 6.3GB ArcMap.cache。
+
 ### MFT 第四坑 + 并行分片粒度命门（2026-09-29，门禁收尾时发现）
 - 现象一：MFT 模式 bench 首次"PASS"（101s）但 temp=0 项——**假胜利**。
 - 根因一：`resolve_path` 用裸 `reference == 5` 判根，而 USN 记录的父子引用都是 **(序列号<<48)|记录号**（probe 取证 parent=0x0005_0000_0000_0005），且根记录不在枚举结果里 → 所有路径解析在最后一跳断裂。修复：按**低 48 位记录号**判根 + 递归深度防御 + 带序列号根的回归单测；修复后 temp 22,037 项与 walk 模式同量级。
