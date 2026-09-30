@@ -9,6 +9,7 @@ pub mod quarantine;
 pub mod rules;
 pub mod safety;
 pub mod scanner;
+pub mod startup;
 pub mod state;
 pub mod storage;
 

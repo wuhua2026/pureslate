@@ -419,16 +419,16 @@ pub fn quarantine_purge(_state: State<AppState>, _params: QuarantinePurgeParams)
     }
 }
 
-/// 启动项列表。
+/// 启动项列表（活动项 + 已禁用备份项，按影响降序）。
 #[tauri::command]
 pub fn startup_list(_state: State<AppState>) -> Vec<StartupEntry> {
-    vec![]
+    crate::startup::list()
 }
 
-/// 启动项启停（禁用=备份后移除，不删源程序）。
+/// 启动项启停（禁用=备份后移除，不删源程序；启用=按备份还原）。
 #[tauri::command]
-pub fn startup_toggle(_state: State<AppState>, _params: StartupToggleParams) -> bool {
-    true
+pub fn startup_toggle(_state: State<AppState>, params: StartupToggleParams) -> bool {
+    crate::startup::toggle(&params.id, params.enabled)
 }
 
 /// 查询审计日志（按 from/to/op 过滤、跨天合并）。

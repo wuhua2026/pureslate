@@ -6,6 +6,17 @@
 
 ## ① 踩坑记录
 
+### 测试锁守卫在构造函数末尾即释放——共享全局依旧被并行污染（2026-09-30，P3-02）
+- 现象：startup 三个沙箱测试随机失败（备份文件"不存在"、manifest 多出别人的记录）。
+- 根因：`Sandbox::new()` 里 `let _g = LOCK.lock()` 的守卫在**函数返回时即 drop**，锁只护住了 setup 阶段；测试体执行期间其他并行测试照样换掉共享 `DATA_ROOT_OVERRIDE`。
+- 修复：把 `MutexGuard<'static, ()>` 存进 Sandbox 结构体字段（`_guard`），随沙箱一起活到测试结束；Drop 里先清 override 再释放锁。
+- 复利结论：`TEST_DATA_ROOT_LOCK` 的语义是"持锁整个测试体"，任何只想借一下 data_root 沙箱的新测试都必须用结构体持有守卫，不能在辅助函数里 lock。
+
+### 任务 XML 不含启用状态——计划任务 enabled 只能靠自家 manifest（2026-09-30，P3-02）
+- 现象：`%SystemRoot%\System32\Tasks\*.xml` 全文无 Enabled 字段，schtasks 文本输出又本地化（中英系统字段名不同），无 locale 无依赖手段拿到任务启停状态。
+- 对策：枚举只认 LogonTrigger（quick-xml 本地名匹配）；未经本应用禁用的任务一律按 enabled=true 展示，本应用禁用项由 startup-backup manifest 标记 false（`startup/tasks.rs` 头注释）。
+- 复利结论：Windows 存储双轨制（XML 定义 vs COM 运行态）是常态；避 COM 又要 locale 无关时，先确认目标属性到底存在哪一轨，别假设导出 XML 是全量。
+
 ### 白名单防线不应依赖 XML 加载时序——卷根系统文件须常量拦截（2026-09-30，P3-01 真机抽查）
 - 现象：P3-01 真机抽查 large 清单榜首是 `C:\pagefile.sys`（21.7GB）——SAFETY §2 明令禁碰的系统关键文件。
 - 根因：pagefile.sys 只存在于 whitelist.xml（P1-04），whitelist.rs 常量根无文件级条目；引擎级直接调用（`scan_large_items`）在 XML 未加载时防线失效。
@@ -64,6 +75,11 @@
 - 修复：`ScanDimension` 补 `#[derive(Hash)]`（contract.rs）。
 
 ## ② 决策记录
+
+### 启动项计划任务源：读 Tasks\*.xml + schtasks 启停，不引入 COM（2026-09-30，P3-02）
+- 背景：SPEC §6.4 要求枚举登录触发计划任务；ITaskService COM 链路（CoInitialize→GetFolder→GetTasks→GetState）大量 unsafe vtable 调用，且计划任务备份无法用 `.reg`/`.lnk` 形态。
+- 决策：枚举直接读 `%SystemRoot%\System32\Tasks\**\*.xml`（quick-xml 解析 LogonTrigger/Exec/Command，locale 无关、只读、零依赖沿用 P1-02b）；启停走 `schtasks /change /tn <name> /enable|/disable`（CREATE_NO_WINDOW，任务本体保留在系统=天然"不删源"）；备份记录用 startup-backup manifest.jsonl（registry 项另存 regedit v5 可导入的 `<id>.reg`，文件夹项移入 `<id>.<ext>`，满足 SPEC 路径约定）。排除 `\Microsoft\` 系统命名空间任务（几十条系统维护任务，非用户可控启动项）。
+- 理由：HKLM Run 写入需管理员而应用 asInvoker——HKLM 项 toggle 会失败返回 false（契约返回 bool），可接受；WOW6432Node Run 展示归入 hklm_run（契约 source 无独立枚举值，M0 冻结不加）。
 
 ### 方案审计结论与对策（2026-09-29）
 - 结论：设计 A（安全闭环与工程纪律超配），落地 B+（单机验证、性能攻坚中）。依据 SPEC / SAFETY / TASKS 全文对照。

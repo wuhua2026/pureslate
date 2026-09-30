@@ -5,6 +5,13 @@
 > 维护（AGENTS.md §9）：任务完成时 agent 自动追加/更新当前会话条目，随任务同一提交。格式：`## YYYY-MM-DD | 主题`。
 > 本初版由历史会话记忆回溯整理（截至 2026-09-29），细节以 git 历史与 TASKS.md 为准。
 
+## 2026-09-30 | P3-02 启动项 R07 交付
+
+- **做了什么**：新建 `src-tauri/src/startup/`（winreg=advapi32 直调、regfile=regedit v5 .reg 生成/解析、backup=startup-backup manifest、tasks=Tasks\*.xml+quick-xml+schtasks、version=version.dll CompanyName、impact=纯函数启发式）；`startup_list/startup_toggle` stub→业务；lib.rs 挂载。禁用流=备份先行（.reg/文件移入/manifest）→移除原项→审计 disable_startup；启用=按备份还原+审计 enable_startup。
+- **关键结论**：①任务 XML 无启用状态（COM 运行态才存），未由本应用禁用的任务按启用显示，自家禁用走 manifest；②HKLM 写值需管理员而应用 asInvoker→HKLM 项 toggle 返回 false+审计 fail（契约 bool 所限）；③测试坑：锁守卫存结构体字段才护满测试体（LESSONS ①）；④契约零改动（WOW6432Node 归入 hklm_run）。
+- **验证**：cargo fmt/clippy -D warnings/test 全绿（103+4，startup 新增 22）；typecheck/vitest(29) 全绿；沙箱覆盖注册表/文件夹 roundtrip+备份存在 DoD。真机手动项（禁用→重启验证→恢复）待人类执行。
+- **下一步**：P3-03 启动项 UI（Startup.vue：影响排序/发布者/禁用风险提示/恢复入口，路由 /startup 仍指向 Placeholder）。
+
 ## 2026-09-30 | 安全审计（方案 A）：引入 cloudflare/security-audit-skill 对照，产出 IPC/TOCTOU 缺口清单
 
 - **做了什么**：评估 cloudflare/security-audit-skill（MIT，AI agent 安全审计技能包）对本项目的适用性 → 结论"方法论可借鉴、不解决误删主线"；随后按方案 A 以其 DESKTOP-MOBILE-AND-LOCAL-IPC 攻击类别为对照框架，审计两端契约、命令层、清理执行、隔离区/还原、journal、白名单与 Tauri 配置，产出 `docs/verify/security-audit-ipc-toctou.md`（13 条缺口 + 正面确认 + P4 归属映射）。
