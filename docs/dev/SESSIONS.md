@@ -5,6 +5,13 @@
 > 维护（AGENTS.md §9）：任务完成时 agent 自动追加/更新当前会话条目，随任务同一提交。格式：`## YYYY-MM-DD | 主题`。
 > 本初版由历史会话记忆回溯整理（截至 2026-09-29），细节以 git 历史与 TASKS.md 为准。
 
+## 2026-10-03 | P4-02 兼容加固 R23 交付（安全审计五项修复 + 八项边界）
+
+- **做了什么**：T-1 `cleaner/preflight`（执行前白名单重跑+逐级 reparse+size/mtime 比对，`CleanTarget.mtime_ms` 贯通，apply_one 接线）；T-2 `restore_one` 四重校验（根内/sha256/白名单禁区/父链）；T-3 `ensure_quarantine_root` reparse 拒绝；F-1 `resolve_targets`+clean_execute 规则失败整体拒绝（原 fail-open 已修）；F-2 审计+`ScanResult.whitelistOk` 加性契约+Report 降级横幅；`guard/instance` 单实例互斥量+激活首实例；whitelist `\\?\` 前缀剥离+`quarantine_root_of` 长路径盘符解析；`tests/compat.rs` 12 例八项边界。
+- **关键结论**：①fixture 反斜杠双写惯例会破坏 `\\?\` 扩展前缀（Win32 不归一化扩展路径）——XML 属性反斜杠本无须转义，旧惯例靠普通路径归一化侥幸工作；②junction 创建用 `mklink /J`（免特权），std 把 junction 映射为 is_symlink；③测试锁要抗中毒（unwrap_or_else into_inner），否则首败级联废全部用例；④盘满边界以 IO 失败注入等价覆盖。
+- **验证**：cargo fmt/clippy/test 全绿（127 lib+12 compat+8 集成）；preflight 5+instance 2 新单测；typecheck/vitest(47)/build 全绿；评审关卡 `docs/review/P4-02.md`。真机人工：双开单实例、坏 whitelist 横幅。
+- **下一步**：P4-03 崩溃安全 R24（minidump 落盘+孤儿 journal 恢复+kill 测试；T-6 恢复协议防 confused deputy 并入）。
+
 ## 2026-10-01 | P4-01 更新机制 R22 交付（Phase 4 开工）
 
 - **做了什么**：`updates/{mod,http}`：WinHTTP 直调 HTTPS（零依赖）+ 通道回退链（jsDelivr→ghproxy→GitHub raw，mirrorFirst 反转）+ manifest 解析/分段数值版本比较（非数值段保守判无更新）+ 规则包 sha256 校验（失败丢弃+审计，通过才落盘到 `<data_root>\rules`）+ opt-in 7 天周查（last-check.json + 启动钩子）+ `update_check` stub→业务 + Settings.vue（更新开关/手动检查/专家模式，路由 /settings Placeholder 退场）。loader 增 `load_dirs` 叠加（用户目录覆盖资源目录；白名单只随资源目录），scan/clean_execute 全部切到叠加链。

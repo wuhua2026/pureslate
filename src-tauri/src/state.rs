@@ -114,6 +114,7 @@ mod tests {
                 yellow: 0,
                 red: 0,
             },
+            whitelist_ok: None,
         };
         store.finish(result, vec![]);
         assert!(store.current.is_none());
@@ -138,6 +139,7 @@ mod tests {
                     yellow: 0,
                     red: 0,
                 },
+                whitelist_ok: None,
             };
             store.finish(result, vec![]);
         }

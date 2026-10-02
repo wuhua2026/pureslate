@@ -10,7 +10,7 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use tauri::{Emitter, Manager, State};
 
-use crate::cleaner::CleanTarget;
+use crate::cleaner::execute::resolve_targets;
 use crate::contract::*;
 use crate::scanner::walk::CancelToken;
 use crate::state::{AppState, ScanContext};
@@ -143,7 +143,26 @@ fn do_scan(
         }
     };
     // 白名单只随资源规则目录（更新包不含白名单）。
-    let _ = crate::safety::whitelist::load_from_dir(&dirs[0]);
+    // F-2（P4-02 安全审计）：加载失败不得静默——审计 + ScanResult.whitelistOk=false，
+    // 清理前 UI 明示降级（常量根仍生效，XML 附加根丢失）。
+    let whitelist_ok = match crate::safety::whitelist::load_from_dir(&dirs[0]) {
+        Ok(()) => None,
+        Err(e) => {
+            eprintln!("[scan] whitelist.xml 加载失败（安全过滤降级）: {e}");
+            let _ = crate::logging::audit::record(&crate::contract::LogEntry {
+                ts: now_ms(),
+                op: "scan".into(),
+                tx_id: Some(scan_id.to_string()),
+                category_id: None,
+                path: Some(dirs[0].join("whitelist.xml").to_string_lossy().into_owned()),
+                size_bytes: None,
+                disposition: None,
+                result: Some("fail".into()),
+                detail: Some(format!("whitelist.xml 加载失败，XML 附加白名单未生效: {e}")),
+            });
+            Some(false)
+        }
+    };
 
     let mut last_emit = Instant::now();
     let throttle = Duration::from_millis(200);
@@ -180,6 +199,7 @@ fn do_scan(
         aggregates: outcome.aggregates,
         item_count: outcome.items.len() as u64,
         total_bytes: outcome.found,
+        whitelist_ok,
     };
     let items = outcome.items;
 
@@ -209,6 +229,7 @@ fn finish_empty(
             yellow: 0,
             red: 0,
         },
+        whitelist_ok: None,
     };
     if let Ok(mut scans) = app_state.scans.lock() {
         scans.finish(result.clone(), vec![]);
@@ -261,39 +282,40 @@ pub fn clean_execute(
     state: State<AppState>,
     params: CleanExecuteParams,
 ) -> Result<String, String> {
-    // 1. 解析待清理项（按 item.id 跨会话定位）为 CleanTarget。
-    //    规则表用于回填各 category 的 guard 进程（进程守卫语义，R23 一语义）。
-    let mut loader = crate::rules::loader::RuleLoader::new();
-    let guard_map = match loader.load_dirs(&rules_dirs(&app)) {
-        Ok(table) => table
-            .by_id
-            .iter()
-            .map(|(id, (_, cat))| (id.clone(), cat.guard_process.clone()))
-            .collect::<HashMap<String, Option<String>>>(),
-        // 规则加载失败：不阻塞清理，guard 守卫退化为"一律不查"（不安全的类目在 BP 侧已由规则保证）。
-        Err(_) => HashMap::new(),
-    };
-
-    let targets = {
+    // 1. 跨会话收集请求的扫描项（按 item.id）。
+    let items = {
         let Ok(scans) = state.scans.lock() else {
             return Err("扫描状态不可用".into());
         };
-        let mut out: Vec<CleanTarget> = Vec::new();
+        let mut out: Vec<ScanItem> = Vec::new();
         for ctx in scans.finished.iter().chain(scans.current.iter()) {
             for item in &ctx.items {
                 if params.items.contains(&item.id) {
-                    out.push(to_clean_target(item, &guard_map));
+                    out.push(item.clone());
                 }
             }
         }
         out
     };
+    if items.is_empty() {
+        return Err("无可清理项".into());
+    }
 
+    // 2. 规则表解析（guard/类目信息）。
+    //    F-1 fail-closed（安全审计，P4-02）：规则加载失败 → 拒绝整个清理事务，
+    //    不得"守卫退化为不查"（原实现此处为 fail-open，已修正）。
+    let mut loader = crate::rules::loader::RuleLoader::new();
+    let table = loader
+        .load_dirs(&rules_dirs(&app))
+        .map_err(|e| format!("规则加载失败，为安全起见已拒绝清理: {e}"))?;
+
+    // 3. 解析为 CleanTarget（类目缺失同样 fail-closed，见 resolve_targets）。
+    let targets = resolve_targets(&items, &params.items, &table)?;
     if targets.is_empty() {
         return Err("无可清理项".into());
     }
 
-    // 2. 🔴 校验：含 Red 项须 confirm_token 非空（专家态 + 二次确认的落地点在 UI，此处强制兜底）。
+    // 4. 🔴 校验：含 Red 项须 confirm_token 非空（专家态 + 二次确认的落地点在 UI，此处强制兜底）。
     let has_red = targets.iter().any(|t| t.grade == Grade::Red);
     if has_red && params.confirm_token.as_deref().is_none_or(|s| s.is_empty()) {
         return Err("包含高风险（🔴）项，请二次确认后重试".into());
@@ -366,18 +388,6 @@ pub fn clean_cancel(_state: State<AppState>, tx_id: String) -> bool {
             true
         }
         None => false,
-    }
-}
-
-/// 把 ScanItem 转成 CleanTarget，回填 category 的 guard 进程。
-fn to_clean_target(item: &ScanItem, guard_map: &HashMap<String, Option<String>>) -> CleanTarget {
-    CleanTarget {
-        path: PathBuf::from(&item.path),
-        grade: item.grade,
-        disposition: item.disposition,
-        category_id: item.category_id.clone(),
-        size_bytes: item.size_bytes,
-        guard_process: guard_map.get(&item.category_id).cloned().flatten(),
     }
 }
 

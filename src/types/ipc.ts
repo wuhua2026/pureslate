@@ -59,6 +59,8 @@ export interface ScanResult {
   aggregates: CategoryAggregate[];
   itemCount: number;
   totalBytes: FoundBytes;
+  /** F-2（P4-02 加性）：whitelist.xml 加载失败时为 false——UI 须在清理前明示降级。 */
+  whitelistOk?: boolean;
 }
 
 // ---- 隔离区 ----

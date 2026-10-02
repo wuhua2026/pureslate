@@ -85,25 +85,49 @@ unsafe extern "system" {
 }
 
 /// 计算某路径所属卷的隔离区根：`<卷根>\.pureslate-quarantine\`。
-/// 非盘符绝对路径（如相对路径）回退到系统盘 `C:`。
+/// 兼容 `\\?\C:\...` 扩展长度前缀（P4-02 长路径边界）：在整串中定位首个盘符段。
+/// 无盘符路径（如相对路径）回退到系统盘 `C:`。
 pub fn quarantine_root_of(path: &Path) -> PathBuf {
-    let volume = path.to_string_lossy().chars().take(2).collect::<String>();
-    let root = if volume.len() == 2
-        && volume.as_bytes()[0].is_ascii_alphabetic()
-        && volume.as_bytes()[1] == b':'
-    {
-        format!("{}\\", volume)
-    } else {
-        "C:\\".to_string()
-    };
+    let s = path.to_string_lossy();
+    let bytes = s.as_bytes();
+    let mut drive: Option<String> = None;
+    for i in 0..bytes.len().saturating_sub(1) {
+        if bytes[i].is_ascii_alphabetic() && bytes[i + 1] == b':' {
+            let sep_ok = i == 0 || bytes[i - 1] == b'\\' || bytes[i - 1] == b'/';
+            if sep_ok {
+                drive = Some(s[i..i + 2].to_string());
+                break;
+            }
+        }
+    }
+    let root = format!("{}\\", drive.unwrap_or_else(|| "C:".into()));
     PathBuf::from(root).join(QUARANTINE_DIR)
 }
 
 /// 确保隔离区根目录存在，并设置 hidden+system 属性（Windows）。
+/// **T-3 reparse 校验（P4-02 安全审计）**：根路径本身命中 junction/symlink 即拒绝——
+/// 防止隔离区目录被替换为指向任意位置的链接（否则移入=向链接目标写文件）。
 /// 目录创建失败传播错误；属性设置失败仅告警不阻断（目录可用性优先）。
 pub fn ensure_quarantine_root(root: &Path) -> std::io::Result<()> {
     if !root.exists() {
         fs::create_dir_all(root)?;
+    }
+    // symlink_metadata 不跟随链接：junction/symlink 均被 std 映射为 is_symlink。
+    let meta = fs::symlink_metadata(root)?;
+    if meta.file_type().is_symlink() {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            format!(
+                "隔离区根命中 junction/symlink，拒绝使用: {}",
+                root.to_string_lossy()
+            ),
+        ));
+    }
+    if !meta.is_dir() {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            format!("隔离区根不是目录: {}", root.to_string_lossy()),
+        ));
     }
     set_hidden_system(root);
     Ok(())

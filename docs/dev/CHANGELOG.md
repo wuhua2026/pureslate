@@ -39,3 +39,9 @@
 - **契约加性变更（双端同步 + 记此日志）**：新增命令 `quarantine_status`（— → `QuarantineStatus{usedBytes, quotaBytes, overQuota, earliestBatchIds}`），ipc.ts ↔ contract.rs ↔ api/commands.ts 三端一致；既有命令签名零改动（`quarantine_list` 的 AppHandle 为 Tauri 注入参数，IPC 参数不变）。
 - **生命周期引擎**：`quarantine/lifecycle` 到期自动清除（硬删+state→purged+审计 auto_purge）、到期前 3 天 `quarantine_expiry_warning` 事件、restored 行 30 天清理（`ManifestEntry` 加性字段 `restoredAt`，serde 兼容旧行）、容量上限 min(5GB, 盘剩余 10%) 超限不自动删（返回最早批次建议 id 供 UI 显式确认）；`quarantine_purge` stub→业务（token 缺失全部拒绝，🔴 语义）。
 - **验证**：cargo fmt/clippy --all-targets -D warnings/test 全绿（109 单测+8 集成，lifecycle 新增 6）；pnpm typecheck/vitest(47)/build 全绿。评审文档 docs/review/P3-06.md。
+
+### 兼容加固 R23（P4-02，[DESTRUCTIVE]）
+
+- **契约加性变更（双端同步 + 记此日志）**：`ScanResult` 增 optional 字段 `whitelistOk?: boolean`（whitelist.xml 加载失败时为 false，UI 清理前明示降级；正常序列化省略，旧消费者不受影响），ipc.ts ↔ contract.rs 一致。
+- **安全审计五项修复**（docs/verify/security-audit-ipc-toctou.md）：T-1 执行前最终复核（白名单重跑+逐级 reparse+size/mtime 比对）；T-2 restore_one 四重校验（隔离区根内/sha256/白名单禁区/父链 reparse）；T-3 隔离区根 reparse 拒绝；F-1 clean_execute 规则加载失败 fail-closed；F-2 白名单降级审计+UI 明示。
+- **验证**：cargo fmt/clippy --all-targets -D warnings/test 全绿（127 单测+20 集成，tests/compat 八项边界 12 例）；pnpm typecheck/vitest(47)/build 全绿。评审文档 docs/review/P4-02.md。

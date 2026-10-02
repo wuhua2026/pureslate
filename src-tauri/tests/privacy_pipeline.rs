@@ -228,6 +228,7 @@ fn guard_running_blocks_whole_privacy_category() {
             category_id: "privacy.edge-history".into(),
             size_bytes: 11,
             guard_process: Some(own_exe),
+            mtime_ms: None,
         },
         CleanTarget {
             path: h2.clone(),
@@ -236,6 +237,7 @@ fn guard_running_blocks_whole_privacy_category() {
             category_id: "privacy.edge-history".into(),
             size_bytes: 3,
             guard_process: Some("msedge.exe".into()),
+            mtime_ms: None,
         },
     ];
 

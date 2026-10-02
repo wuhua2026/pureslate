@@ -238,9 +238,11 @@ fn drive_letter(p_lower: &str) -> Option<String> {
     None
 }
 
-/// 将路径规范化为小写、`/`→`\`、去掉末尾反斜杠。
+/// 将路径规范化为小写、`/`→`\`、去掉末尾反斜杠，并剥掉 `\\?\` 扩展长度前缀
+/// （P4-02 长路径边界：`\\?\C:\Windows\...` 必须同样命中 `C:\Windows` 白名单根）。
 fn normalize_lower(p: &Path) -> String {
     let s = p.to_string_lossy();
+    let s = s.strip_prefix(r"\\?\").unwrap_or(&s);
     let s = s.replace('/', "\\");
     s.trim_end_matches('\\').to_lowercase()
 }

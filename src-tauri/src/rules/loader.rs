@@ -476,7 +476,7 @@ mod tests {
         assert_eq!(cat.risk, crate::rules::model::Risk::Yellow);
         // 仅 base 目录时仍是旧定义。
         let mut loader2 = RuleLoader::new();
-        let t2 = loader2.load_dirs(&[base.clone()]).unwrap();
+        let t2 = loader2.load_dirs(std::slice::from_ref(&base)).unwrap();
         assert_eq!(t2.by_id.get("temp.user").unwrap().1.label, "旧");
 
         let _ = std::fs::remove_dir_all(&base);

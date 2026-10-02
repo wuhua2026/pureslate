@@ -13,6 +13,8 @@ const store = useScanStore();
 const cleanStore = useCleanStore();
 const router = useRouter();
 const items = computed(() => store.items);
+/** F-2（P4-02）：白名单加载降级时清理前明示。 */
+const whitelistDegraded = computed(() => store.result?.whitelistOk === false);
 const loading = computed(() => store.running);
 
 // 专家模式 & 二次确认：仅开启专家模式才允许纳入 🔴 危险项，且须弹 token 确认。
@@ -100,6 +102,10 @@ function onTokenConfirm(token: string) {
       <router-link to="/scan" class="go-scan">去体检 →</router-link>
     </div>
     <template v-else>
+      <!-- F-2：白名单降级明示（清理前必须可见） -->
+      <div v-if="whitelistDegraded" class="whitelist-degraded">
+        ⚠ 安全白名单配置加载失败，本次扫描的过滤保护已降级——建议重启应用或重新安装后再执行清理
+      </div>
       <!-- 总览 -->
       <section class="overview">
         <div class="metric">
@@ -222,6 +228,17 @@ function onTokenConfirm(token: string) {
 .state {
   padding: 2rem;
   color: var(--text-2);
+}
+/* F-2：白名单降级横幅（清理前必须可见） */
+.whitelist-degraded {
+  margin-bottom: 1rem;
+  padding: 0.75rem 1rem;
+  border: 1px solid var(--grade-red);
+  border-radius: 10px;
+  background: var(--surface);
+  color: var(--grade-red);
+  font-size: 0.85rem;
+  font-weight: 600;
 }
 .state.err {
   color: var(--grade-red);

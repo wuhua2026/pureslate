@@ -28,19 +28,71 @@ pub enum RestoreOutcome {
     Failed(String),
 }
 
+/// 判断隔离文件路径是否位于对应隔离区根内（段级前缀，防伪造 manifest 越界移动）。
+fn inside_quarantine_root(root: &Path, src: &Path) -> bool {
+    let norm = |p: &Path| -> String {
+        p.to_string_lossy()
+            .replace('/', "\\")
+            .trim_end_matches('\\')
+            .to_lowercase()
+    };
+    let r = norm(root);
+    let s = norm(src);
+    s == r || s.starts_with(&format!("{r}\\"))
+}
+
 /// 还原单条隔离项。
 ///
 /// `root` 为该条所属的隔离区根（测试可注入沙箱根）。
 /// 幂等：已 restored/purged 的条目返回 `Skipped`。
+///
+/// **T-2 还原路径信任链（P4-02 安全审计修复）**——manifest 位于用户可写位置，
+/// 不得盲信。动手前四重校验，任一不过即拒绝：
+/// ① `quarantine_path` 必须位于本隔离区根内（防伪造 manifest 任意移动文件）；
+/// ② 源文件 sha256 须与 manifest 记录一致（防内容被替换）；
+/// ③ `original_path` 不得落安全白名单禁区（防伪造还原目标写系统目录）；
+/// ④ 原路径父链不得含 junction/symlink（防中间目录被替换重定向）。
 pub fn restore_one(root: &Path, entry: &ManifestEntry) -> RestoreOutcome {
     if entry.state != ManifestState::Quarantined {
         return RestoreOutcome::Skipped("该条目不是可还原的已隔离状态".into());
     }
     let src = PathBuf::from(&entry.quarantine_path);
+    // T-2 ①：隔离区根内。
+    if !inside_quarantine_root(root, &src) {
+        return RestoreOutcome::Failed(format!(
+            "隔离文件不在本隔离区根内，拒绝还原: {}",
+            src.to_string_lossy()
+        ));
+    }
     if !src.is_file() {
         return RestoreOutcome::Failed(format!("隔离区源文件缺失: {}", src.to_string_lossy()));
     }
+    // T-2 ②：sha256 一致（manifest 可被篡改/文件可被替换）。
+    match super::store::sha256_file(&src) {
+        Ok(actual) if actual.eq_ignore_ascii_case(&entry.sha256) => {}
+        Ok(_) => {
+            return RestoreOutcome::Failed(format!(
+                "sha256 校验失败，拒绝还原: {}",
+                src.to_string_lossy()
+            ))
+        }
+        Err(e) => return RestoreOutcome::Failed(format!("读取隔离文件失败: {e}")),
+    }
     let orig = PathBuf::from(&entry.original_path);
+    // T-2 ③：还原目标不得落白名单禁区。
+    if crate::safety::whitelist::is_whitelisted(&orig) {
+        return RestoreOutcome::Failed(format!(
+            "还原目标位于安全白名单禁区，拒绝: {}",
+            orig.to_string_lossy()
+        ));
+    }
+    // T-2 ④：原路径父链 reparse 校验。
+    if let Some(seg) = crate::cleaner::preflight::first_reparse_component(&orig) {
+        return RestoreOutcome::Failed(format!(
+            "还原目标路径含 junction/symlink，拒绝: {}",
+            seg.to_string_lossy()
+        ));
+    }
 
     let is_conflict = orig.exists();
     let target = if is_conflict {

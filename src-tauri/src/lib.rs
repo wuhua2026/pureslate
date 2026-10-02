@@ -21,6 +21,12 @@ use tauri::Manager;
 pub fn run() {
     tauri::Builder::default()
         .setup(|app| {
+            // R23 第二语义：单实例互斥量——第二实例激活首实例窗口后退出（SAFETY §5.2）。
+            if !crate::guard::is_single_instance(crate::guard::instance::MUTEX_NAME) {
+                crate::guard::activate_main_window(crate::guard::instance::MAIN_WINDOW_TITLE);
+                eprintln!("[instance] 已有 PureSlate 实例运行，本实例退出");
+                std::process::exit(0);
+            }
             app.manage(AppState::new());
             // 启动即跑一遍隔离区生命周期（到期自动清除+审计；到期提醒事件推送）。
             let handle = app.handle().clone();

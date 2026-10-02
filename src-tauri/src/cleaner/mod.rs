@@ -3,7 +3,10 @@
 pub mod dup;
 pub mod execute;
 pub mod journal;
+pub mod preflight;
 pub mod recycle;
 
 pub use crate::contract::CleanProgressState;
-pub use execute::{execute, CleanFailure, CleanProgress, CleanReport, CleanTarget};
+pub use execute::{
+    execute, resolve_targets, CleanFailure, CleanProgress, CleanReport, CleanTarget,
+};

@@ -130,6 +130,10 @@ pub struct ScanResult {
     pub aggregates: Vec<CategoryAggregate>,
     pub item_count: u64,
     pub total_bytes: FoundBytes,
+    /// F-2（P4-02 加性）：whitelist.xml 加载失败时为 `Some(false)`——UI 须在清理前
+    /// 明示降级；正常为 None（序列化省略，旧消费者不受影响）。
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub whitelist_ok: Option<bool>,
 }
 
 // ---- 隔离区 ----

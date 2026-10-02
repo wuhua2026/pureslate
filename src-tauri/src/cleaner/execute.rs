@@ -26,6 +26,40 @@ pub struct CleanTarget {
     pub size_bytes: u64,
     /// 类目 guard 进程基名（来自规则）；运行中 → 整类阻止。
     pub guard_process: Option<String>,
+    /// 扫描记录的 mtime（epoch ms）；执行前一致性复核用（T-1）。
+    pub mtime_ms: Option<i64>,
+}
+
+/// 把扫描项按 id 解析为清理目标，守卫与类目信息来自规则表。
+/// **F-1 fail-closed**：规则表缺少该 item 的类目（规则包损坏/被替换）→ 整体拒绝，
+/// 不得"守卫退化为不查"（安全审计 T-1 配套，P4-02）。
+pub fn resolve_targets(
+    items: &[crate::contract::ScanItem],
+    ids: &[String],
+    table: &crate::rules::model::RuleSetTable,
+) -> Result<Vec<CleanTarget>, String> {
+    let mut out = Vec::new();
+    for item in items {
+        if !ids.contains(&item.id) {
+            continue;
+        }
+        let Some((_, cat)) = table.by_id.get(&item.category_id) else {
+            return Err(format!(
+                "规则表缺少类目 {}（安全策略：拒绝执行）",
+                item.category_id
+            ));
+        };
+        out.push(CleanTarget {
+            path: PathBuf::from(&item.path),
+            grade: item.grade,
+            disposition: item.disposition,
+            category_id: item.category_id.clone(),
+            size_bytes: item.size_bytes,
+            guard_process: cat.guard_process.clone(),
+            mtime_ms: item.mtime,
+        });
+    }
+    Ok(out)
 }
 
 /// 单条失败明细。
@@ -202,6 +236,8 @@ fn push_progress(
 /// 按去向对单个目标执行并返回结果。
 fn apply_one(t: &CleanTarget, retention_days: u32) -> Result<(), String> {
     let p = &t.path;
+    // T-1 执行前最终复核（白名单/逐级 reparse/size+mtime 一致性）——不过即拒绝，不动手。
+    super::preflight::verify(t)?;
     // 源已不存在：视为"无需操作"（幂等，成功）。
     if !p.exists() {
         return Err("源文件不存在（可能已被处理）".into());
@@ -273,13 +309,21 @@ mod tests {
     }
 
     fn tgt(root: &Path, name: &str, disposition: Disposition, grade: Grade) -> CleanTarget {
+        let path = root.join(name);
+        // T-1 一致性复核要求 size/mtime 与"扫描记录"一致——测试从真实文件取值。
+        let meta = std::fs::metadata(&path).ok();
         CleanTarget {
-            path: root.join(name),
+            path,
             grade,
             disposition,
             category_id: "cat".into(),
-            size_bytes: 0,
+            size_bytes: meta.as_ref().map(|m| m.len()).unwrap_or(0),
             guard_process: None,
+            mtime_ms: meta
+                .as_ref()
+                .and_then(|m| m.modified().ok())
+                .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+                .map(|d| d.as_millis() as i64),
         }
     }
 
