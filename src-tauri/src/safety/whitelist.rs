@@ -200,10 +200,40 @@ pub fn load_from_dir(rules_dir: &Path) -> Result<(), WhitelistError> {
 
 /// 判断路径是否命中白名单。
 ///
+/// **候选侧短名展开（T-4 镜像形态，P4-06 CI 实测补全）**：环境变量来源的路径
+/// （如 CI 的 `%TEMP%` = `C:\Users\RUNNER~1\...`）可能天然含 8.3 短名段，而
+/// 白名单根已展开为长名——段级匹配失配即保护缺口。仅当路径含 `~N` 短名段时
+/// 才做 `GetLongPathNameW` 展开（成功时长/短两形态都判定），常规长名路径
+/// **零额外系统调用**（扫描热路径保障）。
+///
 /// 含系统/引导卷信息目录的逐盘根判断（§2.3）——该类的盘根本身不是白名单根，
 /// 但 `C:\Boot`、`C:\EFI`、`C:\Recovery`、`System Volume Information`、
 /// `$Recycle.Bin` 均不可触碰。
 pub fn is_whitelisted(path: &Path) -> bool {
+    if path_has_short_component(path) {
+        if let Some(long) = expand_short_name(path) {
+            let hit = whitelisted_once(path) || whitelisted_once(&long);
+            return hit;
+        }
+    }
+    whitelisted_once(path)
+}
+
+/// 8.3 短名段特征：任一路径段含 `~` 且其后紧跟 ASCII 数字（`RUNNER~1`）。
+/// 宽松检测（真名含 `~1` 的用户文件会多一次失败的展开调用并退回原形，无碍）。
+fn path_has_short_component(p: &Path) -> bool {
+    p.to_string_lossy().split(['\\', '/']).any(|seg| {
+        seg.find('~').is_some_and(|i| {
+            seg[i + 1..]
+                .chars()
+                .next()
+                .is_some_and(|c| c.is_ascii_digit())
+        })
+    })
+}
+
+/// 单形态白名单判定（盘根特例 + 常量根 + XML 附加根）。
+fn whitelisted_once(path: &Path) -> bool {
     // 候选路径与白名单根两侧共用段级归一（T-4，P4-04）：`/`→`\` + 小写 +
     // `\\?\` 剥离 + `..`/`.` 段文本化解析 + 逐段去尾随点/空格——任何一侧的
     // 书写形式差异都不再造成保护缺口（此前仅分隔符+小写归一，2026-09-29 曾
@@ -462,18 +492,16 @@ mod tests {
                 .map(|p| p.to_string_lossy().into_owned())
                 .unwrap_or_else(|| "None".into())
         );
-        set_xml_roots(vec![short]);
-        eprintln!(
-            "[t4-short-diag] roots={:?}",
-            xml_roots()
-                .iter()
-                .map(|p| p.to_string_lossy().into_owned())
-                .collect::<Vec<_>>()
-        );
-        eprintln!("[t4-short-diag] long_segs={:?}", normalize_segments(&long));
+        set_xml_roots(vec![short.clone()]);
         assert!(
             is_whitelisted(&long),
             "短名声明的白名单根必须展开为长名后命中"
+        );
+        // 镜像形态（P4-06 CI 实测补全）：候选本身带短名段（如 CI 的 %TEMP%）时
+        // 候选侧也要展开——短名候选 vs 长名 root 必须命中。
+        assert!(
+            is_whitelisted(&short),
+            "短名候选（展开后与长名 root 同指）必须命中"
         );
         set_xml_roots(vec![]);
         let _ = std::fs::remove_dir_all(&dir);
