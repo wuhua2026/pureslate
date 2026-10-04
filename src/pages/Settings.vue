@@ -166,6 +166,9 @@ onMounted(() => {
           />
           <span>允许上传崩溃转储帮助修复问题（默认关闭；上传前可预览内容）</span>
         </label>
+        <p class="warn">
+          上传服务尚未上线：当前版本转储仅保存在本机，开启开关暂无实际联网行为。
+        </p>
         <p v-if="dumps.length === 0" class="empty-list">没有本地崩溃转储</p>
         <ul v-else class="dump-list">
           <li v-for="d in dumps" :key="d.fileName" class="dump-row">

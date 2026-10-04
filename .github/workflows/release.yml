@@ -115,7 +115,14 @@ jobs:
           $version = $tag.TrimStart("v")
           $installer = "src-tauri/target/release/bundle/nsis/PureSlate_${version}_x64-setup.exe"
           $rulesPack = "dist-publish/rules/pureslate-rules-$version.json"
-          gh release create "$tag" "$installer" "$rulesPack" --title "PureSlate $tag" --generate-notes
+          # Release 页功能文档：`.github/release-notes/<tag>.md` 存在则用作正文
+          #（Foundation 条款要求功能在下载页有文档）；否则退回自动生成。
+          $notes = ".github/release-notes/$tag.md"
+          if (Test-Path $notes) {
+            gh release create "$tag" "$installer" "$rulesPack" --title "PureSlate $tag" --notes-file $notes
+          } else {
+            gh release create "$tag" "$installer" "$rulesPack" --title "PureSlate $tag" --generate-notes
+          }
           if ($LASTEXITCODE -ne 0) { throw "gh release create 失败" }
 
       # ---- manifest/规则包提交回 main（更新通道读取处）----

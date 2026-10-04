@@ -27,8 +27,10 @@ pub const KEEP_DUMPS: usize = 5;
 /// 上传体积上限（防御异常巨大的 dump；MiniDumpNormal 正常远小于此）。
 pub const MAX_UPLOAD_BYTES: u64 = 50 * 1024 * 1024;
 
-/// 崩溃转储上传端点（占位常量，P4-06 发布流水线定稿；`.invalid` 顶级域保证
-/// 不会误触真实主机——未定稿前上传必然优雅失败，行为与 P4-01 REPO_SLUG 同口径）。
+/// 崩溃转储上传端点。**2026-10-04 决策：不接入上传后端**（R24 裁剪预案"上传
+/// 降级仅本地"）——`.invalid` 顶级域保证不误触真实主机，`crash_upload` 命令
+/// 保留完整链路（opt-in 门禁/体积限制/审计）但必然优雅失败；本地 dump 保存
+/// 与预览不受影响。未来若接入后端，改此常量即可。
 pub const CRASH_UPLOAD_URL: &str = "https://pureslate.invalid/crash-upload";
 
 /// 生产安装：未处理异常 / panic 双通道写 dump 到数据根 crash 目录。
