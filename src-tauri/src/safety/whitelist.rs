@@ -452,7 +452,28 @@ mod tests {
             let _ = std::fs::remove_dir_all(&dir);
             return; // 该卷无 8.3：本用例不适用
         };
+        eprintln!("[t4-short-diag] original={}", long.to_string_lossy());
+        eprintln!("[t4-short-diag] short={}", short.to_string_lossy());
+        let expanded = expand_short_name(&short);
+        eprintln!(
+            "[t4-short-diag] expand={}",
+            expanded
+                .as_ref()
+                .map(|p| p.to_string_lossy().into_owned())
+                .unwrap_or_else(|| "None".into())
+        );
         set_xml_roots(vec![short]);
+        eprintln!(
+            "[t4-short-diag] roots={:?}",
+            xml_roots()
+                .iter()
+                .map(|p| p.to_string_lossy().into_owned())
+                .collect::<Vec<_>>()
+        );
+        eprintln!(
+            "[t4-short-diag] long_segs={:?}",
+            normalize_segments(&long)
+        );
         assert!(
             is_whitelisted(&long),
             "短名声明的白名单根必须展开为长名后命中"
