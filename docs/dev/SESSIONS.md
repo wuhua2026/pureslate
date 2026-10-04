@@ -5,6 +5,13 @@
 > 维护（AGENTS.md §9）：任务完成时 agent 自动追加/更新当前会话条目，随任务同一提交。格式：`## YYYY-MM-DD | 主题`。
 > 本初版由历史会话记忆回溯整理（截至 2026-09-29），细节以 git 历史与 TASKS.md 为准。
 
+## 2026-10-04 | P4-05 M12 千次还原交付（1000/1000 = 100% ≥ 99.9%）
+
+- **做了什么**：`restore-self-test` 升级——①JSON 报告（stdout 落 `docs/verify/restore-1000.json`：buildProfile/threshold/ratio/gatePass/durationMs/stageCounts/failures），stderr 人读进度（每 100 轮）与结论；②**失败项按五阶段兜底指引**（write/hash/quarantine[manifest·journal 残留可还原]/restore[restore-conflict 可取回]/verify[最严重，导出审计+manifest 提 issue]），failures 上限 50 条防报告膨胀（全量计数在 stageCounts）；③阈值参数化（M2=0.95 默认 / M12=0.999），ps1 增 `-MinRatio`（InvariantCulture 传参，防 zh-CN 之外 locale 逗号小数点破坏参数）。
+- **关键结论**：①**M12 门禁 PASS：1000/1000 = 100% ≥ 99.9%（release，19.3s，零失败）**——P2-02 还原引擎（同盘 rename/跨盘 copy_verify_delete/mtime 回写/state 迁移）在千次规模无劣化，T-2 四重校验零误拒；②沙箱自测对"冲突兜底"路径覆盖不到（样本原路径必空闲，Conflict 分支由 restore 单测覆盖）——千次口径主要验证主路径稳定性，已在报告 stageCounts 空=无失败佐证。
+- **验证**：cargo fmt/clippy -D warnings/test 全绿（167 passed）；M12 evidence `docs/verify/restore-1000.json`（gatePass=true）；冒烟 100 次 debug 2.3s。
+- **下一步**：P4-06 签名与发布流水线 R26（SignPath 占位包+可重复构建+update-manifest 生成+体积断言；顺带定稿 REPO_SLUG 与崩溃上传端点、处置审计 I-1/I-2/I-3/I-4）。遗留：P3-04/P3-06/P4-02 评审关卡人类正式评审仍欠。
+
 ## 2026-10-04 | P4-04 测试体系 R21 交付（黄金集 132 样本两阶段门禁 + T-4 白名单加固收口 + VM 回归手册）
 
 - **做了什么**：①`golden-misdelete-test` 全量重写——fixture 生成器声明式五族 132 样本（safe 48 极端命名 8 / temp 43 含只读 4·零字节 2·长路径深层 / dup 21 十组判重 / red 13），三档 target 内守卫使误删率分母非平凡（黄/红各 1）；测试升级两阶段：扫描期（分档误删率+防漏扫+junction 零跟随）+ **清理期**（绿/direct 真实 `resolve_targets→execute` 全链路，数据根注入沙箱，盘面核对 must_keep 缺失=真误删、只读/长路径按 Win32 语义优雅失败留盘、journal 零孤儿）；②**安全审计 T-4 收口**：白名单段级归一（双侧共用：`..`/`.` 段解析、逐段剥尾随点/空格）+ XML 根 8.3 短名 `GetLongPathNameW` 展开，golden 四形态守卫进门禁全 protected；③`tools/vm-regression.md`（微软开发版 VM 快照步骤：10 步清理场景+9 项重启点检+记录模板）。
