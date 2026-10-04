@@ -17,6 +17,11 @@ pub fn expand_target(target: &Target) -> Option<PathBuf> {
     };
     match p {
         Some(p) if p.as_os_str().is_empty() => None,
+        // P4-06：短名 target 归一为长名——提权运行时 MFT 引擎产物为长名路径
+        // （MFT 存长名），若 target 来自短名形态环境变量（如 CI 的
+        // %TEMP%=C:\Users\RUNNER~1\...），字符串前缀匹配会整体失配（实测扫描
+        // 0 项）。展开失败（目录不存在/无短名形态）保留原值，行为不变。
+        Some(p) => Some(crate::safety::whitelist::normalize_to_long_path(&p)),
         other => other,
     }
 }
@@ -155,6 +160,37 @@ mod tests {
             value: "  ".into(),
         };
         assert!(expand_target(&t).is_none());
+    }
+
+    #[test]
+    fn short_name_target_normalizes_to_long() {
+        // P4-06（CI 提权环境实测）：短名 target（如 %TEMP% = C:\Users\RUNNER~1\...）
+        // 必须归一为长名——否则 MFT 引擎（长名产物）的前缀匹配整体失配。
+        // 用真实临时目录造短名形态验证：本卷禁用 8.3 时退化为原样（行为不变）。
+        let dir = std::env::temp_dir().join(format!(
+            "pureslate-expand-short-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        let long = dir.join("ОченьДлинноеИмяКаталога").join("文件_样本.tmp");
+        std::fs::create_dir_all(long.parent().unwrap()).unwrap();
+        std::fs::write(&long, "x").unwrap();
+        let t = Target {
+            ty: TargetType::Path,
+            value: long.to_string_lossy().into_owned(),
+        };
+        let expanded = expand_target(&t).expect("长名 target 应正常展开");
+        assert!(
+            !expanded.to_string_lossy().contains('~'),
+            "展开结果不应含短名段: {}",
+            expanded.display()
+        );
+        assert!(expanded.exists(), "归一后路径必须仍指向真实文件");
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]

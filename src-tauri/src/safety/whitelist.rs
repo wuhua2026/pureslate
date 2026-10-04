@@ -93,6 +93,14 @@ pub fn set_xml_roots(roots: Vec<PathBuf>) {
     *guard = Some(norm);
 }
 
+/// 短名路径 best-effort 归一为长名（失败返回原路径，调用方语义不变）。
+/// 供两处使用：①`set_xml_roots` 白名单根展开；②scanner target 归一——提权时
+/// MFT 引擎产物为长名路径（MFT 存长名），短名 target 会使前缀匹配整体失配
+/// （CI 提权环境实测：扫描 0 项）。
+pub(crate) fn normalize_to_long_path(p: &Path) -> PathBuf {
+    expand_short_name(p).unwrap_or_else(|| p.to_path_buf())
+}
+
 /// 8.3 短名 → 长名（Windows；失败返回 None）。非 Windows 恒 None。
 #[cfg(windows)]
 fn expand_short_name(p: &Path) -> Option<PathBuf> {
