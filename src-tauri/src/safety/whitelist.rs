@@ -470,10 +470,7 @@ mod tests {
                 .map(|p| p.to_string_lossy().into_owned())
                 .collect::<Vec<_>>()
         );
-        eprintln!(
-            "[t4-short-diag] long_segs={:?}",
-            normalize_segments(&long)
-        );
+        eprintln!("[t4-short-diag] long_segs={:?}", normalize_segments(&long));
         assert!(
             is_whitelisted(&long),
             "短名声明的白名单根必须展开为长名后命中"
