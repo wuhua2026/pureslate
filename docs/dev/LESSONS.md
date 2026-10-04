@@ -6,6 +6,12 @@
 
 ## ① 踩坑记录
 
+### 提权环境（MFT 引擎）+ 短名 target：前缀匹配整体失配致扫描 0 项（2026-10-04，P4-06 CI 首跑揭出）
+- 现象：本地全绿，CI（windows-latest，runner 自带管理员提权）上 compat 八项边界集成测试全挂——「中文名文件必须命中: []」等，扫描 0 项产出。
+- 根因链：①CI runner 提权 → `is_elevated()`=true → **MFT 直读引擎启用**（本地非提权走 walkdir，从未在 MFT 下跑过集成测试）；②MFT 存储的是**长名**，USN 解析出的路径全为长名形态（`C:\Users\runneradmin\...`）；③CI 的 `%TEMP%` 环境变量本身是**短名形态**（`C:\Users\RUNNER~1\...`）→ compat 规则 target 展开为短名 → MFT 长名产物对短名 target 做字符串前缀匹配 → 整体失配 → 0 命中。P1-02b 的「MFT 幂等于 walk 语义」假设漏了短名归一。
+- 修复（三层，全部 best-effort 单点化于 `safety/whitelist.rs`）：①`normalize_to_long_path`（新导出）供 `scanner/expand::expand_target` 把 target 归一为长名（与 MFT 产物一致）；②白名单**候选侧**短名展开——`is_whitelisted` 仅当路径含 `~N` 段时展开（常规长名路径零额外系统调用，扫描热路径无感），长/短两形态都判定；③白名单**根侧**展开（P4-04 已有 `set_xml_roots`）。诊断技巧：给失败测试加 `eprintln!` 推 CI 看真实路径形态，一次定位（original/short/expand/roots 四行对比）。
+- 复利结论：①**提权是测试矩阵的一个隐藏维度**——MFT/walkdir 双引擎行为差异只有提权 runner 才能暴露，本地非提权永远测不到；②「字符串前缀匹配」类安全逻辑必须先归一再比较，短名/长名/正斜杠/`\\?\` 全是同族形态（本条是白名单失配家族第 4 例）；③环境变量来源的路径**不要假设形态**（CI 连 %TEMP% 都是短名）。
+
 ### 本地 NSIS 打包：tauri 首次打包下载工具链走 GitHub 超时（2026-10-04，P4-06）
 - 现象：本地 `pnpm tauri build --bundles nsis` 在 "Verifying NSIS package" 处下载 `nsis-3.11.zip` 超时（`timeout: global`），与 P0-06 的 WiX 下载受限同因（网络环境）。
 - 边界澄清：CI windows-latest 上同一命令一直绿（NSIS 下载无碍）——**"本地不能打包"≠"流水线不能打包"**，安装包产物验证以 CI 为准（LESSONS §③ 既有结论的 NSIS 版）。

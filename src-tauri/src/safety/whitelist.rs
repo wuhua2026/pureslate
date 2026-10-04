@@ -490,23 +490,14 @@ mod tests {
             let _ = std::fs::remove_dir_all(&dir);
             return; // 该卷无 8.3：本用例不适用
         };
-        eprintln!("[t4-short-diag] original={}", long.to_string_lossy());
-        eprintln!("[t4-short-diag] short={}", short.to_string_lossy());
-        let expanded = expand_short_name(&short);
-        eprintln!(
-            "[t4-short-diag] expand={}",
-            expanded
-                .as_ref()
-                .map(|p| p.to_string_lossy().into_owned())
-                .unwrap_or_else(|| "None".into())
-        );
+        // ① 声明侧：白名单根以短名声明（P4-04 T-4），展开后须命中长名候选。
         set_xml_roots(vec![short.clone()]);
         assert!(
             is_whitelisted(&long),
             "短名声明的白名单根必须展开为长名后命中"
         );
-        // 镜像形态（P4-06 CI 实测补全）：候选本身带短名段（如 CI 的 %TEMP%）时
-        // 候选侧也要展开——短名候选 vs 长名 root 必须命中。
+        // ② 镜像形态（P4-06 CI 实测补全）：候选本身带短名段（如 CI 的 %TEMP%）时
+        //    候选侧也要展开——短名候选 vs 长名 root 必须命中。
         assert!(
             is_whitelisted(&short),
             "短名候选（展开后与长名 root 同指）必须命中"

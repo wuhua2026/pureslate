@@ -5,6 +5,14 @@
 > 维护（AGENTS.md §9）：任务完成时 agent 自动追加/更新当前会话条目，随任务同一提交。格式：`## YYYY-MM-DD | 主题`。
 > 本初版由历史会话记忆回溯整理（截至 2026-09-29），细节以 git 历史与 TASKS.md 为准。
 
+## 2026-10-04 | CI 首跑全绿 + 揭出并修复「提权 MFT × 短名 target」真 bug
+
+- **做了什么**：①公开仓库 `wuhua2026/pureslate` 创建并推送 main（历史 32 提交统一改写为 GitHub noreply 邮箱——邮箱隐私限制拒绝真实邮箱 push；TASKS/SESSIONS 内 hash 引用同步更新）；②`updates::REPO_SLUG` 定稿 `wuhua2026/pureslate`（P4-06 占位②收口）；③CI 首跑四轮排障至全绿。
+- **CI 排障链（四轮，每一轮都是真收获）**：①`t4_short` 失败 → `GetLongPathNameW` 的 NULL/0 two-call 惯用法在 CI 返回 0（本地碰巧成功）→ 改固定足量缓冲单次调用（LESSONS ① 同族第 2 例）；②fmt check 挂 → 手写诊断代码没跑 cargo fmt 就提交（纪律：fmt 是 AGENTS 命令清单第一项不是可选项）；③compat 八项边界全挂「扫描 0 项」→ **真 bug**：CI 提权 → MFT 引擎启用 → MFT 长名产物 vs `%TEMP%` 短名形态 target 前缀匹配整体失配（本地非提权永远走 walkdir 测不出）→ 三层修复：target 归一为长名（`normalize_to_long_path` 供 expand_target 复用）+ 白名单候选侧含 `~N` 段才展开（零热路径开销）+ 根侧展开（P4-04 已有）；④rsproxy.cn 镜像在海外 runner 上连接被断 → 移除（Actions 应使用 rustup 官方源）。诊断利器：测试内 eprintln 推 CI 看真实路径形态，一轮定位。
+- **关键结论**：①**提权是测试矩阵的隐藏维度**——MFT/walkdir 双引擎差异只有提权 runner 能暴露，这正是 CI 的不可替代价值（P4-07 社区评审同类逻辑：外部眼睛看本地看不见的东西）；②白名单失配家族第 4 例（正斜杠/尾随点/`..`/短名），根因都是「先比较后归一」；③CI 三 job 全绿 = **CI 真实产出 NSIS 安装包且通过 <20MB 门禁**（P4-06 DoD 的 CI 侧完全达成，pnpm tauri build --bundles nsis 在 Actions 上验证可用）。
+- **验证**：本地 cargo 170/0 两连绿 + clippy 零警告；CI run 37217076151 **全绿**（Rust fmt/clippy/test + Frontend + Tauri package+size gate 三 job）。
+- **下一步**：P4-07 [HUMAN] 社区公开评审（破坏面五模块 + review 文档发 V2EX/Rust 社区）。人类待办：SignPath 开源计划申请（以公开仓库为前提）、崩溃上传后端决策、CSP 真机走查。
+
 ## 2026-10-04 | 仓库公开化：wuhua2026/pureslate 创建并推送 main，REPO_SLUG 定稿
 
 - **做了什么**：用户确认后创建 GitHub 公开仓库 `wuhua2026/pureslate` 并推送 main（32 提交全量）；`updates::REPO_SLUG` 常量定稿 `wuhua2026/pureslate`（与发布侧 GITHUB_REPOSITORY 对齐，P4-06 占位②收口）；release.yml 头注释与 TASKS 备注同步。
