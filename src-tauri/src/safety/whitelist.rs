@@ -96,8 +96,9 @@ pub fn set_xml_roots(roots: Vec<PathBuf>) {
 /// 8.3 短名 → 长名（Windows；失败返回 None）。非 Windows 恒 None。
 #[cfg(windows)]
 fn expand_short_name(p: &Path) -> Option<PathBuf> {
-    // unsafe：GetLongPathNameW 两次调用（尺寸查询+取值）；仅读取传入路径，
-    // 不做任何文件系统变更。kernel32 默认链接。
+    // unsafe：GetLongPathNameW 单次调用（固定足量缓冲）。kernel32 默认链接。
+    // 注意：不用 NULL/0 two-call 惯用法——本机实测该 API 对 NULL 缓冲不可靠
+    // （CI 上返回 0 导致展开静默失败；LESSONS ① GetShortPathNameW 同族教训）。
     unsafe extern "system" {
         fn GetLongPathNameW(
             lpsz_short_path: *const u16,
@@ -110,19 +111,14 @@ fn expand_short_name(p: &Path) -> Option<PathBuf> {
         .encode_utf16()
         .chain(std::iter::once(0))
         .collect();
-    unsafe {
-        let need = GetLongPathNameW(wide.as_ptr(), std::ptr::null_mut(), 0);
-        if need == 0 {
-            return None;
-        }
-        let mut buf = vec![0u16; need as usize];
-        let written = GetLongPathNameW(wide.as_ptr(), buf.as_mut_ptr(), need);
-        if written == 0 || written >= need {
-            return None;
-        }
-        buf.truncate(written as usize);
-        Some(PathBuf::from(String::from_utf16_lossy(&buf)))
+    const CAP: usize = 4096;
+    let mut buf = vec![0u16; CAP];
+    let written = unsafe { GetLongPathNameW(wide.as_ptr(), buf.as_mut_ptr(), CAP as u32) };
+    if written == 0 || written as usize >= CAP {
+        return None; // 失败或缓冲不足（极端长路径保守放弃，退回原形式）
     }
+    buf.truncate(written as usize);
+    Some(PathBuf::from(String::from_utf16_lossy(&buf)))
 }
 
 #[cfg(not(windows))]

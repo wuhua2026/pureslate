@@ -93,10 +93,11 @@
 
 ## ① 踩坑记录
 
-### GetShortPathNameW 两处坑：NULL/0 查询惯用法不可靠 + 必须先有文件再查询（2026-10-04，P4-04）
+### GetShortPathNameW / GetLongPathNameW：NULL/0 查询惯用法不可靠 + 必须先有文件再查询（2026-10-04，P4-04/P4-06）
 - 现象：golden 短名守卫 `shortNameAvailable` 恒 false，但 FSO 探针证明本卷 8.3 是启用的（`PURESL~1.TXT` 存在）。
 - 根因一：照搬 GetLongPathNameW 的 two-call 惯用法（NULL 缓冲 + 0 取所需尺寸）对 GetShortPathNameW 行为微妙不可靠；且我写的启发式 `need <= wide.len()` 方向反了——**短名必然短于长名**，该条件恰好把成功情形拒掉。
 - 修复：分配足量缓冲单次调用，返回串**与原串比较**——相同 = 无短形态（该 API 对无短名的路径原样返回），不同 = 短形态。根因二：查询发生在守卫文件创建之前（查询不存在的路径恒失败）——先创建再查询。
+- CI 实锤（P4-06）：同族的 **GetLongPathNameW** 用 NULL/0 two-call 在本地碰巧成功、CI 上返回 0 → 8.3 展开静默失败 → t4_short 测试挂——同一坑同族 API 再踩一次后彻底改为固定足量缓冲单次调用。
 - 复利结论：①Win32 "query size then call" 两段式惯用法不是普适模式，逐 API 核实语义；②"返回串与输入比较"是判有无短形态的唯一稳法；③FSO（Scripting.FileSystemObject）的 ShortPath 是免管理员验证 8.3 是否启用的探针（fsutil 8dot3name query 需要提权）。
 
 ### 共享全局的单测并行竞态会潜伏到扰动增加才爆发（2026-10-04，P4-04）
