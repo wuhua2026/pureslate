@@ -5,6 +5,13 @@
 > 维护（AGENTS.md §9）：任务完成时 agent 自动追加/更新当前会话条目，随任务同一提交。格式：`## YYYY-MM-DD | 主题`。
 > 本初版由历史会话记忆回溯整理（截至 2026-09-29），细节以 git 历史与 TASKS.md 为准。
 
+## 2026-10-04 | P4-04 测试体系 R21 交付（黄金集 132 样本两阶段门禁 + T-4 白名单加固收口 + VM 回归手册）
+
+- **做了什么**：①`golden-misdelete-test` 全量重写——fixture 生成器声明式五族 132 样本（safe 48 极端命名 8 / temp 43 含只读 4·零字节 2·长路径深层 / dup 21 十组判重 / red 13），三档 target 内守卫使误删率分母非平凡（黄/红各 1）；测试升级两阶段：扫描期（分档误删率+防漏扫+junction 零跟随）+ **清理期**（绿/direct 真实 `resolve_targets→execute` 全链路，数据根注入沙箱，盘面核对 must_keep 缺失=真误删、只读/长路径按 Win32 语义优雅失败留盘、journal 零孤儿）；②**安全审计 T-4 收口**：白名单段级归一（双侧共用：`..`/`.` 段解析、逐段剥尾随点/空格）+ XML 根 8.3 短名 `GetLongPathNameW` 展开，golden 四形态守卫进门禁全 protected；③`tools/vm-regression.md`（微软开发版 VM 快照步骤：10 步清理场景+9 项重启点检+记录模板）。
+- **关键结论**：①**T-4 定级"低（声明健壮性）"**——候选侧由 walkdir 长名产物保证，攻击面在白名单声明侧；加固只收紧不放宽（四种书写形式从"保护静默丢失"变"命中"），匹配逻辑变更按 SAFETY §2 纪律出评审关卡 `docs/review/P4-04.md`；②**GetShortPathNameW 返回值坑**：NULL/0 尺寸查询惯用法（GetLongPathNameW 同族）在此不可靠，且短名必短于长名——"足量缓冲单次调用+与原串比较（相同=无短形态）"才稳；守卫样本必须先创建后查询短名；③whitelist 单测共享 XML_ROOTS 的并行竞态（旧用例靠运气绿）→ 全局测试锁（LESSONS ① 同型第 2 例）；④黄/红隔离区去向在 golden 中不可注入（`quarantine_root_of` 真实卷根）→ 仅扫描期度量，边界已在头注释声明；⑤只读文件 DeleteFileW 必失败（ACCESS_DENIED）、>260 字符路径 DeleteFileW 失败而 std fs::操作内部处理长路径——两条 Win32 硬边界成为 golden 的确定性断言。
+- **验证**：cargo fmt/clippy -D warnings/test 全绿（167 passed，whitelist +4）；golden 复跑 pass=true（132 样本，rates 0/0/0，guardsSwept=[]，T-4 四形态 protected，clean executed=43/ok=38/fail=5 预期内/orphans=0）；pnpm typecheck/vitest(55)/build 全绿；证据 `docs/verify/golden-misdelete.json`。
+- **下一步**：P4-05 M12 千次还原（`tools/test-restore.ps1` 全量 1000 次 ≥99.9%，报告 docs/verify/restore-1000.json）。遗留：I-1/I-2（审计"前小修"）仍未归属任务，建议随 P4-06 发布前处理。
+
 ## 2026-10-04 | P4-03 崩溃安全 R24 交付（minidump + T-6 孤儿恢复 + opt-in 上传预览）
 
 - **做了什么**：`crash/{mod,dump,parse,recover}` 四模块——dump：SEH 顶级过滤器 + panic hook 双通道，dbghelp `MiniDumpWriteDump` `#[link]` 直调（零依赖），落 `<data_root>\crash\` 保留 5 份；recover：启动孤儿 journal 恢复（T-6 协议先行定稿：journal 只定位 manifest 记录绝不按 journal 路径动手，quarantine 孤儿经 restore_one T-2 四重校验还原，「已移入未登记」崩溃窗口按 `<sha8>_<原名>` 约定反查**唯一**未登记候选补登记（🟡/crash.recovered，不自动还原），direct/recycle 不可逆只标记 orphan+审计；恢复期 `clean_execute` 拒绝新事务）；parse：minidump 头/目录/模块流/异常流只读解析（checked 偏移，畸形返回 Err）；四命令 `crash_list/preview/upload/recovery` 加性契约 + `http_post` + Settings 崩溃卡片 + Home 恢复横幅；`bin/crash-sim` + `tests/crash_safety.rs` 4 例（kill/SEH/panic/dump）。

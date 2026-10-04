@@ -47,9 +47,14 @@
 - **验证**：cargo fmt/clippy --all-targets -D warnings/test 全绿（127 单测+20 集成，tests/compat 八项边界 12 例）；pnpm typecheck/vitest(47)/build 全绿。评审文档 docs/review/P4-02.md。
 
 ### 崩溃安全 R24（P4-03）
-
 - **契约加性变更（双端同步 + 记此日志）**：新增命令 `crash_list`（— → `CrashDumpInfo[]`）、`crash_preview`（`{fileName}` → `CrashDumpPreview`）、`crash_upload`（`{fileName}` → `CrashUploadReport`，opt-in 门禁）、`crash_recovery`（— → `CrashRecoveryReport`）及配套类型；ipc.ts ↔ contract.rs ↔ api/commands.ts 三端一致；既有命令签名零改动。
 - **minidump 本地落盘**（`crash/dump`）：dbghelp `MiniDumpWriteDump` `#[link]` 直调（零依赖，AGENTS §4.7）；SEH 顶级过滤器 + panic hook 双通道；SEH 通道经辅助线程写 dump、异常代码经 sidecar JSON 携带（本机环境异常流路径不可用，见 LESSONS）；dump 保留最近 5 份（启动清理）。
 - **启动孤儿 journal 恢复**（`crash/recover`，安全审计 T-6 协议）：journal 内容只用于定位 manifest 记录——quarantine 孤儿经 `restore_one`（T-2 四重校验）还原；「已移入未登记」崩溃窗口按命名约定反查唯一候选补登记（不自动还原）；direct/recycle 不可逆去向只标记 orphan + 审计；恢复期间 `clean_execute` 拒绝新事务（`AppState.recovery_pending` 门闸）。
 - **opt-in 上传预览 UI**：Settings 页崩溃数据卡片（optIn 开关 + 本地转储列表 + 预览[模块列表/异常代码] + 手动上传）；Home 页启动恢复横幅；`updates/http` 增 `http_post`（上传通道，仅 R24 opt-in 联网，红线 #4 边界内）。
 - **验证**：cargo fmt/clippy --all-targets -D warnings/test 全绿（140 lib + 24 集成，crash_safety 4 例：kill 中断恢复/SEH/panic/dump）；pnpm typecheck/vitest(55)/build 全绿。评审文档 docs/review/P4-03.md。
+
+### 测试体系 R21（P4-04）
+
+- **白名单匹配加固（安全审计 T-4 收口，匹配逻辑变更走评审关卡 docs/review/P4-04.md）**：`safety/whitelist` 段级归一（双侧共用）——`..`/`.` 段文本化解析、逐段剥尾随点/空格；XML 附加根加载时 8.3 短名 `GetLongPathNameW` 展开（长短并存）。**只收紧不放宽**：旧行为下四种声明书写形式会导致保护静默丢失，现全部命中；扫除候选只减不增。
+- **黄金文件集扩至 132 样本**（fixture 生成器，原 36 项）：五族 + 三档 target 内守卫（黄/红档误删率分母非平凡）+ T-4 四形态守卫；测试升级为两阶段门禁（扫描期分档误删率 + 清理期真实 execute 盘面核对）。
+- **验证**：cargo fmt/clippy -D warnings/test 全绿（167 passed，whitelist +4）；误删率复跑 绿/黄/红 = 0/0/0（docs/verify/golden-misdelete.json）；pnpm typecheck/vitest(55)/build 全绿。

@@ -72,9 +72,62 @@ static XML_ROOTS: Mutex<Option<Vec<PathBuf>>> = Mutex::new(None);
 
 /// 替换/清空 XML 附加白名单根（幂等；调用方在启动/扫描时加载一次）。
 /// 传空切片等价于清空附加根，仅保留常量根。
+///
+/// **T-4 声明侧加固（P4-04，安全审计「白名单字符串旁路形态」）**：声明若以 8.3
+/// 短名书写（`PROGRA~1`/`GUARD~1.KEE` 等），长名候选永不匹配 → 保护静默丢失。
+/// 加载时对每条根做 `GetLongPathNameW` 展开（best-effort：文件不存在/卷禁用 8.3
+/// 时保留原形式），长短两种形式并存——匹配只会更保守，不会更宽松。
 pub fn set_xml_roots(roots: Vec<PathBuf>) {
+    let mut norm: Vec<PathBuf> = Vec::with_capacity(roots.len() * 2);
+    for r in roots {
+        if let Some(long) = expand_short_name(&r) {
+            if long != r && !norm.contains(&long) {
+                norm.push(long);
+            }
+        }
+        if !norm.contains(&r) {
+            norm.push(r);
+        }
+    }
     let mut guard = XML_ROOTS.lock().expect("whitelist xml roots lock poisoned");
-    *guard = Some(roots);
+    *guard = Some(norm);
+}
+
+/// 8.3 短名 → 长名（Windows；失败返回 None）。非 Windows 恒 None。
+#[cfg(windows)]
+fn expand_short_name(p: &Path) -> Option<PathBuf> {
+    // unsafe：GetLongPathNameW 两次调用（尺寸查询+取值）；仅读取传入路径，
+    // 不做任何文件系统变更。kernel32 默认链接。
+    unsafe extern "system" {
+        fn GetLongPathNameW(
+            lpsz_short_path: *const u16,
+            lpsz_long_path: *mut u16,
+            cch_buffer: u32,
+        ) -> u32;
+    }
+    let wide: Vec<u16> = p
+        .to_string_lossy()
+        .encode_utf16()
+        .chain(std::iter::once(0))
+        .collect();
+    unsafe {
+        let need = GetLongPathNameW(wide.as_ptr(), std::ptr::null_mut(), 0);
+        if need == 0 {
+            return None;
+        }
+        let mut buf = vec![0u16; need as usize];
+        let written = GetLongPathNameW(wide.as_ptr(), buf.as_mut_ptr(), need);
+        if written == 0 || written >= need {
+            return None;
+        }
+        buf.truncate(written as usize);
+        Some(PathBuf::from(String::from_utf16_lossy(&buf)))
+    }
+}
+
+#[cfg(not(windows))]
+fn expand_short_name(_p: &Path) -> Option<PathBuf> {
+    None
 }
 
 /// 当前生效的 XML 附加根（尚未加载时为默认空集）。
@@ -155,10 +208,12 @@ pub fn load_from_dir(rules_dir: &Path) -> Result<(), WhitelistError> {
 /// 但 `C:\Boot`、`C:\EFI`、`C:\Recovery`、`System Volume Information`、
 /// `$Recycle.Bin` 均不可触碰。
 pub fn is_whitelisted(path: &Path) -> bool {
-    // 候选路径与白名单根两侧必须同规（/ → \ + 小写）：规则 XML 常以正斜杠声明
-    // target，walkdir 产物为混合分隔符路径；此前候选侧只小写不归一，会导致
-    // 段级前缀匹配整体失配 → 白名单被绕过（2026-09-29 黄金集扩测发现）。
-    let p_lower = normalize_lower(path);
+    // 候选路径与白名单根两侧共用段级归一（T-4，P4-04）：`/`→`\` + 小写 +
+    // `\\?\` 剥离 + `..`/`.` 段文本化解析 + 逐段去尾随点/空格——任何一侧的
+    // 书写形式差异都不再造成保护缺口（此前仅分隔符+小写归一，2026-09-29 曾
+    // 因正斜杠失配整体绕过；同族形态见安全审计 T-4）。
+    let p_segs = normalize_segments(path);
+    let p_lower = p_segs.join("\\");
 
     // §2.3 盘根下的系统/引导卷信息目录（必须最优先判断，早于 roots 前缀）。
     if let Some(drive) = drive_letter(&p_lower) {
@@ -213,17 +268,17 @@ pub fn is_whitelisted(path: &Path) -> bool {
     }
 
     // 其余白名单根：常量根 + XML 附加根，段级前缀匹配（避免 `C:\a` 误配 `C:\ab`）。
-    if any_root_matches(&p_lower, const_roots()) {
+    if any_root_matches(&p_segs, const_roots()) {
         return true;
     }
-    any_root_matches(&p_lower, &xml_roots())
+    any_root_matches(&p_segs, &xml_roots())
 }
 
-/// 段级前缀匹配任一白名单根。
-fn any_root_matches(p_lower: &str, roots: &[PathBuf]) -> bool {
+/// 段级前缀匹配任一白名单根（根侧同样走共用归一，T-4）。
+fn any_root_matches(path_segs: &[String], roots: &[PathBuf]) -> bool {
     roots
         .iter()
-        .any(|root| prefix_matches(p_lower, &normalize_lower(root)))
+        .any(|root| prefix_matches(path_segs, &normalize_segments(root)))
 }
 
 /// 提取路径的盘符部分（小写），无盘符返回 None。
@@ -238,28 +293,42 @@ fn drive_letter(p_lower: &str) -> Option<String> {
     None
 }
 
-/// 将路径规范化为小写、`/`→`\`、去掉末尾反斜杠，并剥掉 `\\?\` 扩展长度前缀
-/// （P4-02 长路径边界：`\\?\C:\Windows\...` 必须同样命中 `C:\Windows` 白名单根）。
-fn normalize_lower(p: &Path) -> String {
+/// 段级归一（白名单根与候选路径**两侧共用**，T-4 · P4-04）：
+/// `\\?\` 前缀剥离、`/`→`\`、小写、跳过空段与 `.` 段、`..` 段文本化弹栈、
+/// 逐段剥 Windows 创建时会被 Win32 吃掉的尾随点/空格（`guard.keep.` 与
+/// `guard.keep` 在 NTFS 语义上是同一个名字）。
+/// 保护方向单调：归一只会让两侧**更容易对上**（更保守），不会扩大扫除面。
+fn normalize_segments(p: &Path) -> Vec<String> {
     let s = p.to_string_lossy();
     let s = s.strip_prefix(r"\\?\").unwrap_or(&s);
     let s = s.replace('/', "\\");
-    s.trim_end_matches('\\').to_lowercase()
+    let mut out: Vec<String> = Vec::new();
+    for raw in s.split('\\') {
+        if raw == ".." {
+            out.pop();
+            continue;
+        }
+        let seg = raw.trim_end_matches(['.', ' ']);
+        if seg.is_empty() || seg == "." {
+            continue;
+        }
+        out.push(seg.to_lowercase());
+    }
+    out
 }
 
-/// 段级前缀匹配：`base_lower` 的每一个 `\` 段都必须与 `path_lower` 对应段一致。
-fn prefix_matches(path_lower: &str, base_lower: &str) -> bool {
-    let path_segs: Vec<&str> = path_lower.split('\\').filter(|s| !s.is_empty()).collect();
-    let base_segs: Vec<&str> = base_lower.split('\\').filter(|s| !s.is_empty()).collect();
-    if base_segs.len() > path_segs.len() {
-        return false;
-    }
-    base_segs.iter().zip(&path_segs).all(|(b, p)| b == p)
+/// 段级前缀匹配：`base_segs` 的每一段都必须与 `path_segs` 对应段一致。
+fn prefix_matches(path_segs: &[String], base_segs: &[String]) -> bool {
+    base_segs.len() <= path_segs.len() && base_segs.iter().zip(path_segs).all(|(b, p)| b == p)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// XML_ROOTS 全局测试锁：触碰 set_xml_roots 的用例必须持锁整个测试体
+    /// （并行竞态会互相清根，LESSONS ① 模式）。
+    static XML_ROOTS_LOCK: Mutex<()> = Mutex::new(());
 
     #[test]
     fn whitelists_system_root() {
@@ -275,10 +344,125 @@ mod tests {
     fn does_not_whitelist_sibling() {
         // 段级前缀：`C:\Windows32` 不应被 `C:\Windows` 白名单根误配。
         // 直接测段级前缀函数，避免依赖运行环境的具体变量。
-        assert!(prefix_matches(r"c:\windows\system32", r"c:\windows"));
-        assert!(!prefix_matches(r"c:\windows32\system32", r"c:\windows"));
-        assert!(!prefix_matches(r"c:\windo", r"c:\windows"));
-        assert!(prefix_matches(r"c:\windows", r"c:\windows"));
+        let segs = |p: &str| normalize_segments(Path::new(p));
+        assert!(prefix_matches(
+            &segs(r"c:\windows\system32"),
+            &segs(r"c:\windows")
+        ));
+        assert!(!prefix_matches(
+            &segs(r"c:\windows32\system32"),
+            &segs(r"c:\windows")
+        ));
+        assert!(!prefix_matches(&segs(r"c:\windo"), &segs(r"c:\windows")));
+        assert!(prefix_matches(&segs(r"c:\windows"), &segs(r"c:\windows")));
+    }
+
+    #[test]
+    fn t4_dot_and_dotdot_segments_resolve() {
+        // T-4（P4-04）：声明含 `.`/`..` 段时必须文本化解析，否则保护静默丢失
+        // （旧归一只处理分隔符+小写，`..` 段使段级前缀永不匹配）。
+        let _g = XML_ROOTS_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        set_xml_roots(vec![PathBuf::from(
+            r"C:\Users\u\AppData\Local\Temp\keep\sub\.\guard.dat",
+        )]);
+        assert!(
+            is_whitelisted(Path::new(
+                r"C:\Users\u\AppData\Local\Temp\keep\sub\guard.dat"
+            )),
+            "`.` 段声明必须解析后命中"
+        );
+        set_xml_roots(vec![PathBuf::from(
+            r"C:\Users\u\AppData\Local\Temp\keep\sub\..\guard2.dat",
+        )]);
+        assert!(
+            is_whitelisted(Path::new(r"C:\Users\u\AppData\Local\Temp\keep\guard2.dat")),
+            "`..` 段声明必须弹栈后命中"
+        );
+        set_xml_roots(vec![]);
+    }
+
+    #[test]
+    fn t4_trailing_dot_or_space_segments_normalize() {
+        // T-4（P4-04）：Win32 创建路径会吃掉段尾点/空格——`guard.dat.` 与
+        // `guard.dat` 在 NTFS 语义上同名；声明或候选任一侧带尾随点时必须命中。
+        let _g = XML_ROOTS_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        set_xml_roots(vec![PathBuf::from(
+            r"C:\Users\u\AppData\Local\Temp\keep\guard3.dat.",
+        )]);
+        assert!(
+            is_whitelisted(Path::new(r"C:\Users\u\AppData\Local\Temp\keep\guard3.dat")),
+            "声明尾随点必须归一后命中"
+        );
+        // 反向：候选带字面尾随点（经 \\?\ 创建的罕见形态）同样命中同一声明。
+        assert!(
+            is_whitelisted(Path::new(r"C:\Users\u\AppData\Local\Temp\keep\guard3.dat.")),
+            "候选字面尾随点必须归一后命中"
+        );
+        set_xml_roots(vec![PathBuf::from(
+            r"C:\Users\u\AppData\Local\Temp\keep\guard4 .dat",
+        )]);
+        assert!(
+            is_whitelisted(Path::new(r"C:\Users\u\AppData\Local\Temp\keep\guard4 .dat")),
+            "段内空格不受影响（只剥段尾）"
+        );
+        set_xml_roots(vec![]);
+    }
+
+    #[test]
+    fn t4_short_name_declaration_expands_to_long() {
+        // T-4（P4-04）：8.3 短名声明的白名单根必须经 GetLongPathNameW 展开为
+        // 长名并存，否则长名候选永不匹配（保护静默丢失）。卷禁用 8.3 时跳过。
+        let _g = XML_ROOTS_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let dir = std::env::temp_dir().join(format!(
+            "pureslate-wl-short-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        let long = dir.join("ОченьДлинноеИмяФайла_样本.dat");
+        std::fs::write(&long, b"x").unwrap();
+
+        // unsafe：GetShortPathNameW 查询真实 8.3 短名（仅读取）；kernel32 默认链接。
+        // 判定法：足量缓冲单次调用，返回串与原串相同 = 无短形态（原样返回）。
+        unsafe extern "system" {
+            fn GetShortPathNameW(
+                lpsz_long_path: *const u16,
+                lpsz_short_path: *mut u16,
+                cch_buffer: u32,
+            ) -> u32;
+        }
+        let original = long.to_string_lossy().into_owned();
+        let wide: Vec<u16> = original.encode_utf16().chain(std::iter::once(0)).collect();
+        let cap = wide.len() as u32 + 32;
+        let mut buf = vec![0u16; cap as usize];
+        let short: Option<PathBuf> = unsafe {
+            let written = GetShortPathNameW(wide.as_ptr(), buf.as_mut_ptr(), cap);
+            if written == 0 || written as usize >= buf.len() {
+                None
+            } else {
+                buf.truncate(buf.iter().position(|&c| c == 0).unwrap_or(buf.len()));
+                let s = String::from_utf16_lossy(&buf);
+                if s == original {
+                    None // 无短形态
+                } else {
+                    Some(PathBuf::from(s))
+                }
+            }
+        };
+        let Some(short) = short else {
+            let _ = std::fs::remove_dir_all(&dir);
+            return; // 该卷无 8.3：本用例不适用
+        };
+        set_xml_roots(vec![short]);
+        assert!(
+            is_whitelisted(&long),
+            "短名声明的白名单根必须展开为长名后命中"
+        );
+        set_xml_roots(vec![]);
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]
@@ -294,6 +478,7 @@ mod tests {
     fn volume_root_critical_files_whitelisted_without_xml() {
         // 卷根关键系统文件走常量判定（不依赖 whitelist.xml 加载）：
         // 2026-09-30 真机抽查发现 XML 未加载时 pagefile.sys 漏进 large 候选。
+        let _g = XML_ROOTS_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         set_xml_roots(vec![]);
         for f in [
             "pagefile.sys",
@@ -331,6 +516,7 @@ mod tests {
         // 2026-09-29 黄金集扩测发现：规则 XML 以正斜杠声明 target 时，walkdir 产物
         // 为混合分隔符路径，候选侧若不做分隔符归一，段级前缀匹配整体失配 → 白名单
         // 被绕过。修复后正斜杠路径必须同样命中白名单根。
+        let _g = XML_ROOTS_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         set_xml_roots(vec![PathBuf::from(r"C:\Users\u\AppData\Local\Temp\keep")]);
         assert!(
             is_whitelisted(Path::new(r"C:/Users/u/AppData/Local/Temp/keep/guard.keep")),
@@ -374,6 +560,7 @@ mod tests {
     fn xml_added_root_blocks_path() {
         // 一处常量根未见过的路径：注入 XML 根后应被白名单拦截。
         // （样本避开卷根系统文件名——pagefile.sys 等 2026-09-30 起为常量拦截。）
+        let _g = XML_ROOTS_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         let target = Path::new(r"C:\Users\u\AppData\Local\Temp\keepme.dat");
         set_xml_roots(vec![]);
         assert!(!is_whitelisted(target), "未注入前不应被拦截");

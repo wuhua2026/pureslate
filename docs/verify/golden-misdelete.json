@@ -1,7 +1,8 @@
 {
-  "ts": "2026-09-29T12:04:48Z",
-  "goldenTotal": 37,
-  "mustKeepTotal": 15,
+  "ts": "2026-10-04T07:05:55Z",
+  "goldenTotal": 132,
+  "mustKeepTotal": 56,
+  "mustSweepTotal": 64,
   "fp": {},
   "rates": {
     "green": 0.0,
@@ -13,15 +14,39 @@
     "red": 0.0,
     "yellow": 0.02
   },
-  "tempItems": 15,
-  "dupGroups": 3,
-  "guardSwept": false,
-  "unicodeTempSwept": 3,
-  "readonlySwept": 2,
-  "zeroByteSwept": 1,
-  "longpathSupported": true,
-  "longpathGuardSwept": false,
-  "junctionCreated": true,
-  "junctionFollowed": false,
+  "scan": {
+    "tempItems": 43,
+    "dupCandidates": 10,
+    "redItems": 12,
+    "guardsSwept": [],
+    "extremeTempSwept": 6,
+    "extremeTempTotal": 6,
+    "readonlySwept": 4,
+    "readonlyTotal": 4,
+    "zeroByteSwept": 2,
+    "zeroByteTotal": 2,
+    "longpathSupported": true,
+    "junctionCreated": true,
+    "junctionFollowed": false,
+    "t4": {
+      "dotSegProtected": true,
+      "dotDotProtected": true,
+      "trailingDotProtected": true,
+      "shortNameProtected": true,
+      "shortNameAvailable": true
+    }
+  },
+  "clean": {
+    "executed": 43,
+    "ok": 38,
+    "fail": 5,
+    "skip": 0,
+    "missingMustKeep": [],
+    "tempGone": 38,
+    "tempGoneExpected": 38,
+    "readonlySurvived": 4,
+    "longpathSurvived": true,
+    "journalOrphans": 0
+  },
   "pass": true
 }
