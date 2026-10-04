@@ -8,9 +8,9 @@ on:
 
 env:
   RUSTFLAGS: ""
-  # 国内镜像优先，加速 Actions 上 Rust 工具链下载（SPEC §6.5 镜像回退思想, Actions 环境直接指向镜像）
-  RUSTUP_DIST_SERVER: https://rsproxy.cn
-  RUSTUP_UPDATE_ROOT: https://rsproxy.cn
+  # 说明（P4-06）：曾配置 RUSTUP_DIST_SERVER=rsproxy.cn 以为可"加速"，但 Actions
+  # runner 在海外，连国内镜像反而不稳（2026-10-04 实测连接被远端强制断开致 CI
+  # 假失败）——移除，使用 rustup 官方默认源。
 
 jobs:
   rust-checks:
