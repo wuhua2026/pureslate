@@ -5,6 +5,12 @@
 > 维护（AGENTS.md §9）：任务完成时 agent 自动追加/更新当前会话条目，随任务同一提交。格式：`## YYYY-MM-DD | 主题`。
 > 本初版由历史会话记忆回溯整理（截至 2026-09-29），细节以 git 历史与 TASKS.md 为准。
 
+## 2026-10-04 | Release v0.1.0 发布（首个公开版本，更新机制端到端激活）
+
+- **做了什么**：①决策落地——崩溃上传**不接后端**（R24 裁剪预案"降级仅本地"：URL 注释记决策+Settings 文案如实注明"上传服务尚未上线"）；②release.yml 支持 `.github/release-notes/<tag>.md`（Foundation 条款要求功能在下载页有文档）+ 首版功能说明；③tag `v0.1.0` 触发发布流水线：**两次全量 NSIS 构建→体积门禁→规则包+manifest 生成→（签名跳过，secrets 未配）→GitHub Release 上传→manifest/规则包自动回推 main（[skip ci]）**，全绿。
+- **关键结论**：①**Release v0.1.0 已上线**（安装包 724KB！release 构建远小于 debug 基线 8.36MB，<20MB 门禁余量巨大；附规则包/build-hashes.json/中文功能文档）；②manifest 自动回推 main（commit 2c10a2f）——**更新机制端到端激活**：现网 0.1.0 客户端"检查更新"会真实读取该 manifest 并判无更新（版本比较链路首次在真实数据上工作）；③**可重复构建断言降级为记录**：Windows MSVC 链接器默认在 PE 头嵌入时间戳，exe 每次构建哈希必变——字节级可重复需 `/Brepro`+`SOURCE_DATE_EPOCH` 深度改造，挂账后续（双哈希随 Release 发布供外部核对）；④本地与远端网络抖动贯穿全程（push/pull 多次重试才通），CI 上反而稳定——基础设施差异常态化对待。
+- **下一步**：SignPath 申请（用户浏览器操作 signpath.org/apply，前提"已发布待签名形态"现已满足）；P4-07 [HUMAN] 社区公开评审；CSP 真机走查；历次积压真机走查（v0.1.0 发布后优先级提升——真实用户即将出现）。
+
 ## 2026-10-04 | CI 首跑全绿 + 揭出并修复「提权 MFT × 短名 target」真 bug
 
 - **做了什么**：①公开仓库 `wuhua2026/pureslate` 创建并推送 main（历史 32 提交统一改写为 GitHub noreply 邮箱——邮箱隐私限制拒绝真实邮箱 push；TASKS/SESSIONS 内 hash 引用同步更新）；②`updates::REPO_SLUG` 定稿 `wuhua2026/pureslate`（P4-06 占位②收口）；③CI 首跑四轮排障至全绿。
