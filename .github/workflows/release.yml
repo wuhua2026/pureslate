@@ -7,8 +7,8 @@ name: Release (R26)
 # 占位项（定稿后单点改动，见 TASKS P4-06 备注）：
 # - SignPath 签名：配置 SIGNPATH_API_TOKEN / SIGNPATH_ORG_ID / SIGNPATH_PROJECT_ID
 #   / SIGNPATH_SIGNING_POLICY_SLUG secrets 后自动启用；未配置时产出未签名占位包；
-# - REPO_SLUG：发布侧取 GITHUB_REPOSITORY（真实仓库）；代码侧 updates::REPO_SLUG
-#   常量需同步定稿；
+# - REPO_SLUG：已定稿 wuhua2026/pureslate（发布侧取 GITHUB_REPOSITORY，与
+#   updates/mod.rs 常量一致）；
 # - 崩溃上传端点（crash::CRASH_UPLOAD_URL）：后端定稿后更新。
 
 on:

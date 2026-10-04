@@ -5,6 +5,12 @@
 > 维护（AGENTS.md §9）：任务完成时 agent 自动追加/更新当前会话条目，随任务同一提交。格式：`## YYYY-MM-DD | 主题`。
 > 本初版由历史会话记忆回溯整理（截至 2026-09-29），细节以 git 历史与 TASKS.md 为准。
 
+## 2026-10-04 | 仓库公开化：wuhua2026/pureslate 创建并推送 main，REPO_SLUG 定稿
+
+- **做了什么**：用户确认后创建 GitHub 公开仓库 `wuhua2026/pureslate` 并推送 main（32 提交全量）；`updates::REPO_SLUG` 常量定稿 `wuhua2026/pureslate`（与发布侧 GITHUB_REPOSITORY 对齐，P4-06 占位②收口）；release.yml 头注释与 TASKS 备注同步。
+- **关键结论**：①**GitHub 邮箱隐私限制会拒绝含真实邮箱的 push**（`push declined due to email privacy restrictions`）——历史 32 提交用 `git filter-branch --env-filter` 统一改写为 `272885414+wuhua2026@users.noreply.github.com`（GitHub 推荐的 noreply 形态，公开仓库同时不暴露真实 163 邮箱）；②**改写后全部 commit hash 变化**——文档内 hash 引用（TASKS P0-01、SESSIONS P0 条目）已同步更新为新值并加备注；本地 `user.email` 已配 noreply，后续提交不受影响；③gh token 存 Windows keyring（GH_CONFIG_DIR 指向 `.gh-config`），scopes 含 repo/workflow，发布链路权限齐备。
+- **下一步**：CI 首跑观察（push 触发 ci.yml）；SignPath 开源计划申请（以公开仓库为前提，用户浏览器操作）；崩溃上传后端决策。
+
 ## 2026-10-04 | P4-06 签名与发布流水线交付 + 安全审计 I 组四项收口
 
 - **做了什么**：①`.github/workflows/release.yml`（tag `v*` 触发）：双构建一致性（`cargo clean -p pureslate` 重建后 exe sha256 比对）→ 体积门禁 → `tools/publish-manifest.ps1`（RulesPack 规则包[排除 whitelist.xml] + update-manifest 六字段）→ SignPath 占位 step（secrets 四项配置后启用）→ gh release 上传 → manifest 回推 main；②**I-1** `log_export` 收紧：`audit::export_path_for`（目录成分剥离+`[A-Za-z0-9._-]` 白名单+固定 `<data_root>\exports\`+已存在改时间戳防覆盖，同毫秒碰撞循环 5 次）；③**I-2** token 后端签发：契约加性 `confirm_token_issue`（PS-XXXX-XXXX 由 uuid v4 字节映射，仅专家模式可签），`AppState::consume_pending_confirm` 取出即失效（未命中同样作废防暴力重试），clean_execute/quarantine_purge 接入，前端 `generateToken` 移除改 `issueToken`，模态框异步签发（签发失败展示+禁输入）；④**I-3** 严格 CSP 启用（default/script-src 'self'+style/img/font 补充，connect-src ipc:）；⑤**I-4** tauri-plugin-opener 依赖与 capabilities 权限声明移除；⑥审计清单 7 条状态列更新（I-1/I-2/I-4/I-5/T-4/T-6 已收口，I-3 部分处置）。
@@ -120,6 +126,6 @@
 
 ## 2026-08-25 | Phase 0 收口，M0 契约冻结
 
-- **做了什么**：仓库初始化（9f0ff40）→ Tauri 脚手架 → IPC 契约两端镜像（ipc.ts / contract.rs）→ mock 服务（6 扫描维度，vitest 8 过）→ CI 骨架（fmt/clippy/test/typecheck/vitest/build + 体积断言）→ 包体基线 8.36MB（提交 6678a66）。
+- **做了什么**：仓库初始化（95f85db）→ Tauri 脚手架 → IPC 契约两端镜像（ipc.ts / contract.rs）→ mock 服务（6 扫描维度，vitest 8 过）→ CI 骨架（fmt/clippy/test/typecheck/vitest/build + 体积断言）→ 包体基线 8.36MB（提交 da23559）。
 - **关键结论**：契约冻结，`src/types/ipc.ts` 为 TS 唯一事实源。两个坑：ScanDimension 缺 Hash derive；WiX 下载受限改为 CI 断言安装包体积。
 - **下一步**：进 Phase 1 只读扫描链路（M1）。

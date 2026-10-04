@@ -20,8 +20,9 @@ use sha2::{Digest, Sha256};
 use crate::contract::{Channel, UpdateStatus};
 use crate::storage::data_root;
 
-/// 仓库坐标（P4-06 发布流水线定稿时统一调整）。
-pub const REPO_SLUG: &str = "pureslate/pureslate";
+/// 仓库坐标（P4-06 定稿：wuhua2026/pureslate，与 GitHub 公开仓库及
+/// release.yml 发布侧 GITHUB_REPOSITORY 一致；仓库改名时两处同步）。
+pub const REPO_SLUG: &str = "wuhua2026/pureslate";
 /// 发布通道 manifest 文件名（GitHub Releases latest 附件 / 仓库内同步文件）。
 pub const MANIFEST_PATH: &str = "update-manifest.json";
 /// 主分支名（jsDelivr/raw 直连用）。
