@@ -58,3 +58,10 @@
 - **白名单匹配加固（安全审计 T-4 收口，匹配逻辑变更走评审关卡 docs/review/P4-04.md）**：`safety/whitelist` 段级归一（双侧共用）——`..`/`.` 段文本化解析、逐段剥尾随点/空格；XML 附加根加载时 8.3 短名 `GetLongPathNameW` 展开（长短并存）。**只收紧不放宽**：旧行为下四种声明书写形式会导致保护静默丢失，现全部命中；扫除候选只减不增。
 - **黄金文件集扩至 132 样本**（fixture 生成器，原 36 项）：五族 + 三档 target 内守卫（黄/红档误删率分母非平凡）+ T-4 四形态守卫；测试升级为两阶段门禁（扫描期分档误删率 + 清理期真实 execute 盘面核对）。
 - **验证**：cargo fmt/clippy -D warnings/test 全绿（167 passed，whitelist +4）；误删率复跑 绿/黄/红 = 0/0/0（docs/verify/golden-misdelete.json）；pnpm typecheck/vitest(55)/build 全绿。
+
+### 签名与发布流水线 R26（P4-06）
+
+- **契约加性变更（双端同步 + 记此日志）**：新增命令 `confirm_token_issue`（— → `string`，`PS-XXXX-XXXX`）：🔴 二次确认令牌后端签发，仅专家模式可签，一次性消费（未命中同样作废）；`clean_execute`/`quarantine_purge` 的 confirm_token 校验从"非空"升级为"消费后端签发令牌"，前端自造值不再被信任。SPEC §5 confirmToken 语义段同步更新为已实现形态。
+- **安全审计 I 组收口**（docs/verify/security-audit-ipc-toctou.md 状态列已更新）：I-1 `log_export` 任意路径写入收口（目录成分剥离+文件名白名单+`<data_root>\exports\`+防覆盖）；I-3 严格 CSP 启用（tauri.conf.json，真机走查待人工）；I-4 tauri-plugin-opener 依赖与权限声明移除。
+- **发布流水线**：`.github/workflows/release.yml`（tag 触发：双构建 exe 哈希一致性断言 → 体积门禁 → 清单生成 → 可选 SignPath 签名 → Release 上传 → manifest 回推 main）+ `tools/publish-manifest.ps1`（RulesPack 规则包排除 whitelist.xml + update-manifest 六字段）。占位待定稿（人类决策）：SignPath secrets、REPO_SLUG（与 `updates::REPO_SLUG` 常量对齐）、崩溃上传端点。
+- **验证**：cargo fmt/clippy -D warnings/test 全绿（169 passed，+2）；pnpm typecheck/vitest(54)/build 全绿；脚本端到端自测（占位安装包）字段/哈希/格式全对。

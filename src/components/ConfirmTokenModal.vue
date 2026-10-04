@@ -1,8 +1,9 @@
 <script setup lang="ts">
 import { ref, watch } from "vue";
-import { generateToken, verifyToken } from "./confirmToken";
+import { issueToken, verifyToken } from "./confirmToken";
 
-// 🔴 二次确认（SAFETY §8）：展示一次性 token，须用户逐字输入一致才放行清理。
+// 🔴 二次确认（SAFETY §8 / I-2 · P4-06）：令牌由后端签发（一次性消费、仅专家
+// 模式），用户逐字输入一致才放行；提交值由后端取出消费。
 const props = defineProps<{
   modelValue: boolean;
   /** 是否因含 🔴 项触发（true 时文案强调风险）。 */
@@ -18,15 +19,29 @@ const displayToken = ref("");
 const inputToken = ref("");
 // 已输错次数（仅提示，不锁定）。
 const mismatched = ref(false);
+const issuing = ref(false);
+const issueError = ref("");
 
-// 每次打开生成新 token 并清空输入。
+async function issue(): Promise<void> {
+  issuing.value = true;
+  issueError.value = "";
+  displayToken.value = "";
+  inputToken.value = "";
+  canConfirm.value = false;
+  try {
+    displayToken.value = await issueToken();
+  } catch (e) {
+    issueError.value = String(e);
+  } finally {
+    issuing.value = false;
+  }
+}
+
+// 每次打开向后端取新令牌并清空输入。
 watch(
   () => props.modelValue,
   (open) => {
-    if (!open) return;
-    displayToken.value = generateToken();
-    inputToken.value = "";
-    mismatched.value = false;
+    if (open) void issue();
   },
 );
 
@@ -58,11 +73,14 @@ function close() {
         </p>
 
         <div class="token-box">
-          <span class="tok">{{ displayToken }}</span>
-          <button class="gen" @click="displayToken = generateToken(); inputToken = ''; canConfirm = false; mismatched = false">
-            换一个
-          </button>
+          <span v-if="issuing" class="tok pending">签发中…</span>
+          <span v-else-if="displayToken" class="tok">{{ displayToken }}</span>
+          <span v-else class="tok pending">—</span>
+          <button class="gen" :disabled="issuing" @click="issue()">换一个</button>
         </div>
+        <p v-if="issueError" class="hint mismatch">
+          令牌签发失败：{{ issueError }}
+        </p>
 
         <input
           :value="inputToken"
@@ -71,6 +89,7 @@ function close() {
           :placeholder="hasRed ? '输入上方令牌确认清理' : '输入上方令牌确认'"
           autocomplete="one-time-code"
           spellcheck="false"
+          :disabled="!displayToken"
           @input="onInput(($event.target as HTMLInputElement).value)"
         />
         <p v-if="mismatched" class="hint mismatch">
@@ -136,6 +155,10 @@ function close() {
   font-weight: 700;
   letter-spacing: 1px;
   user-select: all;
+}
+.tok.pending {
+  color: var(--text-2);
+  font-weight: 400;
 }
 .gen {
   background: none;

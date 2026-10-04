@@ -21,6 +21,9 @@ pub struct AppState {
     pub recovery_pending: AtomicBool,
     /// 最近一次启动恢复结果（`crash_recovery` 拉取；None/ranAt=0 = 尚未跑）。
     pub recovery_report: Mutex<Option<CrashRecoveryReport>>,
+    /// I-2（P4-06）：后端签发的一次性 🔴 二次确认令牌（`confirm_token_issue`
+    /// 写入，`clean_execute`/`quarantine_purge` 取出消费）。None = 无待消费令牌。
+    pub pending_confirm: Mutex<Option<String>>,
 }
 
 impl AppState {
@@ -33,6 +36,7 @@ impl AppState {
             scans: Mutex::new(ScanStore::default()),
             recovery_pending: AtomicBool::new(false),
             recovery_report: Mutex::new(None),
+            pending_confirm: Mutex::new(None),
         }
     }
 }
@@ -40,6 +44,21 @@ impl AppState {
 impl Default for AppState {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+impl AppState {
+    /// I-2（P4-06）：校验并消费一次性 🔴 二次确认令牌（忽略大小写与首尾空白）。
+    /// **取出即失效**——无论匹配与否旧令牌都作废（防暴力重试；重试须重新签发）。
+    pub fn consume_pending_confirm(&self, input: &str) -> bool {
+        let Ok(mut g) = self.pending_confirm.lock() else {
+            return false;
+        };
+        let Some(stored) = g.take() else {
+            return false; // 无待消费令牌（未签发/已消费）
+        };
+        let norm = |s: &str| s.trim().to_uppercase();
+        norm(input) == norm(&stored)
     }
 }
 
@@ -103,6 +122,29 @@ mod tests {
             scan_id: id.into(),
             ..Default::default()
         }
+    }
+
+    #[test]
+    fn consume_pending_confirm_is_one_shot() {
+        // I-2（P4-06）：令牌一次性消费——命中后立即失效；未命中同样作废
+        // （防暴力重试，重试须重新签发）。
+        let state = AppState::new();
+        *state.pending_confirm.lock().unwrap() = Some("PS-ABCD-EFGH".into());
+        assert!(state.consume_pending_confirm(" ps-abcd-efgh "));
+        assert!(
+            !state.consume_pending_confirm("PS-ABCD-EFGH"),
+            "已消费不得复用"
+        );
+
+        *state.pending_confirm.lock().unwrap() = Some("PS-AAAA-BBBB".into());
+        assert!(
+            !state.consume_pending_confirm("PS-WRNG-TOKN"),
+            "未命中返回 false"
+        );
+        assert!(
+            !state.consume_pending_confirm("PS-AAAA-BBBB"),
+            "未命中的令牌也已作废"
+        );
     }
 
     #[test]

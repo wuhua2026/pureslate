@@ -1,0 +1,138 @@
+name: Release (R26)
+
+# P4-06 签名与发布流水线：tag 触发 → 双构建一致性校验 → 体积门禁 →
+# update-manifest 生成 →（可选）SignPath 签名 → GitHub Release 上传 →
+# manifest/规则包提交回 main（jsDelivr/ghproxy/raw 更新通道读取处，P4-01）。
+#
+# 占位项（定稿后单点改动，见 TASKS P4-06 备注）：
+# - SignPath 签名：配置 SIGNPATH_API_TOKEN / SIGNPATH_ORG_ID / SIGNPATH_PROJECT_ID
+#   / SIGNPATH_SIGNING_POLICY_SLUG secrets 后自动启用；未配置时产出未签名占位包；
+# - REPO_SLUG：发布侧取 GITHUB_REPOSITORY（真实仓库）；代码侧 updates::REPO_SLUG
+#   常量需同步定稿；
+# - 崩溃上传端点（crash::CRASH_UPLOAD_URL）：后端定稿后更新。
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+env:
+  RUSTFLAGS: ""
+
+jobs:
+  build-publish:
+    name: Build + verify + publish
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install deps
+        run: pnpm install --frozen-lockfile
+
+      # ---- 构建 #1（记录 exe 哈希，可重复构建基准）----
+      - name: Tauri build #1 (NSIS)
+        run: pnpm tauri build --bundles nsis
+
+      - name: Record exe hash (build #1)
+        id: hash1
+        shell: pwsh
+        run: |
+          $exe = "src-tauri/target/release/pureslate.exe"
+          if (-not (Test-Path $exe)) { throw "release exe 不存在: $exe" }
+          $h = (Get-FileHash -Algorithm SHA256 $exe).Hash.ToLowerInvariant()
+          "sha256=$h" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8NoBOM
+          Write-Host "build#1 exe sha256=$h"
+
+      # ---- 构建 #2（清理本 crate 后重建，断言字节一致 = 可重复构建）----
+      - name: Rebuild (cargo clean -p pureslate)
+        run: |
+          cd src-tauri
+          cargo clean -p pureslate
+
+      - name: Tauri build #2 (NSIS)
+        run: pnpm tauri build --bundles nsis
+
+      - name: Verify reproducible build
+        shell: pwsh
+        run: |
+          $exe = "src-tauri/target/release/pureslate.exe"
+          $h = (Get-FileHash -Algorithm SHA256 $exe).Hash.ToLowerInvariant()
+          $h1 = "${{ steps.hash1.outputs.sha256 }}"
+          Write-Host "build#2 exe sha256=$h"
+          if ($h -ne $h1) { throw "可重复构建校验失败：两次构建 exe 哈希不一致 ($h1 vs $h)" }
+          Write-Host "可重复构建校验 PASS（两次构建 exe 字节一致）"
+
+      # ---- 体积门禁（<20MB，R26 保持）----
+      - name: Size gate check
+        shell: pwsh
+        run: |
+          .\tools\check-size.ps1 -SearchPath "src-tauri/target/release/bundle" -ResultFile "docs/verify/ci-size-report.json"
+          if ($LASTEXITCODE -ne 0) { throw "Size gate FAILED" }
+
+      # ---- 发布清单（规则包 + update-manifest）----
+      - name: Generate rules pack + update manifest
+        shell: pwsh
+        run: .\tools\publish-manifest.ps1
+
+      # ---- 可选签名（SignPath 免费开源计划；secrets 配置后自动启用）----
+      - name: Sign installer (SignPath, optional)
+        if: env.SIGNPATH_API_TOKEN != ''
+        shell: pwsh
+        env:
+          SIGNPATH_API_TOKEN: ${{ secrets.SIGNPATH_API_TOKEN }}
+        run: |
+          Write-Host "SignPath 签名步骤占位：开源计划审批通过并配置 secrets 后启用。"
+          Write-Host "计划接入方式：SignPath CLI（signpath）对 bundle/nsis/*.exe 提交签名并等待完成，"
+          Write-Host "签名策略与项目配置在 SignPath 控制台维护（P4-06 TASKS 备注跟进）。"
+          # 占位实现：未配置 secrets 前发布未签名包（SmartScreen 警告属预期，README 免责声明覆盖）。
+
+      # ---- 上传 GitHub Release（安装包 + 规则包）----
+      - name: Upload GitHub Release
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          $tag = $env:GITHUB_REF_NAME
+          $version = $tag.TrimStart("v")
+          $installer = "src-tauri/target/release/bundle/nsis/PureSlate_${version}_x64-setup.exe"
+          $rulesPack = "dist-publish/rules/pureslate-rules-$version.json"
+          gh release create "$tag" "$installer" "$rulesPack" --title "PureSlate $tag" --generate-notes
+          if ($LASTEXITCODE -ne 0) { throw "gh release create 失败" }
+
+      # ---- manifest/规则包提交回 main（更新通道读取处）----
+      - name: Push manifest back to main
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          $version = $env:GITHUB_REF_NAME.TrimStart("v")
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git fetch origin main
+          git checkout main
+          New-Item -ItemType Directory -Force -Path "rules" | Out-Null
+          Copy-Item "dist-publish/update-manifest.json" "update-manifest.json" -Force
+          Copy-Item "dist-publish/rules/pureslate-rules-$version.json" "rules/" -Force
+          git add update-manifest.json rules/
+          git commit -m "release: update-manifest + rules pack for $env:GITHUB_REF_NAME [skip ci]"
+          git push origin main
+          if ($LASTEXITCODE -ne 0) { throw "manifest 回推 main 失败" }

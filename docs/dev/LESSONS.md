@@ -6,6 +6,12 @@
 
 ## ① 踩坑记录
 
+### 本地 NSIS 打包：tauri 首次打包下载工具链走 GitHub 超时（2026-10-04，P4-06）
+- 现象：本地 `pnpm tauri build --bundles nsis` 在 "Verifying NSIS package" 处下载 `nsis-3.11.zip` 超时（`timeout: global`），与 P0-06 的 WiX 下载受限同因（网络环境）。
+- 边界澄清：CI windows-latest 上同一命令一直绿（NSIS 下载无碍）——**"本地不能打包"≠"流水线不能打包"**，安装包产物验证以 CI 为准（LESSONS §③ 既有结论的 NSIS 版）。
+- 对策：本地脚本自测用占位安装包（按命名约定放入 bundle/nsis/ 后跑 publish-manifest.ps1，验证清单字段/sha256 逻辑/产物格式），跑完清理；真实端到端等 CI tag 触发。
+- 复利结论：凡"构建期下载外部工具链"的步骤，本地开发环境（网络受限）与 CI（通畅）能力不同，设计脚本时留占位自测路径。
+
 ### MiniDumpWriteDump 异常流路径在本机环境不可用（恒 998）——异常代码走 sidecar（2026-10-04，P4-03）
 - 现象：SEH 顶级过滤器里带 `MINIDUMP_EXCEPTION_INFORMATION` 调 `MiniDumpWriteDump` 稳定失败，`GetLastError=2147943398`（= HRESULT 0x800703E6 → Win32 **998 ERROR_NOACCESS**）；换成干净辅助线程 + 静态堆快照（EXCEPTION_RECORD/CONTEXT 深拷贝，排除"OS 指针在故障线程栈上"的地址空间语义）**仍然 998**。不带异常参数（`exception_param=NULL`）则成功（panic 通道 56KB dump 可解析）。
 - 结论：本机（Win32 build 26300）dbghelp 的异常流写入路径不可用，与调用线程/指针位置无关；不要赌 dbghelp 版本行为。

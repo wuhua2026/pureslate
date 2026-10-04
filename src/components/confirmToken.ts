@@ -1,22 +1,16 @@
 /**
- * 🔴 二次确认 token（SAFETY §8 / SPEC §5 专家模式语义）。
- * 形如 `PS-XXXX-XXXX`（大写字母+数字 4 位 × 2 段）。前端生成并展示，
- * 用户须逐字输入一致才放行清理（ACKnowledge 式二次确认）；后端仅兜底判断非空。
+ * 🔴 二次确认 token（I-2 · P4-06 安全审计收口；SPEC §5 语义落地）。
+ *
+ * 令牌由**后端签发**（`confirm_token_issue`：仅专家模式可签、一次性消费），
+ * 前端负责展示与逐字输入比对；提交值由后端取出消费——前端自造值不再被信任
+ * （旧行为：前端 generateToken + 后端仅查非空，可被 webview 注入绕过）。
+ * 形如 `PS-XXXX-XXXX`（大写字母+数字 4 位 × 2 段，去易混淆字符，与后端同源）。
  */
-const CHARS = "ABCDEFGHJKMNPQRSTUVWXYZ23456789"; // 去掉易混淆 I/L/O/0/1
+import { confirm_token_issue } from "../api/commands";
 
-function randomSegment(len: number): string {
-  const out = new Array<string>(len);
-  // node 18+ / 现代浏览器均提供全局 crypto.getRandomValues。
-  const bytes = new Uint8Array(len);
-  globalThis.crypto.getRandomValues(bytes);
-  for (let i = 0; i < len; i++) out[i] = CHARS[bytes[i] % CHARS.length];
-  return out.join("");
-}
-
-/** 生成一次性 token。 */
-export function generateToken(): string {
-  return `PS-${randomSegment(4)}-${randomSegment(4)}`;
+/** 从后端签发一次性令牌。失败原样抛出（非专家模式/状态不可用），调用方展示。 */
+export async function issueToken(): Promise<string> {
+  return confirm_token_issue();
 }
 
 /** 校验用户输入与期望一致性（忽略首尾空白与大小写，字母数字不变量）。 */

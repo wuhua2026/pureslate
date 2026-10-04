@@ -176,6 +176,7 @@ export interface AppSettings {
 | `log_export` | `path` → `boolean` | 导出指定范围 |
 | `settings_get` / `settings_set` | — / `AppSettings` | set 全量覆盖 |
 | `update_check` | `manual: boolean` → `UpdateStatus` | manual=true 无视 optIn |
+| `confirm_token_issue` | — → `string`（`PS-XXXX-XXXX`） | 🔴 二次确认令牌**后端签发**（I-2 · P4-06 加性新增）：仅专家模式可签，一次性消费（`clean_execute`/`quarantine_purge` 校验并作废）；未签发/不匹配/已消费一律拒绝 |
 | `crash_list` | — → `CrashDumpInfo[]` | 本地转储列表（时间倒序；P4-03 加性新增） |
 | `crash_preview` | `{fileName}` → `CrashDumpPreview` | 模块列表/异常代码摘要；解析失败回 error 字段 |
 | `crash_upload` | `{fileName}` → `CrashUploadReport` | opt-in 门禁（crashUploadOptIn=false 拒绝联网） |
@@ -212,7 +213,7 @@ export interface UpdateStatus {
 export interface RestoreReport { requested: number; restored: number; conflict: number; failures: { id: string; reason: string }[]; }
 ```
 
-**confirmToken 语义**：UI 对 🔴 项或 `quarantine_purge` 弹二次确认 → 用户确认后由 `app_meta` 风格的握手命令获取一次性 token（实现为：Rust 端生成 UUID 注入弹窗上下文，提交时校验一次性消费）。M0 先定接口语义，UI 流程 Phase 2 落地。
+**confirmToken 语义（I-2 · P4-06 已实现）**：UI 对 🔴 项或 `quarantine_purge` 弹二次确认 → 前端调 `confirm_token_issue` 从**后端**签发一次性令牌（仅专家模式）→ 用户逐字输入一致后随命令提交 → 后端取出比对并**消费**（未命中同样作废，防暴力重试）。前端自造值不再被信任；`log_export` 同批收口：参数只取文件名成分，固定落 `<data_root>\exports\`（I-1）。
 
 ## 6. 关键机制
 

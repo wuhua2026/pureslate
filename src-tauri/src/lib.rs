@@ -108,6 +108,7 @@ pub fn run() {
             ipc::commands::settings_get,
             ipc::commands::settings_set,
             ipc::commands::update_check,
+            ipc::commands::confirm_token_issue,
             ipc::commands::crash_list,
             ipc::commands::crash_preview,
             ipc::commands::crash_upload,

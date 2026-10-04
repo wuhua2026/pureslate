@@ -144,6 +144,9 @@ export const mockCommands = {
       checkedAt: Date.now(),
     }),
 
+  // I-2（P4-06）：mock 固定令牌（dev 走查 token 流）。
+  confirm_token_issue: (): Promise<string> => Promise.resolve("PS-MOCK-MOCK"),
+
   // ---- R24 崩溃安全（P4-03）：mock 固定样本，供 dev 走查预览/上传/恢复横幅 UI ----
 
   crash_list: (): Promise<CrashDumpInfo[]> =>

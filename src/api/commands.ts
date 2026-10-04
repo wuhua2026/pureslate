@@ -100,6 +100,13 @@ export const update_check = (manual: boolean) =>
     ? mockCommands.update_check(manual)
     : invokeApp<UpdateStatus>("update_check", { manual });
 
+// ---- I-2（P4-06）：🔴 二次确认令牌后端签发（一次性消费） ----
+
+export const confirm_token_issue = () =>
+  useMock()
+    ? mockCommands.confirm_token_issue()
+    : invokeApp<string>("confirm_token_issue");
+
 // ---- R24 崩溃安全（P4-03） ----
 
 export const crash_list = () =>

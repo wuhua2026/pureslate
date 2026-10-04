@@ -3,7 +3,7 @@
 //! 其余命令保持 stub（对应 Phase 2/3 填充）。
 
 use std::collections::HashMap;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering as AtomicOrdering};
 use std::sync::{Mutex, OnceLock};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
@@ -274,7 +274,50 @@ fn now_ms() -> i64 {
 
 // ---- 以下为 Phase 2/3 命令（stub） ----
 
-/// 执行清理。含 🔴 项而 confirm_token 缺失 → 拒绝（M0 语义落地，SAFETY §4.5）。
+// ---- I-2（P4-06 · 安全审计收口）：🔴 二次确认令牌后端签发（SPEC §5 语义落地）----
+
+/// 令牌字母表（与前端 confirmToken.ts 同源：去掉易混淆 I/L/O/0/1）。
+const TOKEN_CHARS: &[u8] = b"ABCDEFGHJKMNPQRSTUVWXYZ23456789";
+
+/// 由 uuid v4 字节生成 `PS-XXXX-XXXX` 形态令牌（uuid crate 已是依赖，rand 引入
+/// 违反依赖准入）。模偏置对 UI 确认流无对抗意义，可接受。
+fn new_confirm_token() -> String {
+    let bytes = uuid::Uuid::new_v4().as_bytes().to_vec();
+    let seg = |off: usize| -> String {
+        (0..4)
+            .map(|i| TOKEN_CHARS[(bytes[off + i] % TOKEN_CHARS.len() as u8) as usize] as char)
+            .collect()
+    };
+    format!("PS-{}-{}", seg(0), seg(4))
+}
+
+/// 签发一次性 🔴 二次确认令牌。**仅专家模式可签**（🔴 灰禁语义：非专家模式
+/// 本就不允许清理 🔴 项）；重复签发覆盖旧令牌（同刻至多一个确认流）。
+#[tauri::command]
+pub fn confirm_token_issue(state: State<AppState>) -> Result<String, String> {
+    let expert = state
+        .settings
+        .lock()
+        .map(|s| s.expert_mode)
+        .unwrap_or(false);
+    if !expert {
+        return Err("二次确认令牌仅专家模式可签发（设置中开启专家模式）".into());
+    }
+    let token = new_confirm_token();
+    match state.pending_confirm.lock() {
+        Ok(mut g) => *g = Some(token.clone()),
+        Err(_) => return Err("确认令牌状态不可用".into()),
+    }
+    Ok(token)
+}
+
+/// 校验并**消费**待确认令牌（一次性语义实现在 `AppState::consume_pending_confirm`）。
+fn verify_pending_confirm(state: &State<AppState>, input: &str) -> bool {
+    state.consume_pending_confirm(input)
+}
+
+/// 执行清理。含 🔴 项须通过后端签发的一次性令牌（I-2 · P4-06：`confirm_token_issue`
+/// 签发 + 此处取出消费，前端自造值不再被信任；M0 语义落地，SAFETY §4.5）。
 /// 返回 tx_id；后台执行并推送 `clean_progress`/`clean_done`。
 #[tauri::command]
 pub fn clean_execute(
@@ -319,10 +362,11 @@ pub fn clean_execute(
         return Err("无可清理项".into());
     }
 
-    // 4. 🔴 校验：含 Red 项须 confirm_token 非空（专家态 + 二次确认的落地点在 UI，此处强制兜底）。
+    // 4. 🔴 校验（I-2 · P4-06）：含 Red 项须消费后端签发的一次性令牌
+    //    （专家模式签发 + 逐字输入一致 + 一次性消费）；前端自造值一律拒绝。
     let has_red = targets.iter().any(|t| t.grade == Grade::Red);
-    if has_red && params.confirm_token.as_deref().is_none_or(|s| s.is_empty()) {
-        return Err("包含高风险（🔴）项，请二次确认后重试".into());
+    if has_red && !verify_pending_confirm(&state, params.confirm_token.as_deref().unwrap_or("")) {
+        return Err("二次确认令牌无效或已过期，请重新发起确认".into());
     }
 
     // 3. 生成 tx_id + 取消令牌并登记。
@@ -464,9 +508,24 @@ pub fn quarantine_restore(
     crate::quarantine::restore_globally(&params.ids)
 }
 
-/// 硬删隔离项（确认清空/释放最早批次；🔴 语义须 confirm_token，缺失全部拒绝）。
+/// 硬删隔离项（确认清空/释放最早批次；🔴 语义须消费后端签发的一次性令牌，
+/// I-2 · P4-06 同 `clean_execute`；lifecycle 内部的非空校验保留为兜底）。
 #[tauri::command]
-pub fn quarantine_purge(_state: State<AppState>, params: QuarantinePurgeParams) -> PurgeReport {
+pub fn quarantine_purge(state: State<AppState>, params: QuarantinePurgeParams) -> PurgeReport {
+    if !verify_pending_confirm(&state, &params.confirm_token) {
+        return PurgeReport {
+            requested: params.ids.len() as u64,
+            purged: 0,
+            failures: params
+                .ids
+                .into_iter()
+                .map(|id| RestoreFailure {
+                    id,
+                    reason: "二次确认令牌无效或已过期，请重新发起确认".into(),
+                })
+                .collect(),
+        };
+    }
     crate::quarantine::lifecycle::purge_globally(&params.ids, &params.confirm_token)
 }
 
@@ -489,10 +548,27 @@ pub fn log_query(state: State<AppState>, filter: LogQueryFilter) -> Vec<LogEntry
     crate::logging::audit::query(filter.from, filter.to, filter.op.as_deref())
 }
 
-/// 导出日志：全量审计日志 → 指定文件（JSONL）。返回是否成功。
+/// 导出日志：全量审计日志 → JSONL（I-1 · P4-06 收口：参数只取文件名成分，
+/// 固定落 `<data_root>\exports\`，白名单 + 防覆盖，见 `audit::export_path_for`）。
 #[tauri::command]
 pub fn log_export(_state: State<AppState>, path: String) -> bool {
-    crate::logging::audit::export_all(Path::new(&path)).is_ok()
+    let target = match crate::logging::audit::export_path_for(&path) {
+        Ok(p) => p,
+        Err(e) => {
+            eprintln!("[log_export] 拒绝: {e}");
+            return false;
+        }
+    };
+    match crate::logging::audit::export_all(&target) {
+        Ok(()) => {
+            eprintln!("[log_export] 已导出: {}", target.to_string_lossy());
+            true
+        }
+        Err(e) => {
+            eprintln!("[log_export] 导出失败: {e}");
+            false
+        }
+    }
 }
 
 /// 读取设置（从状态返回；状态在启动时已从 settings.json 恢复）。

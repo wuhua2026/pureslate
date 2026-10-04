@@ -5,6 +5,13 @@
 > 维护（AGENTS.md §9）：任务完成时 agent 自动追加/更新当前会话条目，随任务同一提交。格式：`## YYYY-MM-DD | 主题`。
 > 本初版由历史会话记忆回溯整理（截至 2026-09-29），细节以 git 历史与 TASKS.md 为准。
 
+## 2026-10-04 | P4-06 签名与发布流水线交付 + 安全审计 I 组四项收口
+
+- **做了什么**：①`.github/workflows/release.yml`（tag `v*` 触发）：双构建一致性（`cargo clean -p pureslate` 重建后 exe sha256 比对）→ 体积门禁 → `tools/publish-manifest.ps1`（RulesPack 规则包[排除 whitelist.xml] + update-manifest 六字段）→ SignPath 占位 step（secrets 四项配置后启用）→ gh release 上传 → manifest 回推 main；②**I-1** `log_export` 收紧：`audit::export_path_for`（目录成分剥离+`[A-Za-z0-9._-]` 白名单+固定 `<data_root>\exports\`+已存在改时间戳防覆盖，同毫秒碰撞循环 5 次）；③**I-2** token 后端签发：契约加性 `confirm_token_issue`（PS-XXXX-XXXX 由 uuid v4 字节映射，仅专家模式可签），`AppState::consume_pending_confirm` 取出即失效（未命中同样作废防暴力重试），clean_execute/quarantine_purge 接入，前端 `generateToken` 移除改 `issueToken`，模态框异步签发（签发失败展示+禁输入）；④**I-3** 严格 CSP 启用（default/script-src 'self'+style/img/font 补充，connect-src ipc:）；⑤**I-4** tauri-plugin-opener 依赖与 capabilities 权限声明移除；⑥审计清单 7 条状态列更新（I-1/I-2/I-4/I-5/T-4/T-6 已收口，I-3 部分处置）。
+- **关键结论**：①**本地 NSIS 打包不可行**（tauri 首次打包下载 NSIS 工具链走 GitHub 超时，与 P0-06 WiX 同因；CI windows-latest 无此问题，发布流水线端到端待真实仓库 tag）——用占位安装包跑通脚本全流程自测（manifest 六字段/sha256 双向一致/规则包无 BOM/whitelist 排除）；②"剥离优于拒绝"的导出收口设计：webview 传任意路径只取末段文件名，`..` 因 file_name()=None 自然落拒绝分支；③一次性令牌"未命中也作废"语义（take 先于比对）防暴力重试，代价是输错须重新签发（UX 可接受）；④uuid v4 字节映射字母表替代引入 rand crate（依赖准入红线）。
+- **验证**：cargo fmt/clippy -D warnings/test 全绿（169 passed，+2：export_path 拒绝与防覆盖/consume_pending_confirm 一次性）；pnpm typecheck/vitest(54)[generateToken 用例移除]/build 全绿；脚本端到端自测全对。
+- **下一步**：P4-07 [HUMAN] 社区公开评审（发布破坏面五模块代码+review 文档到 V2EX/Rust 社区）。**M3 门禁工程侧全绿，仅差社区评审**。人类决策待办：SignPath 申请、真实仓库定稿（REPO_SLUG/identifier）、崩溃上传后端、CSP 真机走查、历次积压真机走查。
+
 ## 2026-10-04 | P4-05 M12 千次还原交付（1000/1000 = 100% ≥ 99.9%）
 
 - **做了什么**：`restore-self-test` 升级——①JSON 报告（stdout 落 `docs/verify/restore-1000.json`：buildProfile/threshold/ratio/gatePass/durationMs/stageCounts/failures），stderr 人读进度（每 100 轮）与结论；②**失败项按五阶段兜底指引**（write/hash/quarantine[manifest·journal 残留可还原]/restore[restore-conflict 可取回]/verify[最严重，导出审计+manifest 提 issue]），failures 上限 50 条防报告膨胀（全量计数在 stageCounts）；③阈值参数化（M2=0.95 默认 / M12=0.999），ps1 增 `-MinRatio`（InvariantCulture 传参，防 zh-CN 之外 locale 逗号小数点破坏参数）。

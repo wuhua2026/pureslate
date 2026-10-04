@@ -57,7 +57,8 @@ async function doExport() {
   try {
     const ok = await commands.log_export({ path: `pureslate-audit-export-${Date.now()}.jsonl` });
     exported.value = ok;
-    if (!ok) error.value = "导出失败（检查应用运行目录写入权限）";
+    // I-1（P4-06）：导出固定落数据目录 exports\（后端剥离目录成分 + 防覆盖）。
+    if (!ok) error.value = "导出失败（导出文件名不合法或磁盘不可写）";
   } catch (e) {
     error.value = String(e);
   } finally {
@@ -94,7 +95,7 @@ onMounted(load);
         </div>
       </div>
       <p v-if="exported" class="ok-tip">
-        已导出到应用运行目录 <code>pureslate-audit-export-*.jsonl</code>
+        已导出到数据目录 <code>exports\pureslate-audit-export-*.jsonl</code>
       </p>
 
       <div class="state" v-if="loading">加载中…</div>
