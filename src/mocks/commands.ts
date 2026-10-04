@@ -7,6 +7,12 @@ import type {
   AppMeta,
   AppSettings,
   CleanExecuteParams,
+  CrashDumpInfo,
+  CrashDumpPreview,
+  CrashPreviewParams,
+  CrashRecoveryReport,
+  CrashUploadParams,
+  CrashUploadReport,
   LogEntry,
   LogQueryFilter,
   PurgeReport,
@@ -136,5 +142,41 @@ export const mockCommands = {
       hasUpdate: false,
       channel: "github",
       checkedAt: Date.now(),
+    }),
+
+  // ---- R24 崩溃安全（P4-03）：mock 固定样本，供 dev 走查预览/上传/恢复横幅 UI ----
+
+  crash_list: (): Promise<CrashDumpInfo[]> =>
+    Promise.resolve([
+      {
+        fileName: "pureslate-crash-20261004-120000-1234.dmp",
+        sizeBytes: 1_204_224,
+        ts: Date.now() - 3_600_000,
+      },
+    ]),
+
+  crash_preview: (params: CrashPreviewParams): Promise<CrashDumpPreview> =>
+    Promise.resolve({
+      fileName: params.fileName,
+      sizeBytes: 1_204_224,
+      ts: Date.now() - 3_600_000,
+      moduleCount: 3,
+      modules: ["ntdll.dll", "kernel32.dll", "pureslate.exe"],
+      exceptionCode: 0xc0000005,
+    }),
+
+  crash_upload: (params: CrashUploadParams): Promise<CrashUploadReport> =>
+    Promise.resolve({ fileName: params.fileName, uploaded: true }),
+
+  crash_recovery: (): Promise<CrashRecoveryReport> =>
+    Promise.resolve({
+      ranAt: Date.now() - 60_000,
+      orphansFound: 2,
+      restored: 1,
+      conflictRestored: 0,
+      adopted: 1,
+      irreversible: 0,
+      untouched: 0,
+      failures: [],
     }),
 };

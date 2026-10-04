@@ -213,6 +213,103 @@ fn get_https(p: &ParsedUrl) -> Result<Vec<u8>, String> {
     }
 }
 
+/// HTTPS POST 原始字节体（R24 崩溃转储 opt-in 上传）。约束同 `http_get`；
+/// 仅 2xx 判成功。本模块只服务 R22 更新检查与 R24 opt-in 崩溃上传（红线 #4）。
+/// 不做单测（无网络沙箱）；与 `get_https` 同构，可评审。
+pub fn http_post(url: &str, body: &[u8]) -> Result<(), String> {
+    #[cfg(windows)]
+    {
+        let parsed = parse_https_url(url).ok_or_else(|| format!("非法 URL: {url}"))?;
+        post_https(&parsed, body)
+    }
+    #[cfg(not(windows))]
+    {
+        let _ = (url, body);
+        Err("上传仅支持 Windows（WinHTTP）".into())
+    }
+}
+
+#[cfg(windows)]
+fn post_https(p: &ParsedUrl, body: &[u8]) -> Result<(), String> {
+    // 安全性：以下 WinHTTP 调用参数均为有效宽字符串指针/缓冲区；句柄 RAII 关闭。
+    unsafe {
+        let agent = wide("PureSlate-Crash-Upload");
+        let session = WinHttpOpen(
+            agent.as_ptr(),
+            WINHTTP_ACCESS_TYPE_DEFAULT_PROXY,
+            std::ptr::null(),
+            std::ptr::null(),
+            0,
+        );
+        if session.is_null() {
+            return Err("WinHttpOpen 失败".into());
+        }
+        let session = HWin(session);
+
+        let host = wide(&p.host);
+        let connect = WinHttpConnect(session.0, host.as_ptr(), p.port, 0);
+        if connect.is_null() {
+            return Err(format!("连接失败: {}", p.host));
+        }
+        let connect = HWin(connect);
+
+        let verb = wide("POST");
+        let object = wide(&p.path);
+        let request = WinHttpOpenRequest(
+            connect.0,
+            verb.as_ptr(),
+            object.as_ptr(),
+            std::ptr::null(),
+            std::ptr::null(),
+            std::ptr::null(),
+            WINHTTP_FLAG_SECURE,
+        );
+        if request.is_null() {
+            return Err("创建请求失败".into());
+        }
+        let request = HWin(request);
+
+        if WinHttpSetTimeouts(request.0, 5000, 5000, 5000, 15_000) != 0 {
+            return Err("设置超时失败".into());
+        }
+        // Content-Type 经 SendRequest 的附加头传入；长度不含结尾 NUL。
+        let headers = wide("Content-Type: application/octet-stream\r\n");
+        let total = body.len() as u32;
+        if WinHttpSendRequest(
+            request.0,
+            headers.as_ptr(),
+            (headers.len() as u32).saturating_sub(1),
+            body.as_ptr().cast(),
+            total,
+            total,
+            0,
+        ) == 0
+        {
+            return Err("发送请求失败".into());
+        }
+        if WinHttpReceiveResponse(request.0, std::ptr::null()) == 0 {
+            return Err("接收响应失败".into());
+        }
+        let mut status: u32 = 0;
+        let mut len = std::mem::size_of::<u32>() as u32;
+        if WinHttpQueryHeaders(
+            request.0,
+            WINHTTP_QUERY_STATUS_CODE | WINHTTP_QUERY_FLAG_NUMBER,
+            std::ptr::null(),
+            &mut status as *mut u32 as *mut c_void,
+            &mut len,
+            std::ptr::null_mut(),
+        ) == 0
+        {
+            return Err("查询状态码失败".into());
+        }
+        if !(200..300).contains(&status) {
+            return Err(format!("HTTP {status}"));
+        }
+        Ok(())
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

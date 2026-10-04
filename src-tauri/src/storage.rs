@@ -25,13 +25,18 @@ pub fn set_data_root_override(root: Option<PathBuf>) {
     }
 }
 
-/// 定位 PureSlate 数据根。首选覆盖路径；否则 `%LOCALAPPDATA%\PureSlate`；缺失回退 `%APPDATA%`。
+/// 定位 PureSlate 数据根。优先级：测试覆盖 > `PURESLATE_DATA_ROOT` 环境变量
+/// （R24 kill 测试/crash-sim 子进程注入沙箱用；生产不设置，等价于既有 LOCALAPPDATA
+/// 信任面，不扩权）> `%LOCALAPPDATA%\PureSlate`；缺失回退 `%APPDATA%`。
 /// 生产禁 unwrap/expect（红线 §6）。
 pub fn data_root() -> PathBuf {
     if let Ok(g) = DATA_ROOT_OVERRIDE.lock() {
         if let Some(r) = g.as_ref() {
             return r.clone();
         }
+    }
+    if let Some(p) = std::env::var_os("PURESLATE_DATA_ROOT") {
+        return PathBuf::from(p);
     }
     let base = std::env::var_os("LOCALAPPDATA")
         .map(PathBuf::from)

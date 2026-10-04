@@ -2,6 +2,7 @@
 
 pub mod cleaner;
 pub mod contract;
+pub mod crash;
 pub mod guard;
 pub mod ipc;
 pub mod logging;
@@ -21,6 +22,10 @@ use tauri::Manager;
 pub fn run() {
     tauri::Builder::default()
         .setup(|app| {
+            // R24 第一件事：装崩溃处理器（SEH + panic → minidump 本地落盘，SPEC §6.6），
+            // 越早安装覆盖面越大；随后清理历史 dump 只留最近 KEEP_DUMPS 份。
+            crate::crash::install();
+            crate::crash::prune_old_dumps(crate::crash::KEEP_DUMPS);
             // R23 第二语义：单实例互斥量——第二实例激活首实例窗口后退出（SAFETY §5.2）。
             if !crate::guard::is_single_instance(crate::guard::instance::MUTEX_NAME) {
                 crate::guard::activate_main_window(crate::guard::instance::MAIN_WINDOW_TITLE);
@@ -28,6 +33,33 @@ pub fn run() {
                 std::process::exit(0);
             }
             app.manage(AppState::new());
+            // R24 启动恢复：孤儿 journal 对账（T-6 协议——journal 只决定查谁，
+            // 文件移动一律经 manifest 信任锚的 restore_one；不可逆去向只标记）。
+            // 恢复期间置 recovery_pending，clean_execute 拒绝新事务（防竞态）。
+            let handle_cr = app.handle().clone();
+            tauri::async_runtime::spawn_blocking(move || {
+                let state = handle_cr.state::<AppState>();
+                state
+                    .recovery_pending
+                    .store(true, std::sync::atomic::Ordering::SeqCst);
+                let report = crate::crash::recover::recover_globally();
+                if let Ok(mut g) = state.recovery_report.lock() {
+                    *g = Some(report.clone());
+                }
+                state
+                    .recovery_pending
+                    .store(false, std::sync::atomic::Ordering::SeqCst);
+                if report.orphans_found > 0 {
+                    eprintln!(
+                        "[crash-recover] 孤儿={} 还原={} 补登记={} 不可逆标记={} 失败={}",
+                        report.orphans_found,
+                        report.restored,
+                        report.adopted,
+                        report.irreversible,
+                        report.failures.len()
+                    );
+                }
+            });
             // 启动即跑一遍隔离区生命周期（到期自动清除+审计；到期提醒事件推送）。
             let handle = app.handle().clone();
             tauri::async_runtime::spawn(async move {
@@ -76,6 +108,10 @@ pub fn run() {
             ipc::commands::settings_get,
             ipc::commands::settings_set,
             ipc::commands::update_check,
+            ipc::commands::crash_list,
+            ipc::commands::crash_preview,
+            ipc::commands::crash_upload,
+            ipc::commands::crash_recovery,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

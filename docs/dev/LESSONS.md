@@ -6,6 +6,17 @@
 
 ## ① 踩坑记录
 
+### MiniDumpWriteDump 异常流路径在本机环境不可用（恒 998）——异常代码走 sidecar（2026-10-04，P4-03）
+- 现象：SEH 顶级过滤器里带 `MINIDUMP_EXCEPTION_INFORMATION` 调 `MiniDumpWriteDump` 稳定失败，`GetLastError=2147943398`（= HRESULT 0x800703E6 → Win32 **998 ERROR_NOACCESS**）；换成干净辅助线程 + 静态堆快照（EXCEPTION_RECORD/CONTEXT 深拷贝，排除"OS 指针在故障线程栈上"的地址空间语义）**仍然 998**。不带异常参数（`exception_param=NULL`）则成功（panic 通道 56KB dump 可解析）。
+- 结论：本机（Win32 build 26300）dbghelp 的异常流写入路径不可用，与调用线程/指针位置无关；不要赌 dbghelp 版本行为。
+- 修复：dump 保证落盘（异常参数失败 → 无异常流兜底重写一次）；异常代码在过滤器内从深拷贝的 EXCEPTION_RECORD 首 u32（ExceptionCode，MSVC/x64 布局首字段稳定）取出，写 sidecar `<dump>.json`（`{"exceptionCode":..., "ts":...}`），`crash_preview` 解析 dump 后合并 sidecar；`prune_old_dumps` 连 sidecar 一起清。
+- 复利结论：①崩溃路径上的 FFI 失败必须打 GetLastError（本次靠它锁定 998）；②对 OS 级行为做三层降级设计（带异常流 → 无异常流 → 放弃），每层都要真实可测——SEH 真实崩溃测试（volatile 空指针写触发硬件 AV，勿用 `std::process::abort`，fastfail 绕过 SEH）是验证唯一手段；③`GetLastError` 返回值 ≥0x80070000 时减 0x80070000 得 Win32 码。
+
+### cargo 集成测试进程看不到 lib 的 #[cfg(test)] 项——共享锁须本文件自建（2026-10-04，P4-03）
+- 现象：`tests/crash_safety.rs` 引用 `pureslate_lib::storage::TEST_DATA_ROOT_LOCK` 编译错 cannot find value。
+- 根因：`#[cfg(test)]` 只在编译 lib 自身单测目标时存在；集成测试是独立 crate，看到的 lib 没有 cfg(test) 项（compat.rs 早就用了本文件私有锁，口径一致）。
+- 复利结论：集成测试需要"串行化共享全局"时，在测试文件内 `static TEST_LOCK: Mutex<()> = Mutex::new(())` 自建；子进程数据根注入用 `PURESLATE_DATA_ROOT` 环境变量（storage::data_root 第三优先级）。
+
 ### 测试锁守卫在构造函数末尾即释放——共享全局依旧被并行污染（2026-09-30，P3-02）
 - 现象：startup 三个沙箱测试随机失败（备份文件"不存在"、manifest 多出别人的记录）。
 - 根因：`Sandbox::new()` 里 `let _g = LOCK.lock()` 的守卫在**函数返回时即 drop**，锁只护住了 setup 阶段；测试体执行期间其他并行测试照样换掉共享 `DATA_ROOT_OVERRIDE`。
@@ -75,6 +86,11 @@
 - 修复：`ScanDimension` 补 `#[derive(Hash)]`（contract.rs）。
 
 ## ② 决策记录
+
+### 孤儿 journal 恢复协议（T-6）：manifest 唯一信任锚，journal 只定位不动作（2026-10-04，P4-03）
+- 背景：安全审计 T-6——journal 位于用户可写目录，启动恢复若信任 journal 声称的 path 执行操作即 confused deputy（伪造 journal 让应用删/移任意文件）。
+- 协议（先定死后实现，recover.rs 头注释为权威表述）：①journal 内容只用于决定"查哪条 manifest 记录"，绝不直接对 journal path 执行删除/移动；direct/recycle 不可逆去向一律只标记 orphan+审计；②quarantine 孤儿的文件移动 100% 复用 restore_one（T-2 四重校验）；③「move 已发生、manifest 未写」窗口按 store 命名约定（`<sha256 前 8>_<原名>`，深度≤3）反查**未被任何 manifest 行引用**的唯一候选——**不唯一即拒绝**、补登记进 manifest（🟡/crash.recovered）而**不自动还原**（内容身份无法再对已不存在的原文件证明，交用户在隔离区页操作）；④恢复动作逐条审计 op=recover，完成后向原 tx journal **追加** result 行闭环（只追加，seq 续编）。
+- 复利结论：恢复协议的本质是把"信任根"从可写文件（journal）收敛到已有校验链（manifest→restore_one），新破坏面评审即可缩到一条；任何"补全数据"类恢复都应默认降级为登记而非动作。
 
 ### 隐私清理走规则驱动而非独立 privacy/ 模块（2026-09-30，P3-04）
 - 背景：SPEC §2 列有 `privacy/` 模块（R08 枚举），但隐私项本质是文件类目（History 数据库/.lnk），guard/quarantine/journal/审计全在既有管线里。

@@ -42,17 +42,29 @@ pub struct Journal {
 
 impl Journal {
     /// 打开（创建）单事务 journal 文件。目录缺失则自动创建。
+    /// R24 启动恢复会向**既有**事务文件追加 result 行闭环——此时从既有最大 seq
+    /// 续编（保持事务内 seq 单调；新事务文件从 0 起，生产行为不变）。
     pub fn open(tx_id: &str) -> std::io::Result<Self> {
         let dir = journal_dir();
         fs::create_dir_all(&dir)?;
-        let file = OpenOptions::new()
-            .create(true)
-            .append(true)
-            .open(journal_path(tx_id))?;
+        let p = journal_path(tx_id);
+        let mut seq = 0u64;
+        if p.exists() {
+            if let Ok(text) = fs::read_to_string(&p) {
+                for line in text.lines() {
+                    if let Ok(v) = serde_json::from_str::<serde_json::Value>(line) {
+                        if let Some(s) = v["seq"].as_u64() {
+                            seq = seq.max(s);
+                        }
+                    }
+                }
+            }
+        }
+        let file = OpenOptions::new().create(true).append(true).open(p)?;
         Ok(Self {
             tx_id: tx_id.to_string(),
             file,
-            seq: 0,
+            seq,
         })
     }
 

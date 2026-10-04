@@ -1,6 +1,8 @@
 <script setup lang="ts">
-import { computed } from "vue";
+import { computed, onMounted, ref } from "vue";
+import { crash_recovery } from "../api/commands";
 import { DiskUsageStub, type DiskUsageEntry } from "../mocks/data";
+import { recoveryNotice } from "./crashModel";
 
 // GB/TB 易读格式化：>=1024GB 显示 TB，否则 GB。
 function formatBytes(bytes: number): string {
@@ -15,6 +17,16 @@ function usagePercent(d: DiskUsageEntry): number {
 }
 
 const disks = computed(() => DiskUsageStub);
+
+// R24：启动恢复通知（上次清理被崩溃中断时，横幅告知处理结果）。
+const recoveryBanner = ref<string | null>(null);
+onMounted(async () => {
+  try {
+    recoveryBanner.value = recoveryNotice(await crash_recovery());
+  } catch {
+    recoveryBanner.value = null;
+  }
+});
 </script>
 
 <template>
@@ -23,6 +35,12 @@ const disks = computed(() => DiskUsageStub);
       <h1>PureSlate</h1>
       <p class="tag">本地磁盘清理 · 只读扫描 · 安全分级 · 全程可还原</p>
     </header>
+
+    <!-- R24 启动恢复横幅 -->
+    <section v-if="recoveryBanner" class="card recovery-card">
+      <p class="recovery-text">{{ recoveryBanner }}</p>
+      <router-link to="/quarantine" class="recovery-link">前往隔离区查看 →</router-link>
+    </section>
 
     <!-- 磁盘占用条 -->
     <section class="card">
@@ -211,5 +229,21 @@ const disks = computed(() => DiskUsageStub);
   font-size: 0.8rem;
   color: var(--text-2);
   line-height: 1.5;
+}
+
+/* R24 启动恢复横幅 */
+.recovery-card {
+  border-color: var(--grade-yellow);
+  background: #fdf8ee;
+}
+.recovery-text {
+  margin: 0 0 6px;
+  color: var(--text);
+  font-size: 0.88rem;
+  line-height: 1.6;
+}
+.recovery-link {
+  font-size: 0.82rem;
+  color: var(--accent);
 }
 </style>

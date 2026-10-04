@@ -282,6 +282,10 @@ pub fn clean_execute(
     state: State<AppState>,
     params: CleanExecuteParams,
 ) -> Result<String, String> {
+    // R24：启动恢复进行中拒绝新事务（恢复可能移动隔离区文件，与新清理竞态）。
+    if state.recovery_pending.load(AtomicOrdering::SeqCst) {
+        return Err("崩溃恢复进行中，请稍后重试".into());
+    }
     // 1. 跨会话收集请求的扫描项（按 item.id）。
     let items = {
         let Ok(scans) = state.scans.lock() else {
@@ -538,4 +542,140 @@ pub fn update_check(app: tauri::AppHandle, state: State<AppState>, manual: bool)
         let _ = app.emit(events::UPDATE_AVAILABLE, status.clone());
     }
     status
+}
+
+// ---- R24 崩溃安全（P4-03 · SPEC §6.6） ----
+
+/// 列出本地崩溃转储（时间倒序）。只列不删——清理统一在启动时做。
+#[tauri::command]
+pub fn crash_list(_state: State<AppState>) -> Vec<CrashDumpInfo> {
+    crate::crash::list_dumps()
+}
+
+/// 解析 dump 预览摘要（模块列表 + 异常代码）。解析失败回 error 字段（UI 展示原文）。
+/// 只接受 crash 目录内合法命名的文件（防路径穿越）。
+#[tauri::command]
+pub fn crash_preview(_state: State<AppState>, params: CrashPreviewParams) -> CrashDumpPreview {
+    let name = params.file_name;
+    let Some(m) = crate::crash::list_dumps()
+        .into_iter()
+        .find(|d| d.file_name == name)
+    else {
+        return CrashDumpPreview {
+            file_name: name,
+            size_bytes: 0,
+            ts: 0,
+            module_count: None,
+            modules: None,
+            exception_code: None,
+            error: Some("转储不存在".into()),
+        };
+    };
+    let err_preview = |error: String| CrashDumpPreview {
+        file_name: name.clone(),
+        size_bytes: m.size_bytes,
+        ts: m.ts,
+        module_count: None,
+        modules: None,
+        exception_code: None,
+        error: Some(error),
+    };
+    if m.size_bytes > crate::crash::parse::MAX_PARSE_BYTES {
+        return err_preview("转储超过解析体积上限".into());
+    }
+    let path = match crate::crash::validated_dump_path(&name) {
+        Ok(p) => p,
+        Err(e) => return err_preview(e),
+    };
+    let bytes = match std::fs::read(&path) {
+        Ok(b) => b,
+        Err(e) => return err_preview(format!("读取转储失败: {e}")),
+    };
+    match crate::crash::parse::parse_summary(&bytes) {
+        Ok(mut s) => {
+            // 异常代码优先取 dump 异常流；本机环境异常流不可用时经 sidecar 携带。
+            if s.exception_code.is_none() {
+                s.exception_code = crate::crash::read_sidecar_code(&path);
+            }
+            CrashDumpPreview {
+                file_name: name,
+                size_bytes: m.size_bytes,
+                ts: m.ts,
+                module_count: Some(s.module_count),
+                modules: Some(s.modules),
+                exception_code: s.exception_code,
+                error: None,
+            }
+        }
+        Err(e) => err_preview(e),
+    }
+}
+
+/// opt-in 上传崩溃转储（红线 #4：仅在 crashUploadOptIn=true 时联网；体积受限）。
+/// 端点未定稿前必然优雅失败（.invalid 域），成功/失败均记审计。
+#[tauri::command]
+pub fn crash_upload(state: State<AppState>, params: CrashUploadParams) -> CrashUploadReport {
+    let opt_in = state
+        .settings
+        .lock()
+        .map(|s| s.crash_upload_opt_in)
+        .unwrap_or(false);
+    let fail = |detail: String| CrashUploadReport {
+        file_name: params.file_name.clone(),
+        uploaded: false,
+        detail: Some(detail),
+    };
+    if !opt_in {
+        return fail("未开启崩溃数据上传（设置中可开启）".into());
+    }
+    let path = match crate::crash::validated_dump_path(&params.file_name) {
+        Ok(p) => p,
+        Err(e) => return fail(e),
+    };
+    let meta = match std::fs::metadata(&path) {
+        Ok(m) => m,
+        Err(e) => return fail(format!("读取转储失败: {e}")),
+    };
+    if meta.len() > crate::crash::MAX_UPLOAD_BYTES {
+        return fail(format!("转储过大（{} 字节），已拒绝上传", meta.len()));
+    }
+    let body = match std::fs::read(&path) {
+        Ok(b) => b,
+        Err(e) => return fail(format!("读取转储失败: {e}")),
+    };
+    let (result, detail) =
+        match crate::updates::http::http_post(crate::crash::CRASH_UPLOAD_URL, &body) {
+            Ok(()) => ("ok", None),
+            Err(e) => ("fail", Some(e)),
+        };
+    let _ = crate::logging::audit::record(&LogEntry {
+        ts: now_ms(),
+        op: "crash_upload".into(),
+        tx_id: None,
+        category_id: None,
+        path: Some(params.file_name.clone()),
+        size_bytes: Some(body.len() as u64),
+        disposition: None,
+        result: Some(result.into()),
+        detail: detail.clone(),
+    });
+    match detail {
+        Some(d) => fail(d),
+        None => CrashUploadReport {
+            file_name: params.file_name,
+            uploaded: true,
+            detail: None,
+        },
+    }
+}
+
+/// 最近一次启动恢复结果（T-6 协议执行摘要；ranAt=0 = 尚未运行）。
+#[tauri::command]
+pub fn crash_recovery(state: State<AppState>) -> CrashRecoveryReport {
+    state
+        .recovery_report
+        .lock()
+        .ok()
+        .and_then(|g| g.clone())
+        .unwrap_or_default()
 }

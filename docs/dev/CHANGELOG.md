@@ -45,3 +45,11 @@
 - **契约加性变更（双端同步 + 记此日志）**：`ScanResult` 增 optional 字段 `whitelistOk?: boolean`（whitelist.xml 加载失败时为 false，UI 清理前明示降级；正常序列化省略，旧消费者不受影响），ipc.ts ↔ contract.rs 一致。
 - **安全审计五项修复**（docs/verify/security-audit-ipc-toctou.md）：T-1 执行前最终复核（白名单重跑+逐级 reparse+size/mtime 比对）；T-2 restore_one 四重校验（隔离区根内/sha256/白名单禁区/父链 reparse）；T-3 隔离区根 reparse 拒绝；F-1 clean_execute 规则加载失败 fail-closed；F-2 白名单降级审计+UI 明示。
 - **验证**：cargo fmt/clippy --all-targets -D warnings/test 全绿（127 单测+20 集成，tests/compat 八项边界 12 例）；pnpm typecheck/vitest(47)/build 全绿。评审文档 docs/review/P4-02.md。
+
+### 崩溃安全 R24（P4-03）
+
+- **契约加性变更（双端同步 + 记此日志）**：新增命令 `crash_list`（— → `CrashDumpInfo[]`）、`crash_preview`（`{fileName}` → `CrashDumpPreview`）、`crash_upload`（`{fileName}` → `CrashUploadReport`，opt-in 门禁）、`crash_recovery`（— → `CrashRecoveryReport`）及配套类型；ipc.ts ↔ contract.rs ↔ api/commands.ts 三端一致；既有命令签名零改动。
+- **minidump 本地落盘**（`crash/dump`）：dbghelp `MiniDumpWriteDump` `#[link]` 直调（零依赖，AGENTS §4.7）；SEH 顶级过滤器 + panic hook 双通道；SEH 通道经辅助线程写 dump、异常代码经 sidecar JSON 携带（本机环境异常流路径不可用，见 LESSONS）；dump 保留最近 5 份（启动清理）。
+- **启动孤儿 journal 恢复**（`crash/recover`，安全审计 T-6 协议）：journal 内容只用于定位 manifest 记录——quarantine 孤儿经 `restore_one`（T-2 四重校验）还原；「已移入未登记」崩溃窗口按命名约定反查唯一候选补登记（不自动还原）；direct/recycle 不可逆去向只标记 orphan + 审计；恢复期间 `clean_execute` 拒绝新事务（`AppState.recovery_pending` 门闸）。
+- **opt-in 上传预览 UI**：Settings 页崩溃数据卡片（optIn 开关 + 本地转储列表 + 预览[模块列表/异常代码] + 手动上传）；Home 页启动恢复横幅；`updates/http` 增 `http_post`（上传通道，仅 R24 opt-in 联网，红线 #4 边界内）。
+- **验证**：cargo fmt/clippy --all-targets -D warnings/test 全绿（140 lib + 24 集成，crash_safety 4 例：kill 中断恢复/SEH/panic/dump）；pnpm typecheck/vitest(55)/build 全绿。评审文档 docs/review/P4-03.md。

@@ -5,6 +5,13 @@
 > 维护（AGENTS.md §9）：任务完成时 agent 自动追加/更新当前会话条目，随任务同一提交。格式：`## YYYY-MM-DD | 主题`。
 > 本初版由历史会话记忆回溯整理（截至 2026-09-29），细节以 git 历史与 TASKS.md 为准。
 
+## 2026-10-04 | P4-03 崩溃安全 R24 交付（minidump + T-6 孤儿恢复 + opt-in 上传预览）
+
+- **做了什么**：`crash/{mod,dump,parse,recover}` 四模块——dump：SEH 顶级过滤器 + panic hook 双通道，dbghelp `MiniDumpWriteDump` `#[link]` 直调（零依赖），落 `<data_root>\crash\` 保留 5 份；recover：启动孤儿 journal 恢复（T-6 协议先行定稿：journal 只定位 manifest 记录绝不按 journal 路径动手，quarantine 孤儿经 restore_one T-2 四重校验还原，「已移入未登记」崩溃窗口按 `<sha8>_<原名>` 约定反查**唯一**未登记候选补登记（🟡/crash.recovered，不自动还原），direct/recycle 不可逆只标记 orphan+审计；恢复期 `clean_execute` 拒绝新事务）；parse：minidump 头/目录/模块流/异常流只读解析（checked 偏移，畸形返回 Err）；四命令 `crash_list/preview/upload/recovery` 加性契约 + `http_post` + Settings 崩溃卡片 + Home 恢复横幅；`bin/crash-sim` + `tests/crash_safety.rs` 4 例（kill/SEH/panic/dump）。
+- **关键结论**：①**本机环境 `MiniDumpWriteDump` 异常流路径不可用（带异常参数恒 998 ERROR_NOACCESS，故障线程直调与干净辅助线程+自有快照均拒）**——工程决策：dump 保证落盘（无异常流兜底成功），异常代码由过滤器深拷贝 EXCEPTION_RECORD 首 u32 写 sidecar `<dump>.json` 携带，`crash_preview` 解析合并；②kill 测试设计：crash-sim 子进程逐文件 intent→移入（写 manifest）→停 300ms→result，父进程轮询 marker 出现即 kill，得到确定性的「intent+manifest 已写、result 未写」窗口形态；③集成测试进程无 lib 的 `TEST_DATA_ROOT_LOCK`（#[cfg(test)]），须本文件私有锁；子进程数据根经新增 `PURESLATE_DATA_ROOT` 环境变量注入（等价 LOCALAPPDATA 信任面）；④clippy 新版规则：`&[x.clone()]`→`std::slice::from_ref`、RawHandle 已是 `*mut c_void` 无需转换、`chunks_exact(2)`/`%2`→`as_chunks`/`is_multiple_of`。
+- **验证**：cargo fmt/clippy -D warnings/test 全绿（140 lib + 24 集成，crash_safety 4 例全过：kill 中断→manifest 背书孤儿还原+journal 闭环+审计 recover）；pnpm typecheck/vitest(55)/build 全绿；评审关卡 `docs/review/P4-03.md`。真机人工：Settings 崩溃卡片预览/上传、Home 恢复横幅待走查。
+- **下一步**：P4-04 测试体系 R21（黄金集扩至 100+ 样本 + fixture 生成器 + tools/vm-regression.md；顺带处置安全审计 T-4 白名单旁路验证样本）。遗留：I-1/I-2（审计清单「P4 前小修」）仍未归属任务。
+
 ## 2026-10-03 | P4-02 兼容加固 R23 交付（安全审计五项修复 + 八项边界）
 
 - **做了什么**：T-1 `cleaner/preflight`（执行前白名单重跑+逐级 reparse+size/mtime 比对，`CleanTarget.mtime_ms` 贯通，apply_one 接线）；T-2 `restore_one` 四重校验（根内/sha256/白名单禁区/父链）；T-3 `ensure_quarantine_root` reparse 拒绝；F-1 `resolve_targets`+clean_execute 规则失败整体拒绝（原 fail-open 已修）；F-2 审计+`ScanResult.whitelistOk` 加性契约+Report 降级横幅；`guard/instance` 单实例互斥量+激活首实例；whitelist `\\?\` 前缀剥离+`quarantine_root_of` 长路径盘符解析；`tests/compat.rs` 12 例八项边界。

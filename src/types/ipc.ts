@@ -124,6 +124,44 @@ export interface UpdateStatus {
   checkedAt: number;
 }
 
+// ---- 崩溃安全（R24 · P4-03 加性新增，SPEC §6.6） ----
+export interface CrashDumpInfo {
+  fileName: string;
+  sizeBytes: number;
+  /** 文件修改时间（epoch ms）。 */
+  ts: number;
+}
+
+export interface CrashDumpPreview {
+  fileName: string;
+  sizeBytes: number;
+  ts: number;
+  moduleCount?: number;
+  /** 模块基名预览（上限见内核 parse::PREVIEW_MODULE_CAP）。 */
+  modules?: string[];
+  /** 异常代码（panic 通道 dump 无异常流 → undefined）。 */
+  exceptionCode?: number;
+  error?: string;
+}
+
+export interface CrashUploadReport {
+  fileName: string;
+  uploaded: boolean;
+  detail?: string;
+}
+
+/** 启动孤儿 journal 恢复报告（T-6 协议；ranAt=0 表示尚未运行）。 */
+export interface CrashRecoveryReport {
+  ranAt: number;
+  orphansFound: number;
+  restored: number;
+  conflictRestored: number;
+  adopted: number;
+  irreversible: number;
+  untouched: number;
+  failures: string[];
+}
+
 // ---- 日志 ----
 export interface LogQueryFilter {
   from: number;
@@ -217,6 +255,14 @@ export interface QuarantinePurgeParams {
 export interface StartupToggleParams {
   id: string;
   enabled: boolean;
+}
+
+export interface CrashPreviewParams {
+  fileName: string;
+}
+
+export interface CrashUploadParams {
+  fileName: string;
 }
 
 export interface LogExportParams {

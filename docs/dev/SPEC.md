@@ -176,6 +176,10 @@ export interface AppSettings {
 | `log_export` | `path` → `boolean` | 导出指定范围 |
 | `settings_get` / `settings_set` | — / `AppSettings` | set 全量覆盖 |
 | `update_check` | `manual: boolean` → `UpdateStatus` | manual=true 无视 optIn |
+| `crash_list` | — → `CrashDumpInfo[]` | 本地转储列表（时间倒序；P4-03 加性新增） |
+| `crash_preview` | `{fileName}` → `CrashDumpPreview` | 模块列表/异常代码摘要；解析失败回 error 字段 |
+| `crash_upload` | `{fileName}` → `CrashUploadReport` | opt-in 门禁（crashUploadOptIn=false 拒绝联网） |
+| `crash_recovery` | — → `CrashRecoveryReport` | 最近一次启动孤儿恢复摘要（ranAt=0 尚未运行） |
 | `app_meta` | — → `{version, rulesVersion, channel}` | |
 
 事件（`listen('event', cb)`）：
@@ -232,8 +236,10 @@ journal 协议见 SAFETY §3。🟢 direct：`RemoveFile`（Windows API，绕过
 - 下载后 sha256 校验失败 → 丢弃 + `rulesPackHashOk=false` + 审计日志；**规则包写入前须校验通过**（规则 XML 是可执行内容）；
 - opt-in 周查请求仅含版本号路径参数，无任何标识（AGENTS 红线 #4）。
 
-### 6.6 崩溃安全（R24）
-minidump 本地始终落盘（crash/，基于 `crash-handler` 或 windows-rs MiniDumpWriteDump）；opt-in 上传前 UI 展示 dump 内容预览（模块列表摘要），确认后才发；主程序启动时扫描孤儿 journal 执行恢复（SAFETY §3）。
+### 6.6 崩溃安全（R24，P4-03）
+- minidump 本地始终落盘（`<data_root>\crash\`，保留最近 5 份）：SEH 顶级过滤器（`SetUnhandledExceptionFilter`）+ Rust panic hook 双通道；dbghelp `MiniDumpWriteDump` 以 `#[link]` 直调（零第三方依赖，依赖决策同 P1-02b 记 LESSONS）。SEH 通道经干净辅助线程写 dump；异常代码经 sidecar `<dump>.json` 携带（本机环境异常流路径不可用，LESSONS §①）；
+- opt-in 上传（`crashUploadOptIn`，默认 false）：上传前 `crash_preview` 展示内容预览（模块列表摘要 + 异常代码），用户在设置页显式点击才发送；端点为占位常量（P4-06 定稿）；
+- 主程序启动时扫描孤儿 journal 执行恢复（SAFETY §3 / T-6 协议，`crash/recover`）：**journal 只定位、manifest 唯一信任锚**——quarantine 孤儿经 `restore_one`（T-2 四重校验）自动还原；「已移入未登记」崩溃窗口按命名约定反查唯一候选补登记（不自动还原）；direct/recycle 不可逆去向只标记 orphan + 审计 + UI 提示；恢复期间 `clean_execute` 拒绝新事务。
 
 ## 7. UI 规范
 

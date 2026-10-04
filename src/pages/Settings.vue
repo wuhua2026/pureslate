@@ -1,17 +1,38 @@
 <script setup lang="ts">
 import { onMounted, ref } from "vue";
-import { settings_get, settings_set, update_check } from "../api/commands";
-import type { AppSettings, UpdateStatus } from "../types/ipc";
+import {
+  crash_list,
+  crash_preview,
+  crash_upload,
+  settings_get,
+  settings_set,
+  update_check,
+} from "../api/commands";
+import type { AppSettings, CrashDumpInfo, CrashDumpPreview, UpdateStatus } from "../types/ipc";
+import { formatBytes } from "./filesModel";
+import { moduleLine, previewSummary } from "./crashModel";
 
 /** 设置页（P4-01 起步）：R22 更新（optIn 周查/镜像优先/手动检查）+ 专家模式。
- *  后续任务按需扩展（隔离保留期等）。 */
+ *  P4-03 扩展：R24 崩溃数据（opt-in 上传 + 本地转储预览）。 */
 const settings = ref<AppSettings | null>(null);
 const checking = ref(false);
 const status = ref<UpdateStatus | null>(null);
 const checkError = ref("");
 
+// 崩溃转储（P4-03）：列表 + 展开的预览 + 上传状态。
+const dumps = ref<CrashDumpInfo[]>([]);
+const previews = ref<Record<string, CrashDumpPreview>>({});
+const openName = ref<string | null>(null);
+const uploading = ref<string | null>(null);
+const uploadMsgs = ref<Record<string, { text: string; ok: boolean }>>({});
+
 async function load(): Promise<void> {
   settings.value = await settings_get();
+  try {
+    dumps.value = await crash_list();
+  } catch {
+    dumps.value = [];
+  }
 }
 
 async function save(next: AppSettings): Promise<void> {
@@ -33,6 +54,39 @@ async function checkNow(): Promise<void> {
     checkError.value = String(e);
   } finally {
     checking.value = false;
+  }
+}
+
+async function togglePreview(name: string): Promise<void> {
+  if (openName.value === name) {
+    openName.value = null;
+    return;
+  }
+  openName.value = name;
+  try {
+    previews.value[name] = await crash_preview({ fileName: name });
+  } catch (e) {
+    previews.value[name] = {
+      fileName: name,
+      sizeBytes: 0,
+      ts: 0,
+      error: String(e),
+    };
+  }
+}
+
+async function upload(name: string): Promise<void> {
+  if (uploading.value) return;
+  uploading.value = name;
+  try {
+    const r = await crash_upload({ fileName: name });
+    uploadMsgs.value[name] = r.uploaded
+      ? { text: "已上传，感谢反馈", ok: true }
+      : { text: r.detail ?? "上传失败", ok: false };
+  } catch (e) {
+    uploadMsgs.value[name] = { text: String(e), ok: false };
+  } finally {
+    uploading.value = null;
   }
 }
 
@@ -100,6 +154,59 @@ onMounted(() => {
           />
           <span>解锁高风险（🔴）项：灰禁解除，清理前仍需二次确认令牌</span>
         </label>
+      </section>
+
+      <section class="card">
+        <h2>崩溃数据（默认仅本地保存）</h2>
+        <label class="row">
+          <input
+            type="checkbox"
+            :checked="settings.crashUploadOptIn"
+            @change="toggle('crashUploadOptIn')"
+          />
+          <span>允许上传崩溃转储帮助修复问题（默认关闭；上传前可预览内容）</span>
+        </label>
+        <p v-if="dumps.length === 0" class="empty-list">没有本地崩溃转储</p>
+        <ul v-else class="dump-list">
+          <li v-for="d in dumps" :key="d.fileName" class="dump-row">
+            <div class="dump-head">
+              <span class="dump-name">{{ d.fileName }}</span>
+              <span class="dump-size">{{ formatBytes(d.sizeBytes) }}</span>
+              <span class="dump-actions">
+                <button class="btn" @click="togglePreview(d.fileName)">
+                  {{ openName === d.fileName ? "收起" : "预览" }}
+                </button>
+                <button
+                  class="btn"
+                  :disabled="!settings.crashUploadOptIn || uploading === d.fileName"
+                  @click="upload(d.fileName)"
+                >
+                  {{ uploading === d.fileName ? "上传中…" : "上传" }}
+                </button>
+              </span>
+            </div>
+            <div v-if="openName === d.fileName" class="dump-preview">
+              <template v-if="previews[d.fileName]">
+                <p class="preview-line">
+                  {{ previewSummary(previews[d.fileName]) }}
+                </p>
+                <code class="mod-list">{{ moduleLine(previews[d.fileName]) }}</code>
+              </template>
+              <p v-else class="preview-line">解析中…</p>
+            </div>
+            <p
+              v-if="uploadMsgs[d.fileName]"
+              class="upload-msg"
+              :class="{ ok: uploadMsgs[d.fileName].ok }"
+            >
+              {{ uploadMsgs[d.fileName].text }}
+            </p>
+          </li>
+        </ul>
+        <p class="hint">
+          崩溃转储仅在本程序意外退出时写入本机，包含加载模块列表与异常代码摘要，
+          不自动上传；本地最多保留 5 份。
+        </p>
       </section>
     </template>
   </section>
@@ -173,5 +280,63 @@ onMounted(() => {
   color: var(--grade-yellow, #d9971c);
   font-size: 0.8rem;
   margin: 4px 0 0;
+}
+.dump-list {
+  list-style: none;
+  margin: 8px 0 0;
+  padding: 0;
+}
+.dump-row {
+  padding: 8px 0;
+  border-top: 1px solid var(--border, #e4e7ec);
+  font-size: 0.82rem;
+}
+.dump-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.dump-name {
+  flex: 1;
+  color: var(--text, #1f2430);
+  word-break: break-all;
+}
+.dump-size {
+  color: var(--text-2, #5a6472);
+  white-space: nowrap;
+}
+.dump-actions {
+  display: flex;
+  gap: 6px;
+}
+.dump-preview {
+  margin-top: 6px;
+  padding: 8px 10px;
+  background: var(--bg, #fafafa);
+  border: 1px solid var(--border, #e4e7ec);
+  border-radius: 8px;
+}
+.preview-line {
+  margin: 0 0 4px;
+  color: var(--text, #1f2430);
+}
+.mod-list {
+  display: block;
+  font-size: 0.75rem;
+  color: var(--text-2, #5a6472);
+  word-break: break-all;
+}
+.upload-msg {
+  margin: 4px 0 0;
+  color: var(--grade-yellow, #d9971c);
+  font-size: 0.8rem;
+}
+.upload-msg.ok {
+  color: var(--grade-green, #2e9e5b);
+}
+.hint {
+  margin: 10px 0 0;
+  font-size: 0.75rem;
+  color: var(--text-2, #5a6472);
 }
 </style>

@@ -214,6 +214,65 @@ pub struct UpdateStatus {
     pub checked_at: i64,
 }
 
+// ---- 崩溃安全（R24 · P4-03 加性新增，SPEC §6.6） ----
+/// 一份崩溃转储的列表项（`crash_list` 返回）。
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CrashDumpInfo {
+    pub file_name: String,
+    pub size_bytes: u64,
+    /// 文件修改时间（epoch ms）。
+    pub ts: i64,
+}
+
+/// dump 预览摘要（`crash_preview` 返回；解析失败时 error 非 None，UI 展示原文）。
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CrashDumpPreview {
+    pub file_name: String,
+    pub size_bytes: u64,
+    pub ts: i64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub module_count: Option<u32>,
+    /// 模块基名预览（上限见内核 parse::PREVIEW_MODULE_CAP）。
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub modules: Option<Vec<String>>,
+    /// 异常代码（panic 通道 dump 无异常流 → None）。
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub exception_code: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
+}
+
+/// 上传结果（`crash_upload` 返回）。
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CrashUploadReport {
+    pub file_name: String,
+    pub uploaded: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub detail: Option<String>,
+}
+
+/// 启动孤儿 journal 恢复报告（T-6 协议；`crash_recovery` 返回，ranAt=0 表示尚未运行）。
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CrashRecoveryReport {
+    pub ran_at: i64,
+    pub orphans_found: u64,
+    /// manifest 信任锚还原成功。
+    pub restored: u64,
+    /// 还原时原路径被占用，落 restore-conflict 兜底。
+    pub conflict_restored: u64,
+    /// 崩溃窗口「已移入未登记」：按命名约定反查补登记（不自动还原）。
+    pub adopted: u64,
+    /// 不可逆去向（direct/recycle）：仅标记 orphan + 审计，未动作。
+    pub irreversible: u64,
+    /// 无需处理（移动前崩溃 / 已有终态记录）。
+    pub untouched: u64,
+    pub failures: Vec<String>,
+}
+
 // ---- 日志 ----
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -374,6 +433,18 @@ pub struct QuarantinePurgeParams {
 pub struct StartupToggleParams {
     pub id: String,
     pub enabled: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CrashPreviewParams {
+    pub file_name: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CrashUploadParams {
+    pub file_name: String,
 }
 
 // ---- 事件名常量 ----

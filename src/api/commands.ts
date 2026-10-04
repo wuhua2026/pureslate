@@ -6,6 +6,12 @@ import type {
   AppMeta,
   AppSettings,
   CleanExecuteParams,
+  CrashDumpInfo,
+  CrashDumpPreview,
+  CrashPreviewParams,
+  CrashRecoveryReport,
+  CrashUploadParams,
+  CrashUploadReport,
   LogEntry,
   LogQueryFilter,
   PurgeReport,
@@ -93,3 +99,23 @@ export const update_check = (manual: boolean) =>
   useMock()
     ? mockCommands.update_check(manual)
     : invokeApp<UpdateStatus>("update_check", { manual });
+
+// ---- R24 崩溃安全（P4-03） ----
+
+export const crash_list = () =>
+  useMock() ? mockCommands.crash_list() : invokeApp<CrashDumpInfo[]>("crash_list");
+
+export const crash_preview = (params: CrashPreviewParams) =>
+  useMock()
+    ? mockCommands.crash_preview(params)
+    : invokeApp<CrashDumpPreview>("crash_preview", params);
+
+export const crash_upload = (params: CrashUploadParams) =>
+  useMock()
+    ? mockCommands.crash_upload(params)
+    : invokeApp<CrashUploadReport>("crash_upload", params);
+
+export const crash_recovery = () =>
+  useMock()
+    ? mockCommands.crash_recovery()
+    : invokeApp<CrashRecoveryReport>("crash_recovery");

@@ -1,8 +1,9 @@
 //! 应用级共享状态（Tauri State）。
 
+use std::sync::atomic::AtomicBool;
 use std::sync::Mutex;
 
-use crate::contract::{AppSettings, ScanItem, ScanResult};
+use crate::contract::{AppSettings, CrashRecoveryReport, ScanItem, ScanResult};
 use crate::scanner::walk::CancelToken;
 
 /// 最近保留的完成扫描数（超出按完成时间丢弃最旧）。
@@ -15,6 +16,11 @@ pub struct AppState {
     pub settings: Mutex<AppSettings>,
     /// 扫描会话存储（current：进行中；finished：已完成的滚动历史）。
     pub scans: Mutex<ScanStore>,
+    /// R24 崩溃恢复进行中（true 时 `clean_execute` 拒绝新事务，防恢复移动文件与
+    /// 新清理竞态）。
+    pub recovery_pending: AtomicBool,
+    /// 最近一次启动恢复结果（`crash_recovery` 拉取；None/ranAt=0 = 尚未跑）。
+    pub recovery_report: Mutex<Option<CrashRecoveryReport>>,
 }
 
 impl AppState {
@@ -25,6 +31,8 @@ impl AppState {
             // P2-01：启动从 settings.json 恢复设置（信任底座持久化）。
             settings: Mutex::new(crate::storage::load_settings()),
             scans: Mutex::new(ScanStore::default()),
+            recovery_pending: AtomicBool::new(false),
+            recovery_report: Mutex::new(None),
         }
     }
 }
