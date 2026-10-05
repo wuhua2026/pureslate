@@ -336,6 +336,23 @@ pub struct AppMeta {
     pub version: String,
     pub rules_version: String,
     pub channel: Channel,
+    /// 当前进程是否管理员提权（v0.1.2 加性：MFT 快速引擎启用与否的 UI 提示依据；
+    /// 非 Windows / 不可得时省略）。
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub is_elevated: Option<bool>,
+}
+
+/// 单个固定磁盘的容量信息（v0.1.2 加性新增，`disk_usage` 返回；首页磁盘条真实数据）。
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DiskUsageInfo {
+    /// 盘符字母（"C"）。
+    pub letter: String,
+    /// 卷标（用户命名的卷名；不可得为 None）。
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub label: Option<String>,
+    pub total_bytes: u64,
+    pub free_bytes: u64,
 }
 
 // ---- 事件 payload ----
@@ -467,16 +484,21 @@ mod tests {
             version: "0.1.0".into(),
             rules_version: "0".into(),
             channel: Channel::Github,
+            // v0.1.2 加性：None 时序列化省略（旧消费者不受影响）。
+            is_elevated: Some(true),
         };
         let json = serde_json::to_string(&meta).unwrap();
         assert!(json.contains("\"rulesVersion\""));
         assert!(json.contains("\"channel\":\"github\""));
+        assert!(json.contains("\"isElevated\":true"));
     }
 
     #[test]
     fn app_meta_roundtrip_deserialize() {
+        // 无 isElevated 的旧载荷兼容（Option 缺省 None）。
         let json = r#"{"version":"0.1.0","rulesVersion":"1","channel":"github"}"#;
         let meta: AppMeta = serde_json::from_str(json).unwrap();
         assert_eq!(meta.channel, Channel::Github);
+        assert_eq!(meta.is_elevated, None);
     }
 }

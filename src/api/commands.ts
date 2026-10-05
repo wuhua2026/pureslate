@@ -12,6 +12,7 @@ import type {
   CrashRecoveryReport,
   CrashUploadParams,
   CrashUploadReport,
+  DiskUsageInfo,
   LogEntry,
   LogQueryFilter,
   PurgeReport,
@@ -35,6 +36,10 @@ function useMock(): boolean {
 
 export const app_meta = () =>
   useMock() ? mockCommands.app_meta() : invokeApp<AppMeta>("app_meta");
+
+// v0.1.2：固定磁盘容量枚举（首页磁盘条真实数据）。
+export const disk_usage = () =>
+  useMock() ? mockCommands.disk_usage() : invokeApp<DiskUsageInfo[]>("disk_usage");
 
 export const scan_start = (profile: ScanProfile) =>
   useMock() ? mockCommands.scan_start(profile) : invokeApp<string>("scan_start", { profile });

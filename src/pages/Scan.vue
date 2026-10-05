@@ -1,10 +1,26 @@
 <script setup lang="ts">
-import { onMounted, watch } from "vue";
+import { onMounted, ref, watch } from "vue";
 import { useRouter } from "vue-router";
+import { app_meta } from "../api/commands";
 import { useScanStore } from "../stores/scan";
 
 const store = useScanStore();
 const router = useRouter();
+
+// v0.1.2：非提权提示——便携/双击运行通常无管理员权限，MFT 快速引擎不启用，
+// 深度维度（大文件全卷遍历/重复文件哈希）在大容量盘上会显著变慢。
+const elevated = ref<boolean | null>(null);
+const isDeep = store.deepScan;
+
+onMounted(async () => {
+  try {
+    const meta = await app_meta();
+    elevated.value = meta.isElevated ?? null;
+  } catch {
+    elevated.value = null;
+  }
+  void store.start();
+});
 
 const PHASE_CN: Record<string, string> = {
   walking: "遍历扫描中",
@@ -33,21 +49,22 @@ watch(
     if (done) router.push("/report");
   },
 );
-
-onMounted(() => {
-  void store.start();
-});
 </script>
 
 <template>
   <main class="scan">
     <header class="scan-head">
       <router-link to="/" class="back">← 首页</router-link>
-      <h1>一键体检</h1>
+      <h1>{{ isDeep ? "深度体检" : "一键体检" }}</h1>
       <p class="sub">只读扫描 · 不删除任何文件 · 全程可在确认后逐项处置</p>
     </header>
 
     <div v-if="store.error" class="error">扫描失败：{{ store.error }}</div>
+
+    <p v-else-if="isDeep && elevated === false" class="slow-hint">
+      当前未以管理员运行：大文件/重复文件维度使用慢速遍历，大容量盘耗时明显变长。
+      可取消后右键"以管理员身份运行"本程序再次体检（快速体检不受影响）。
+    </p>
 
     <section class="card" v-else>
       <!-- 阶段与百分比 -->
@@ -110,6 +127,16 @@ onMounted(() => {
   margin: 0;
   color: var(--text-2);
   font-size: 0.9rem;
+}
+.slow-hint {
+  margin: 0 0 12px;
+  padding: 10px 14px;
+  border: 1px solid var(--grade-yellow);
+  background: #fdf8ee;
+  border-radius: 8px;
+  color: var(--text);
+  font-size: 0.83rem;
+  line-height: 1.6;
 }
 .error {
   color: var(--grade-red);

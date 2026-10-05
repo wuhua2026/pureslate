@@ -71,3 +71,10 @@
 - **规则资源布局修复（v0.1.0 安装包在非开发机上不可用）**：tauri.conf 资源由 list 形式（落 `$RESOURCE/resources/rules/`，保留结构）改 **map 形式**（`"resources/rules/*.xml": "rules/"`，glob 平铺到 `$RESOURCE/rules/`），与 `rules_dirs` 的 `resource_dir()/rules` 读取匹配；`rules_dirs` 增双布局探测兜底（`rules/` → `resources/rules/` → 开发态源码目录）。v0.1.0 缺陷表现：非开发机上规则加载失败 → 扫描空结果 / 清理 fail-closed 拒绝。
 - **便携版（portable zip）**：Release 新增资产 `PureSlate-<ver>-portable.zip`（exe + rules/ 全量含 whitelist.xml + README.txt 使用说明），release.yml 构建后 Compress-Archive 打包；`resource_dir()` 对裸 exe 解析到 exe 目录，便携形态资源解析与安装版一致。
 - **验证**：本地 `pnpm tauri build --no-bundle` 确认 `target/release/pureslate.exe` + `rules/`（5 XML 全量）布局正确；cargo/pnpm 全量绿。版本号 0.1.1（tauri.conf + Cargo.toml）。
+
+### v0.1.2（真机反馈：体检体验重构 + 磁盘真实数据）
+
+- **契约加性变更（双端同步 + 记此日志）**：①`AppMeta` 增 optional `isElevated?: boolean`（提权状态——MFT 快速引擎提示依据）；②新增命令 `disk_usage`（— → `DiskUsageInfo[]`：letter/label?/totalBytes/freeBytes，`GetDiskFreeSpaceExW`+`GetVolumeInformationW` 枚举固定盘）。
+- **体检分两档（真机反馈修复）**：默认体检曾全开六维度，large（全卷遍历）+dup（哈希）在便携非提权形态 + 2.5TB 盘上十几分钟且 large 无中间进度事件——用户实测"只见临时文件"。现 `scan` store 拆 QUICK（temp/cache/startup/privacy）与 DEEP（large/dup）两组，默认快速；首页新增"深度体检"入口（`setDeepScan` 经 store 传递）；Scan.vue 深度 + 非提权时显示慢速原因提示（`app_meta.isElevated`）。
+- **首页磁盘占用接真实数据**：`disk_usage` 命令替代 `DiskUsageStub` 硬编码（stub 恰为开发机盘，用户无从分辨——P1-06 遗留"真数据后接"至此收口）；失败回退 stub。
+- **验证**：cargo fmt/clippy -D warnings/test 全绿（170 passed，contract app_meta 用例更新）；pnpm typecheck/vitest(54)/build 全绿。版本 0.1.2（tauri.conf/Cargo.toml/mock）。

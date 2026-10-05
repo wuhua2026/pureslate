@@ -41,3 +41,7 @@ tools/diag/
 
 # 项目状态报告（仅本地查阅，不入公开仓库）
 docs/verify/report-*.md
+
+# Mimosa 安全扫描插件状态（本地）
+.mimosa/
+.zcodeignore

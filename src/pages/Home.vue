@@ -1,8 +1,9 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from "vue";
-import { crash_recovery } from "../api/commands";
+import { onMounted, ref } from "vue";
+import { crash_recovery, disk_usage } from "../api/commands";
 import { DiskUsageStub, type DiskUsageEntry } from "../mocks/data";
 import { recoveryNotice } from "./crashModel";
+import type { DiskUsageInfo } from "../types/ipc";
 
 // GB/TB 易读格式化：>=1024GB 显示 TB，否则 GB。
 function formatBytes(bytes: number): string {
@@ -11,12 +12,21 @@ function formatBytes(bytes: number): string {
   return `${gb.toFixed(0)} GB`;
 }
 
-function usagePercent(d: DiskUsageEntry): number {
+function usagePercent(d: DiskUsageEntry | DiskUsageInfo): number {
   if (d.totalBytes <= 0) return 0;
   return Math.min(100, Math.round(((d.totalBytes - d.freeBytes) / d.totalBytes) * 100));
 }
 
-const disks = computed(() => DiskUsageStub);
+// v0.1.2：磁盘占用接真实数据（disk_usage 命令枚举固定盘）；失败回退 mock stub。
+const disks = ref<DiskUsageEntry[] | DiskUsageInfo[]>(DiskUsageStub);
+
+// v0.1.2：体检分两档——快速（temp/cache/startup/privacy，秒级~分钟级）与
+// 深度（加 large/dup，大容量盘 + 非提权时可能十分钟级）。选择经 store 传递。
+import { useScanStore } from "../stores/scan";
+const scanStore = useScanStore();
+function goScan(deep: boolean): void {
+  scanStore.setDeepScan(deep);
+}
 
 // R24：启动恢复通知（上次清理被崩溃中断时，横幅告知处理结果）。
 const recoveryBanner = ref<string | null>(null);
@@ -25,6 +35,12 @@ onMounted(async () => {
     recoveryBanner.value = recoveryNotice(await crash_recovery());
   } catch {
     recoveryBanner.value = null;
+  }
+  try {
+    const real = await disk_usage();
+    if (real.length > 0) disks.value = real;
+  } catch {
+    disks.value = DiskUsageStub;
   }
 });
 </script>
@@ -68,9 +84,12 @@ onMounted(async () => {
       <div class="cta-row">
         <div>
           <h2 class="card-title">一键体检</h2>
-          <p class="cta-desc">扫描各类可清理项并做安全分级，不删除任何文件，等你确认后再执行。</p>
+          <p class="cta-desc">快速体检扫描临时/缓存/隐私/启动项（约几秒到几分钟），不删除任何文件，等你确认后再执行。需要定位大文件与重复文件时可选深度体检（大容量盘较慢）。</p>
         </div>
-        <router-link to="/scan" class="btn-primary">开始体检 →</router-link>
+        <div class="cta-btns">
+          <router-link to="/scan" class="btn-deep" @click="goScan(true)">深度体检</router-link>
+          <router-link to="/scan" class="btn-primary" @click="goScan(false)">开始体检 →</router-link>
+        </div>
       </div>
     </section>
 
@@ -196,6 +215,24 @@ onMounted(async () => {
 }
 .btn-primary:hover {
   filter: brightness(1.05);
+}
+.cta-btns {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  flex-shrink: 0;
+}
+.btn-deep {
+  padding: 0.7rem 1.1rem;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  color: var(--text-2);
+  font-size: 0.85rem;
+  white-space: nowrap;
+}
+.btn-deep:hover {
+  border-color: var(--accent);
+  color: var(--accent);
 }
 
 /* 快速建议 */

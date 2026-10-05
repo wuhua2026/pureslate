@@ -29,13 +29,97 @@ fn clean_cancel_registry() -> std::sync::MutexGuard<'static, HashMap<String, Can
         .unwrap_or_else(|e| e.into_inner())
 }
 
-/// 应用元信息（首个打通命令）。
+/// 应用元信息（首个打通命令）。is_elevated：提权状态（v0.1.2 加性）——
+/// UI 据此提示"MFT 快速引擎可用性"（便携/双击运行通常非提权，大容量盘
+/// 深度维度会显著变慢）。
 #[tauri::command]
 pub fn app_meta(state: State<AppState>) -> AppMeta {
     AppMeta {
         version: state.version.clone(),
         rules_version: state.rules_version.clone(),
         channel: Channel::Github,
+        is_elevated: Some(crate::scanner::mft::is_admin()),
+    }
+}
+
+/// 固定磁盘容量枚举（v0.1.2 加性 · 首页磁盘条真实数据，替代 mock stub）。
+/// 枚举 A–Z 中 `DRIVE_FIXED` 的盘，逐盘取总/可用空间与卷标。
+#[tauri::command]
+pub fn disk_usage(_state: State<AppState>) -> Vec<DiskUsageInfo> {
+    #[cfg(windows)]
+    {
+        let mut out = Vec::new();
+        for code in b'A'..=b'Z' {
+            let root = format!("{}:\\", code as char);
+            let root_w: Vec<u16> = root.encode_utf16().chain(std::iter::once(0)).collect();
+            // unsafe：kernel32 卷信息查询，仅读取；宽字符串均以 NUL 结尾。
+            unsafe extern "system" {
+                fn GetDriveTypeW(lp_root_path_name: *const u16) -> u32;
+                fn GetDiskFreeSpaceExW(
+                    lp_directory_name: *const u16,
+                    lp_free_bytes_available_to_caller: *mut u64,
+                    lp_total_number_of_bytes: *mut u64,
+                    lp_total_number_of_free_bytes: *mut u64,
+                ) -> i32;
+                fn GetVolumeInformationW(
+                    lp_root_path_name: *const u16,
+                    lp_volume_name_buffer: *mut u16,
+                    n_volume_name_size: u32,
+                    lp_volume_serial_number: *mut u32,
+                    lp_maximum_component_length: *mut u32,
+                    lp_file_system_flags: *mut u32,
+                    lp_file_system_name_buffer: *mut u16,
+                    n_file_system_name_size: u32,
+                ) -> i32;
+            }
+            const DRIVE_FIXED: u32 = 3;
+            if unsafe { GetDriveTypeW(root_w.as_ptr()) } != DRIVE_FIXED {
+                continue;
+            }
+            let (mut total, mut free) = (0u64, 0u64);
+            // 可用空间对"调用者"（配额视角）；UI 语义用磁盘物理剩余更直观，
+            // 但 GetDiskFreeSpaceExW 的第三参数（卷总剩余）即 free_bytes。
+            let ok = unsafe {
+                GetDiskFreeSpaceExW(root_w.as_ptr(), std::ptr::null_mut(), &mut total, &mut free)
+            } != 0;
+            if !ok || total == 0 {
+                continue;
+            }
+            let label: Option<String> = {
+                let mut buf = [0u16; 64];
+                let n = unsafe {
+                    GetVolumeInformationW(
+                        root_w.as_ptr(),
+                        buf.as_mut_ptr(),
+                        buf.len() as u32,
+                        std::ptr::null_mut(),
+                        std::ptr::null_mut(),
+                        std::ptr::null_mut(),
+                        std::ptr::null_mut(),
+                        0,
+                    )
+                };
+                if n != 0 {
+                    let end = buf.iter().position(|&c| c == 0).unwrap_or(buf.len());
+                    let s = String::from_utf16_lossy(&buf[..end]);
+                    let s = s.trim().to_string();
+                    (!s.is_empty()).then_some(s)
+                } else {
+                    None
+                }
+            };
+            out.push(DiskUsageInfo {
+                letter: (code as char).to_string(),
+                label,
+                total_bytes: total,
+                free_bytes: free,
+            });
+        }
+        out
+    }
+    #[cfg(not(windows))]
+    {
+        Vec::new()
     }
 }
 

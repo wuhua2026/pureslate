@@ -17,12 +17,18 @@ import type {
   ScanResult,
 } from "../types/ipc";
 
-const ALL_DIMENSIONS: ScanDimension[] = ["temp", "large", "dup", "cache", "startup", "privacy"];
+/** 快速维度（v0.1.2 默认体检）：temp/cache/privacy 为定点目录扫描、startup 为
+ * 注册表/计划任务枚举——秒级~分钟级，任何形态（含便携非提权）体验可控。 */
+const QUICK_DIMENSIONS: ScanDimension[] = ["temp", "cache", "startup", "privacy"];
+/** 深度维度：large（全卷遍历）+ dup（内容哈希）——大容量盘 + 非提权（无 MFT 快速
+ * 引擎）时可能十分钟级，改为显式选择（v0.1.2：默认全开曾导致体检"只见临时文件"）。 */
+const DEEP_DIMENSIONS: ScanDimension[] = ["large", "dup"];
 
-/** 默认体检维度：全开（privacy 已按 P3-04 🟡 决策纳入常规体检；红档项由规则侧控制）。 */
-function defaultProfile(): ScanProfile {
+/** 组合体检 profile：快速四维度恒开，深度维度（large/dup）按 deep 开关。 */
+function profileWith(deep: boolean): ScanProfile {
   const dimensions: Partial<Record<ScanDimension, boolean>> = {};
-  for (const d of ALL_DIMENSIONS) dimensions[d] = true;
+  for (const d of QUICK_DIMENSIONS) dimensions[d] = true;
+  for (const d of DEEP_DIMENSIONS) dimensions[d] = deep;
   return { dimensions };
 }
 
@@ -120,13 +126,20 @@ export const useScanStore = defineStore("scan", () => {
       }),
     );
 
-    const id = await commands.scan_start(defaultProfile());
+    const id = await commands.scan_start(profileWith(deepScan.value));
     if (!id) {
       error.value = "扫描启动失败";
       running.value = false;
       return;
     }
     scanId.value = id;
+  }
+
+  /** 深度体检开关（v0.1.2）：Home 页"深度体检"按钮置位，Scan.vue onMounted 启动时
+   *  读取并纳入 large/dup 维度；默认（快速体检）不含慢维度。 */
+  const deepScan = ref(false);
+  function setDeepScan(v: boolean) {
+    deepScan.value = v;
   }
 
   async function start() {
@@ -169,6 +182,8 @@ export const useScanStore = defineStore("scan", () => {
     result,
     items,
     error,
+    deepScan,
+    setDeepScan,
     foundBytesTotal,
     isDone,
     start,

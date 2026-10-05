@@ -92,6 +92,7 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             ipc::commands::app_meta,
+            ipc::commands::disk_usage,
             ipc::commands::scan_start,
             ipc::commands::scan_cancel,
             ipc::commands::scan_get_items,

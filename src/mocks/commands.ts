@@ -13,6 +13,7 @@ import type {
   CrashRecoveryReport,
   CrashUploadParams,
   CrashUploadReport,
+  DiskUsageInfo,
   LogEntry,
   LogQueryFilter,
   PurgeReport,
@@ -30,7 +31,11 @@ import type {
 import { QuarantineListStub, StartupListStub, buildMockScanResult } from "./data";
 
 export const mockCommands = {
-  app_meta: (): Promise<AppMeta> => Promise.resolve({ version: "0.1.0", rulesVersion: "0", channel: "github" }),
+  app_meta: (): Promise<AppMeta> =>
+    Promise.resolve({ version: "0.1.2", rulesVersion: "0", channel: "github", isElevated: false }),
+
+  // v0.1.2：mock 直接复用磁盘 stub（真实模式走 disk_usage 命令）。
+  disk_usage: (): Promise<DiskUsageInfo[]> => import("./data").then((m) => m.DiskUsageStub),
 
   scan_start: (_profile: ScanProfile): Promise<string> => {
     const result = buildMockScanResult();

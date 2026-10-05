@@ -196,6 +196,16 @@ export interface AppMeta {
   version: string;
   rulesVersion: string;
   channel: Channel;
+  /** 当前进程是否管理员提权（v0.1.2 加性：MFT 快速引擎提示依据；不可得时缺省）。 */
+  isElevated?: boolean;
+}
+
+/** 单个固定磁盘的容量信息（v0.1.2 加性新增，`disk_usage` 返回）。 */
+export interface DiskUsageInfo {
+  letter: string;
+  label?: string;
+  totalBytes: number;
+  freeBytes: number;
 }
 
 // ---- 事件 payload ----
