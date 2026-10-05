@@ -31,3 +31,10 @@ dist-ssr
 
 # 净室隔离（红线5）：竞品研究素材仅本地参考，禁止入库
 docs/research/
+
+# 私人文档（2026-10-04 决策：产品战略/个人规划/内部安全审计不入公开仓库，
+# 本地保留；历史提交中仍可见——接受，见 SESSIONS 2026-10-04）
+docs/prd-*.md
+docs/dev-plan-*.md
+docs/verify/security-audit-*.md
+tools/diag/

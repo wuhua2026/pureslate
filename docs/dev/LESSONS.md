@@ -161,7 +161,7 @@
 
 ## ③ 本机环境结论
 
-- 开发机用户 `17599`，Windows，系统盘 C: 为 NTFS。
+- 开发机用户名不入公开文档（2026-10-04 脱敏；本机路径形如 `C:\Users\<本地账户>\`），Windows，系统盘 C: 为 NTFS。
 - Shell 为 Windows PowerShell 5.1（非 pwsh）：编码两坑见 §①。
 - 提权排障既定模式：`tools/diag/` 下 ASCII runner 脚本（`.probe-elevate.ps1` / `.fsctl-elevate.ps1` / `.bench-elevate.ps1`）+ 输出落盘 `*-out.txt`（已 gitignore）。
 - 探针工具：`src-tauri/src/bin/probe-mft.rs`（提权/完整性/MFT 打开诊断）、`probe-fsctl.rs`（卷打开方式矩阵测试）。
