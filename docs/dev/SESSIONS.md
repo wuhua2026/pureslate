@@ -5,6 +5,14 @@
 > 维护（AGENTS.md §9）：任务完成时 agent 自动追加/更新当前会话条目，随任务同一提交。格式：`## YYYY-MM-DD | 主题`。
 > 本初版由历史会话记忆回溯整理（截至 2026-09-29），细节以 git 历史与 TASKS.md 为准。
 
+## 2026-10-05 | v0.1.1 发布（P0 级发布缺陷修复 + 便携版引入）
+
+- **做了什么**：①用户要"便捷包"→ 只读分析中揭出 **P0 级发布缺陷**：tauri.conf 资源用 list 形式（落 `$RESOURCE/resources/rules/`）而 `rules_dirs` 读 `$RESOURCE/rules/`——**v0.1.0 安装包在非开发机上规则加载失败 → 扫描空/清理 fail-closed 拒绝**（开发者本机被源码目录回退掩盖，P1-08 真机走查走 dev 模式未暴露）；②修复：tauri.conf 改 **map 形式**（`"resources/rules/*.xml": "rules/"` glob 平铺）+ `rules_dirs` 双布局探测兜底（rules/ → resources/rules/ → 源码目录）；③**便携版**：release.yml 新增 Compress-Archive 打包（exe + rules/ 全量含 whitelist.xml + README.txt），Release 四资产（安装包/便携 zip/规则包/构建哈希）；④版本 0.1.1、release notes、CHANGELOG、tag 发布全链路完成。
+- **关键结论**：①**Tauri resources list 形式"保留原相对结构"**——与 bundle 消费侧的目录预期极易错位，map 形式（显式目标）才是可读契约；②「开发者本机永远测不出安装版缺陷」第二次应验（第一次是 CI 提权 MFT）——**安装形态必须真机安装验证**，target/release 的 `--no-bundle` 布局检查是本地可行的最低成本验证（`pnpm tauri build --no-bundle` 后直接看 `target/release/` 的资源复制结果）；③便携包语义边界如实声明：免安装 ≠ 零写入（审计/journal/隔离区必须固定位置），WebView2 Runtime 是唯一外部依赖；④Compress-Archive 内 README.txt 用 ASCII 文件名规避 zip 非 ASCII 文件名编码风险。
+- **验证**：本地 cargo 170/0 + pnpm 54/54 + `--no-bundle` 布局确认（pureslate.exe + rules/ 5 XML 全量）；CI 全绿（run 37298252487）；Release v0.1.1 四资产（安装包 741KB/便携 3.7MB/规则包/build-hashes）+ manifest 回推 main（appVersion=0.1.1，commit bfdafd1）；Release 页正文使用 notes 文件。
+- **下一步**：真机安装/便携双形态走查（规则命中扫描、清理、隔离区）；SignPath 申请；P4-07 社区评审。
+
+
 ## 2026-10-04 | 文档公开化治理：私人文档移出仓库 + README 正式版
 
 - **做了什么**（用户拍板"选项 A：移出+历史保留"）：①`git rm --cached`（本地保留）移出 PRD（含团队名单/分工账目/内测计划）、Dev Plan 两版（个人投入节奏/AI 辅助工作模式）、内部安全审计清单（13 项缺口完整攻击链——修复事实已在 CHANGELOG/review 正面记载，完整地图不宜公开）、tools/diag 提权排障脚本；②`.gitignore` 加对应条目防误加回；③AGENTS.md 开头措辞改为"战略背景文档本地保留、不入公开仓库"；④LESSONS §③ 本机用户名脱敏；⑤**README 重写为正式版**（功能表+下载链接+未签名/SmartScreen 说明+安全设计与门禁证据+文档索引）+ **新增 SECURITY.md**（私密披露渠道/支持版本/审计状态/审阅者指引）。
