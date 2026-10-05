@@ -2382,7 +2382,7 @@ dependencies = [
 
 [[package]]
 name = "pureslate"
-version = "0.1.1"
+version = "0.1.2"
 dependencies = [
  "globset",
  "quick-xml 0.36.2",
