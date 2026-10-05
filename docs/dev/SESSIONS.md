@@ -5,6 +5,14 @@
 > 维护（AGENTS.md §9）：任务完成时 agent 自动追加/更新当前会话条目，随任务同一提交。格式：`## YYYY-MM-DD | 主题`。
 > 本初版由历史会话记忆回溯整理（截至 2026-09-29），细节以 git 历史与 TASKS.md 为准。
 
+## 2026-10-05 | v0.1.2 发布（真机反馈：体检两档化 + 磁盘真实数据）
+
+- **做了什么**：用户便携版真机测试反馈"非常不合格，一键体检只扫出临时文件"→ 定位根因：**默认体检全开六维度，large（全卷遍历）+dup（哈希）在便携非提权 + 2.5TB 双盘上十几分钟且无中间进度**——用户等不到深度维度出结果，取消后只剩最快的 temp。修复三件：①**体检两档化**——scan store 拆 QUICK（temp/cache/startup/privacy）与 DEEP（large/dup），默认快速；首页"开始体检/深度体检"双按钮经 `setDeepScan` 传递；②**磁盘占用接真实数据**——新增 `disk_usage` 命令（GetDiskFreeSpaceExW+GetVolumeInformationW 枚举固定盘），替换恰好写成本机盘的 DiskUsageStub（用户无从分辨的假数据）；③Scan.vue 深度+非提权时明示慢速原因（app_meta 加性 isElevated）。
+- **关键结论**：①**bench 口径（提权 MFT 46.5s）与便携用户真实体验（非提权 walkdir 2.5TB 十分钟级）相差一个数量级**——性能宣传必须绑定形态；②默认全维度是"开发者视角"设计（本机提权+SSD 感觉快），产品默认应按最差形态设计；③磁盘 stub 恰好是开发机盘值——"看起来对"的 mock 最危险，接真数据前应显式标注 DEMO；④git add -A 两次误暂存本地工具目录（.mimosa/.zcodeignore）——已 gitignore，后续 add 用显式路径。
+- **验证**：cargo 170/0 + clippy 零警告 + pnpm 54/54 + build；Release v0.1.2 四资产（安装包 741KB/便携 3.75MB/规则包/build-hashes）+ manifest 回推 main（appVersion=0.1.2，0b6ca4c）。
+- **下一步**：用户复测 v0.1.2 便携+安装双形态（快速体检应秒级~分钟级出全四类结果；深度体检预期慢但有提示）；large/dup 分片级进度事件（挂账）；真机走查清账。
+
+
 ## 2026-10-05 | v0.1.1 发布（P0 级发布缺陷修复 + 便携版引入）
 
 - **做了什么**：①用户要"便捷包"→ 只读分析中揭出 **P0 级发布缺陷**：tauri.conf 资源用 list 形式（落 `$RESOURCE/resources/rules/`）而 `rules_dirs` 读 `$RESOURCE/rules/`——**v0.1.0 安装包在非开发机上规则加载失败 → 扫描空/清理 fail-closed 拒绝**（开发者本机被源码目录回退掩盖，P1-08 真机走查走 dev 模式未暴露）；②修复：tauri.conf 改 **map 形式**（`"resources/rules/*.xml": "rules/"` glob 平铺）+ `rules_dirs` 双布局探测兜底（rules/ → resources/rules/ → 源码目录）；③**便携版**：release.yml 新增 Compress-Archive 打包（exe + rules/ 全量含 whitelist.xml + README.txt），Release 四资产（安装包/便携 zip/规则包/构建哈希）；④版本 0.1.1、release notes、CHANGELOG、tag 发布全链路完成。
