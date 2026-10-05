@@ -22,7 +22,8 @@
 1. 系统目录：`%SystemRoot%`（C:\Windows）及其子目录（`C:\Windows\Temp` 等显式声明的例外由规则集白名单子句放行）；
 2. 程序目录：`%ProgramFiles%`、`%ProgramFiles(x86)%`、`%ProgramData%\Microsoft`；
 3. 引导与系统卷信息：`C:\Boot`、`C:\EFI`、`C:\Recovery`、`System Volume Information`、`$Recycle.Bin`（回收站本体走专用 API，不做路径级删除）；
-4. 用户核心数据目录（默认 🔴 且不建议清理）：`Documents`、`Desktop`、`Pictures`、`Videos`、`Music` 的**非缓存子路径**（例外：这些目录下被规则显式标记为缓存的路径，如 `Pictures\Thumbnails`）；
+4. 用户核心数据目录（默认 🔴 且不建议清理）：`Documents`、`Desktop`、`Pictures`、`Videos`、`Music` 的**非缓存子路径**（例外：这些目录下被规则显式标记为缓存的路径，如 `Pictures\Thumbnails`）。
+   **v0.1.4 语义分层（H1 修复）**：§2.4 五目录从通用白名单根拆出（`is_user_core_data`）——对 **quarantine 去向**（🟡/🔴 隔离区：可还原 + 用户逐项确认）的扫描与清理**放行**（dup/cache 等类目必须进入这些目录才能提供产品价值）；对 **direct/recycle 去向**（🟢 直清）仍整树拦截（preflight 强制，用户文档绝不进直清候选）；系统目录等其余白名单根对所有类目全拦不变；还原（restore）目标检查同步不含 §2.4（恢复用户数据不属删除）。
 5. 运行中进程的可执行文件与已加载 DLL（通过系统句柄快照判定）；
 6. 自身设施：`.pureslate-quarantine\` 隔离区目录、journal 目录、manifest、日志文件——只能由对应模块按状态机操作，不进通用清理；
 7. OneDrive/云盘占位文件（reparse point，属性含 `FILE_ATTRIBUTE_RECALL_ON_DATA_ACCESS`）：跳过不扫描，UI 提示为已知限制；

@@ -83,3 +83,11 @@
 
 - **requireAdministrator 清单（release 构建嵌入）**：`build.rs` 按 `PROFILE` 区分——release 嵌入 `requireAdministrator` manifest（保留 Common-Controls v6 依赖），debug/test 保持 asInvoker（tauri dev 与 cargo test 非提权终端不受影响）。启动 UAC 自动提权：MFT 快速引擎双形态恒启用（深度体检大容量盘分钟级）、HKLM 启动项管理恢复可写（P3-02 的 asInvoker 限制解除）。提权不改变数据位置（当前用户 %LOCALAPPDATA%）。本地验证：release exe 含 requireAdministrator/trustInfo，debug exe 不含。
 - 版本 0.1.3（tauri.conf/Cargo.toml/mock）。便携 README、主 README 增 UAC 行为说明。
+
+### v0.1.4（外部代码审查修复：3 高危 + 5 中危）
+
+- **H1 白名单 §2.4 与 quarantine 扫描分层（评审关卡 docs/review/P4-08.md，SAFETY §2.4 修订）**：五用户目录（Documents/Desktop/Pictures/Videos/Music）从通用白名单根拆出（`is_user_core_data` + `is_excluded_from_scan(path, disposition)`）——dup 维度 4/5 target 曾被自家白名单整树剪除（静默只剩 Downloads）；quarantine 去向放行（隔离可还原+逐项确认）、direct/recycle 仍整树拦（preflight 同步）、restore 目标检查同步（恢复用户文档合法）。
+- **H2** `guard_process` → `guard_processes: Vec<String>`：多 `<guard>` 声明全部生效（原后者覆盖前者，chrome.exe 守卫被静默顶掉——SAFETY §5.1 缺口）；多守卫回归测试。
+- **H3** `maxAgeDays`/`minSize` per-include 实现落地（原解析后从未消费）：`match_include` 返回命中约束 + `constraint_allows` 校验（mtime 注入可测，异常一律排除=宁缺勿错）；类目级剪枝下界 max→min；temp.user 7 天/微信缓存 30 天保护窗从此真实生效。
+- **M1** journal intent 写失败 → 该目标 fail-closed 跳过（原吞错后照常删除，违反红线 #2）；result 写失败显式告警（恢复协议兜底）。**M2** manifest 状态迁移/行清理改同盘 temp+rename 原子替换（崩溃窗口不再丢全部行）。**M3** rules_url 域白名单（三通道域+REPO_SLUG 绑定，域外拒绝+审计）。**M5** OneDrive 占位文件（RECALL_ON_DATA_ACCESS/OFFLINE）walk/mft/dup 三处跳过（SAFETY §2.7 落地）。**M6** whitelist 两处 expect → into_inner（红线 #6 清零）。
+- **验证**：cargo fmt/clippy -D warnings/test 全绿（176 passed，+5 测试）；pnpm typecheck/vitest(54)/build 全绿。评审文档 docs/review/P4-08.md（破坏面：H1 为"扩大扫描面、收窄删除面"变更，direct 候选在 §2.4 仍整树拦）。挂账：M4/M7/低危 L 系列下批。
