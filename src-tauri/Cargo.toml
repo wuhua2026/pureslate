@@ -1,6 +1,6 @@
 [package]
 name = "pureslate"
-version = "0.1.3"
+version = "0.1.4"
 description = "PureSlate - Windows PC cleaning tool (Tauri 2 + Rust kernel)"
 authors = ["PureSlate Contributors"]
 edition = "2021"
