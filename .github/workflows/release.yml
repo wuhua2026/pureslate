@@ -48,6 +48,17 @@ jobs:
       - name: Install deps
         run: pnpm install --frozen-lockfile
 
+      # ---- tag 与应用版本一致性校验（P4-06 补强：防 tag 打在版本不符的 commit 上）----
+      - name: Verify tag matches app version
+        shell: pwsh
+        run: |
+          $tag = $env:GITHUB_REF_NAME
+          $conf = Get-Content "src-tauri/tauri.conf.json" -Raw | ConvertFrom-Json
+          if ($tag -ne "v$($conf.version)") {
+            throw "tag ($tag) 与 tauri.conf.json version (v$($conf.version)) 不一致——tag 可能打在了内容不符的 commit 上"
+          }
+          Write-Host "tag=$tag 与应用版本一致"
+
       # ---- 构建 #1（记录 exe 哈希，可重复构建基准）----
       - name: Tauri build #1 (NSIS)
         run: pnpm tauri build --bundles nsis
