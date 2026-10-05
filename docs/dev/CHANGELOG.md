@@ -65,3 +65,9 @@
 - **安全审计 I 组收口**（docs/verify/security-audit-ipc-toctou.md 状态列已更新）：I-1 `log_export` 任意路径写入收口（目录成分剥离+文件名白名单+`<data_root>\exports\`+防覆盖）；I-3 严格 CSP 启用（tauri.conf.json，真机走查待人工）；I-4 tauri-plugin-opener 依赖与权限声明移除。
 - **发布流水线**：`.github/workflows/release.yml`（tag 触发：双构建 exe 哈希一致性断言 → 体积门禁 → 清单生成 → 可选 SignPath 签名 → Release 上传 → manifest 回推 main）+ `tools/publish-manifest.ps1`（RulesPack 规则包排除 whitelist.xml + update-manifest 六字段）。占位待定稿（人类决策）：SignPath secrets、REPO_SLUG（与 `updates::REPO_SLUG` 常量对齐）、崩溃上传端点。
 - **验证**：cargo fmt/clippy -D warnings/test 全绿（169 passed，+2）；pnpm typecheck/vitest(54)/build 全绿；脚本端到端自测（占位安装包）字段/哈希/格式全对。
+
+### v0.1.1（发布缺陷修复 + 便携版）
+
+- **规则资源布局修复（v0.1.0 安装包在非开发机上不可用）**：tauri.conf 资源由 list 形式（落 `$RESOURCE/resources/rules/`，保留结构）改 **map 形式**（`"resources/rules/*.xml": "rules/"`，glob 平铺到 `$RESOURCE/rules/`），与 `rules_dirs` 的 `resource_dir()/rules` 读取匹配；`rules_dirs` 增双布局探测兜底（`rules/` → `resources/rules/` → 开发态源码目录）。v0.1.0 缺陷表现：非开发机上规则加载失败 → 扫描空结果 / 清理 fail-closed 拒绝。
+- **便携版（portable zip）**：Release 新增资产 `PureSlate-<ver>-portable.zip`（exe + rules/ 全量含 whitelist.xml + README.txt 使用说明），release.yml 构建后 Compress-Archive 打包；`resource_dir()` 对裸 exe 解析到 exe 目录，便携形态资源解析与安装版一致。
+- **验证**：本地 `pnpm tauri build --no-bundle` 确认 `target/release/pureslate.exe` + `rules/`（5 XML 全量）布局正确；cargo/pnpm 全量绿。版本号 0.1.1（tauri.conf + Cargo.toml）。

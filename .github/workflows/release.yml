@@ -102,6 +102,20 @@ jobs:
         shell: pwsh
         run: .\tools\publish-manifest.ps1
 
+      # ---- 便携版 zip（v0.1.1 起：exe + rules/ + 说明，免安装形态）----
+      - name: Build portable zip
+        shell: pwsh
+        run: |
+          $version = $env:GITHUB_REF_NAME.TrimStart("v")
+          $stage = "dist-publish/portable/PureSlate-$version-portable"
+          New-Item -ItemType Directory -Force -Path "$stage/rules" | Out-Null
+          Copy-Item "src-tauri/target/release/pureslate.exe" $stage
+          # 便携包规则与安装版同源（bundle 资源同一段配置），whitelist.xml 全量随包。
+          Copy-Item "src-tauri/resources/rules/*.xml" "$stage/rules/"
+          Copy-Item "tools/portable-readme.txt" "$stage/README.txt"
+          Compress-Archive -Path $stage -DestinationPath "dist-publish/PureSlate-$version-portable.zip" -Force
+          Write-Host "portable zip: dist-publish/PureSlate-$version-portable.zip"
+
       # ---- 可选签名（SignPath 免费开源计划；secrets 配置后自动启用）----
       - name: Sign installer (SignPath, optional)
         if: env.SIGNPATH_API_TOKEN != ''
@@ -124,13 +138,14 @@ jobs:
           $version = $tag.TrimStart("v")
           $installer = "src-tauri/target/release/bundle/nsis/PureSlate_${version}_x64-setup.exe"
           $rulesPack = "dist-publish/rules/pureslate-rules-$version.json"
+          $portable = "dist-publish/PureSlate-$version-portable.zip"
           # Release 页功能文档：`.github/release-notes/<tag>.md` 存在则用作正文
           #（Foundation 条款要求功能在下载页有文档）；否则退回自动生成。
           $notes = ".github/release-notes/$tag.md"
           if (Test-Path $notes) {
-            gh release create "$tag" "$installer" "$rulesPack" "dist-publish/build-hashes.json" --title "PureSlate $tag" --notes-file $notes
+            gh release create "$tag" "$installer" "$portable" "$rulesPack" "dist-publish/build-hashes.json" --title "PureSlate $tag" --notes-file $notes
           } else {
-            gh release create "$tag" "$installer" "$rulesPack" "dist-publish/build-hashes.json" --title "PureSlate $tag" --generate-notes
+            gh release create "$tag" "$installer" "$portable" "$rulesPack" "dist-publish/build-hashes.json" --title "PureSlate $tag" --generate-notes
           }
           if ($LASTEXITCODE -ne 0) { throw "gh release create 失败" }
 

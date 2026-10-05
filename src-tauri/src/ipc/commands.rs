@@ -240,10 +240,18 @@ fn finish_empty(
 /// 规则目录链（R22 更新包叠加语义）：资源规则目录 → `<data_root>\rules`（更新包安装目标，
 /// 同 id category 覆盖资源目录）。资源目录优先打包目录，开发态回退源码目录。
 fn rules_dirs(app: &tauri::AppHandle) -> Vec<PathBuf> {
+    // 资源布局探测（v0.1.1 修复）：tauri.conf 资源以 **map 形式**打包到
+    // `$RESOURCE/rules/`（v0.1.0 曾用 list 形式落 `$RESOURCE/resources/rules/`，
+    // 与此处的 join("rules") 失配——非开发机上规则加载失败，扫描空/清理拒绝）。
+    // 兜底顺序：`rules/`（map 目标，现行为）→ `resources/rules/`（list 形式兼容）
+    // → 开发态源码目录。
     let base = if let Ok(res) = app.path().resource_dir() {
-        let in_res = res.join("rules");
-        if in_res.is_dir() {
-            in_res
+        let mapped = res.join("rules");
+        let legacy = res.join("resources/rules");
+        if mapped.is_dir() {
+            mapped
+        } else if legacy.is_dir() {
+            legacy
         } else {
             // 开发态：src-tauri/resources/rules
             PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("resources/rules")
