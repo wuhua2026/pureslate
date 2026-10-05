@@ -5,6 +5,15 @@
 > 维护（AGENTS.md §9）：任务完成时 agent 自动追加/更新当前会话条目，随任务同一提交。格式：`## YYYY-MM-DD | 主题`。
 > 本初版由历史会话记忆回溯整理（截至 2026-09-29），细节以 git 历史与 TASKS.md 为准。
 
+## 2026-10-05 | v0.1.3 发布（自动提权）+ tag/内容不符事故与流水线防护
+
+- **做了什么**：用户要求"自动提权成管理员"——`build.rs` 按 `PROFILE` 区分嵌入 Windows manifest：**release 构建嵌 `requireAdministrator`**（保留 tauri-build 默认的 Common-Controls v6 依赖），debug/test 保持 asInvoker（tauri dev/cargo test 非提权终端不受影响）。本地双 profile 验证：release exe 含 requireAdministrator/trustInfo、debug 不含。收益：①MFT 快速引擎安装/便携双形态恒启用（深度体检大容量盘分钟级）；②HKLM 启动项管理恢复可写（P3-02 asInvoker 限制解除）；③Scan 非提权提示自动消失（isElevated=true）。
+- **事故与防护**：**tag v0.1.3 首次打在了内容仍是 0.1.2 的旧 HEAD**（commit 链失败后 tag 未重打）——CI 构建出 0.1.2 安装包而 Release 名为 v0.1.3，Upload step 因文件名不匹配失败（幸运拦截，未发布错版）。修复：删除 tag 重打到正确 commit 重发成功；**release.yml 加 tag/tauri.conf version 一致性校验 step**（不符即 fail），此类事故从流程上封死。
+- **关键结论**：①`tauri_build::WindowsAttributes::app_manifest` 是 Tauri 2 定制清单的正规入口（默认清单极简，仅 Common-Controls——自定义时必须保留）；②**tag 是"内容承诺"**——commit 失败链路后 tag 必须重打，且流水线要自校验；③NSIS 安装包内 exe 被 LZMA 压缩，grep 安装包验 manifest 是**假阴性**——验裸 exe（target/release/pureslate.exe）或真机 UAC 弹窗；④schannel/连接重置贯穿 push/pull——网络抖动常态化，长重试循环是标准姿势。
+- **验证**：本地 cargo 170/0 + pnpm 54/54 + 双 profile manifest 字节验证；Release v0.1.3 四资产（安装包 741KB/便携 3.75MB/规则包/build-hashes）+ manifest 回推 main（appVersion=0.1.3）。
+- **下一步**：用户真机复测 v0.1.3（UAC 弹窗→快速体检/深度体检提速→启动项 HKLM 可用）；SignPath 申请；P4-07 社区评审。
+
+
 ## 2026-10-05 | v0.1.2 发布（真机反馈：体检两档化 + 磁盘真实数据）
 
 - **做了什么**：用户便携版真机测试反馈"非常不合格，一键体检只扫出临时文件"→ 定位根因：**默认体检全开六维度，large（全卷遍历）+dup（哈希）在便携非提权 + 2.5TB 双盘上十几分钟且无中间进度**——用户等不到深度维度出结果，取消后只剩最快的 temp。修复三件：①**体检两档化**——scan store 拆 QUICK（temp/cache/startup/privacy）与 DEEP（large/dup），默认快速；首页"开始体检/深度体检"双按钮经 `setDeepScan` 传递；②**磁盘占用接真实数据**——新增 `disk_usage` 命令（GetDiskFreeSpaceExW+GetVolumeInformationW 枚举固定盘），替换恰好写成本机盘的 DiskUsageStub（用户无从分辨的假数据）；③Scan.vue 深度+非提权时明示慢速原因（app_meta 加性 isElevated）。
