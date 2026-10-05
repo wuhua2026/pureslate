@@ -170,7 +170,9 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git fetch origin main
-          git checkout main
+          # -f：构建过程可能对工作区产生残留改动（如 Cargo.toml 时间戳/版本同步），
+          # 强制切换丢弃之；update-manifest.json/rules 为新拷贝文件不受影响。
+          git checkout -f main
           New-Item -ItemType Directory -Force -Path "rules" | Out-Null
           Copy-Item "dist-publish/update-manifest.json" "update-manifest.json" -Force
           Copy-Item "dist-publish/rules/pureslate-rules-$version.json" "rules/" -Force
