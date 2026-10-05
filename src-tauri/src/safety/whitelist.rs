@@ -13,6 +13,8 @@ use std::sync::{Mutex, OnceLock};
 use quick_xml::events::Event;
 use quick_xml::Reader;
 
+use crate::contract::Disposition;
+
 /// 白名单根路径集合（常量部分）。由系统相关环境变量在首次使用时展开一次并缓存。
 fn const_roots() -> &'static Vec<PathBuf> {
     static INSTANCE: OnceLock<Vec<PathBuf>> = OnceLock::new();
@@ -47,13 +49,48 @@ fn collect_roots() -> Vec<PathBuf> {
     if let Some(la) = env("LOCALAPPDATA") {
         v.push(la.join("PureSlate"));
     }
-    // §2.4 用户核心数据目录（默认 🔴 且不建议清理）。
-    if let Some(home) = env("USERPROFILE") {
-        for sub in ["Documents", "Desktop", "Pictures", "Videos", "Music"] {
-            v.push(home.join(sub));
-        }
-    }
+    // §2.4 用户核心数据目录**不再入通用白名单根**（H1 · v0.1.4）：
+    // 它们对 quarantine 去向的扫描/清理放行（见 `is_excluded_from_scan` /
+    // `is_user_core_data`），对 direct/recycle 去向仍整树拦截（preflight）。
+    // 原实现把五目录混入通用根，导致 dup 维度 4/5 的 target 被自家白名单
+    // 整树剪除（只读扫描被"禁删"语义误伤）。
     v
+}
+
+/// §2.4 用户核心数据目录的段级根（相对用户主目录，小写）。
+/// 纯函数（home 注入）供测试与 `is_user_core_data` 复用。
+fn user_core_data_seg_roots(home: &Path) -> Vec<Vec<String>> {
+    let home_segs = normalize_segments(home);
+    ["documents", "desktop", "pictures", "videos", "music"]
+        .iter()
+        .map(|sub| {
+            let mut segs = home_segs.clone();
+            segs.push((*sub).to_string());
+            segs
+        })
+        .collect()
+}
+
+/// 路径是否位于 §2.4 用户核心数据目录（Documents/Desktop/Pictures/Videos/Music）。
+/// H1（v0.1.4）语义：这些目录对 **quarantine 去向**（隔离区可还原 + 用户逐项确认）
+/// 不再构成扫描/清理禁区；对 direct/recycle 去向仍整树拦截（preflight 强制）。
+pub fn is_user_core_data(path: &Path) -> bool {
+    if let Some(home) = env("USERPROFILE") {
+        let p_segs = normalize_segments(path);
+        return user_core_data_seg_roots(&home)
+            .iter()
+            .any(|root| prefix_matches(&p_segs, root));
+    }
+    false
+}
+
+/// 扫描期保护判定（H1 · v0.1.4）：白名单根全类目拦截；§2.4 用户核心目录仅对
+/// **非 quarantine** 去向整树拦截。walk/mft/dup 的过滤统一走本函数。
+pub fn is_excluded_from_scan(path: &Path, disposition: Disposition) -> bool {
+    if is_whitelisted(path) {
+        return true;
+    }
+    disposition != Disposition::Quarantine && is_user_core_data(path)
 }
 
 // ===== XML 附加白名单根（resources/rules/whitelist.xml，SAFETY §2 白名单维护）=====
@@ -89,7 +126,9 @@ pub fn set_xml_roots(roots: Vec<PathBuf>) {
             norm.push(r);
         }
     }
-    let mut guard = XML_ROOTS.lock().expect("whitelist xml roots lock poisoned");
+    // M6（v0.1.4 · 红线 #6）：锁中毒时取守卫继续（into_inner）——白名单是保护
+    // 机构，panic 比"读到一个被污染的旧值"更不可接受；与全库抗中毒模式一致。
+    let mut guard = XML_ROOTS.lock().unwrap_or_else(|e| e.into_inner());
     *guard = Some(norm);
 }
 
@@ -136,9 +175,10 @@ fn expand_short_name(_p: &Path) -> Option<PathBuf> {
 
 /// 当前生效的 XML 附加根（尚未加载时为默认空集）。
 fn xml_roots() -> Vec<PathBuf> {
+    // M6（v0.1.4 · 红线 #6）：同 set_xml_roots——中毒取守卫而非 panic。
     XML_ROOTS
         .lock()
-        .expect("whitelist xml roots lock poisoned")
+        .unwrap_or_else(|e| e.into_inner())
         .as_ref()
         .cloned()
         .unwrap_or_default()
@@ -625,5 +665,57 @@ mod tests {
         // 无 whitelist.xml 视为合法。
         assert!(load_from_dir(&dir).is_ok());
         std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn user_core_data_layers_for_quarantine_scan() {
+        // H1（v0.1.4）三层语义验证：
+        // ① §2.4 五目录段级判定（纯函数，fake home）；
+        // ② is_whitelisted 不再含 §2.4（dup 维度 4/5 target 被自家白名单废掉的根因）；
+        // ③ is_excluded_from_scan：direct/recycle 仍拦、quarantine 放行、系统根全拦。
+        let home = Path::new(r"C:\Users\testuser");
+        let roots = user_core_data_seg_roots(home);
+        assert_eq!(roots.len(), 5);
+        let doc = normalize_segments(Path::new(r"C:\Users\testuser\Documents\a\b.txt"));
+        assert!(roots.iter().any(|r| prefix_matches(&doc, r)));
+        let tmp = normalize_segments(Path::new(r"C:\Users\testuser\AppData\Local\Temp\x"));
+        assert!(
+            !roots.iter().any(|r| prefix_matches(&tmp, r)),
+            "非 §2.4 目录不误判"
+        );
+
+        // ②③ 用真实 USERPROFILE 动态构造（is_user_core_data 读环境变量；
+        // 不硬编码本机用户名）。
+        let Ok(real_home) = std::env::var("USERPROFILE") else {
+            set_xml_roots(vec![]);
+            return;
+        };
+        let _g = XML_ROOTS_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        set_xml_roots(vec![]);
+        let doc_path = Path::new(&real_home)
+            .join("Documents")
+            .join("dups")
+            .join("a.bin");
+        assert!(
+            !is_whitelisted(&doc_path),
+            "§2.4 已从通用白名单拆出（H1 根因修复）"
+        );
+        assert!(is_user_core_data(&doc_path));
+        assert!(
+            is_excluded_from_scan(&doc_path, Disposition::Direct),
+            "direct/recycle 去向仍整树拦（用户文档绝不进直清候选）"
+        );
+        assert!(
+            !is_excluded_from_scan(&doc_path, Disposition::Quarantine),
+            "quarantine 去向放行（隔离可还原 + 逐项确认）"
+        );
+        // 系统根对所有类目仍拦（§2.4 例外不外溢）。
+        if let Ok(win) = std::env::var("SystemRoot") {
+            assert!(is_excluded_from_scan(
+                Path::new(&format!("{win}\\x.dll")),
+                Disposition::Quarantine
+            ));
+        }
+        set_xml_roots(vec![]);
     }
 }

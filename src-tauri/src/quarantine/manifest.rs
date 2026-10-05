@@ -123,10 +123,18 @@ pub fn update_entry_state(root: &Path, id: &str, state: ManifestState) -> std::i
         out.push('\n');
     }
     if changed {
-        let mut f = File::create(&p)?;
-        f.write_all(out.as_bytes())?;
+        rewrite_atomic(&p, &out)?;
     }
     Ok(changed)
+}
+
+/// M2（v0.1.4 · 审计中危）：manifest 全文件重写改为**同盘临时文件 + rename 原子
+/// 替换**——原实现 `File::create` 截断重写，崩溃窗口可丢全部 manifest 行（隔离区
+/// 记录是还原的唯一依据，恰恰最不该丢）。同卷 rename 原子性由 NTFS 保证。
+fn rewrite_atomic(p: &Path, content: &str) -> std::io::Result<()> {
+    let tmp = p.with_extension("jsonl.tmp");
+    std::fs::write(&tmp, content)?;
+    std::fs::rename(&tmp, p)
 }
 
 /// 清理"已还原且还原时间早于 cutoff"的 manifest 行（SPEC §4.3：restored 行保留 30 天）。
@@ -150,7 +158,7 @@ pub fn prune_restored_before(root: &Path, cutoff_ms: i64) -> std::io::Result<usi
         }
     }
     if removed > 0 {
-        std::fs::write(&p, out)?;
+        rewrite_atomic(&p, &out)?;
     }
     Ok(removed)
 }

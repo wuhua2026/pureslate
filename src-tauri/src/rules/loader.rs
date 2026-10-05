@@ -176,8 +176,12 @@ pub fn parse_ruleset(xml: &str) -> Result<Ruleset, RulesError> {
                             for a in e.attributes().flatten() {
                                 let key = String::from_utf8_lossy(a.key.as_ref()).into_owned();
                                 if key == "process" {
+                                    // H2（v0.1.4）：多 `<guard>` 全部收集——原实现后者覆盖前者，
+                                    // cache.browser 的 chrome.exe 守卫曾被 msedge.exe 静默顶掉。
                                     let val = a.unescape_value().unwrap_or_default().into_owned();
-                                    c.guard_process = if val.is_empty() { None } else { Some(val) };
+                                    if !val.is_empty() {
+                                        c.guard_processes.push(val);
+                                    }
                                 }
                             }
                         }
@@ -398,7 +402,7 @@ struct PartialCategory {
     targets: Vec<Target>,
     includes: Vec<GlobRule>,
     excludes: Vec<GlobRule>,
-    guard_process: Option<String>,
+    guard_processes: Vec<String>,
 }
 
 impl PartialCategory {
@@ -424,7 +428,7 @@ impl PartialCategory {
             targets: self.targets,
             includes: self.includes,
             excludes: self.excludes,
-            guard_process: self.guard_process,
+            guard_processes: self.guard_processes,
         };
         if !cat.is_valid_config() {
             let cid = cat.id.clone();
@@ -516,7 +520,7 @@ mod tests {
         assert!(temp.includes[0].recursive);
         assert_eq!(temp.includes[0].max_age_days, 7);
         assert_eq!(temp.excludes[0].pattern, "*.lock");
-        assert!(temp.guard_process.is_none());
+        assert!(temp.guard_processes.is_empty());
 
         let wx = rs
             .categories
@@ -525,7 +529,33 @@ mod tests {
             .unwrap();
         assert_eq!(wx.risk, Risk::Yellow);
         assert_eq!(wx.disposition, Disposition::Quarantine);
-        assert_eq!(wx.guard_process.as_deref(), Some("WeChat.exe"));
+        assert!(wx.guard_processes == vec!["WeChat.exe".to_string()]);
+    }
+
+    #[test]
+    fn parses_multiple_guards_without_folding() {
+        // H2（v0.1.4）回归：多 `<guard>` 声明必须全部生效——原实现后者覆盖前者，
+        // cache.browser 的 chrome.exe 守卫曾被 msedge.exe 静默顶掉（SAFETY §5.1 缺口）。
+        let xml = r#"<?xml version="1.0" encoding="UTF-8"?>
+<ruleset id="t" version="1" lang="zh-CN">
+  <category id="cache.browser" label="浏览器缓存" risk="yellow" disposition="quarantine" description="x">
+    <target type="knownFolder" value="Local AppData"/>
+    <include pattern="**" recursive="true"/>
+    <guard process="chrome.exe"/>
+    <guard process="msedge.exe"/>
+  </category>
+</ruleset>"#;
+        let rs = parse_ruleset(xml).expect("parse ok");
+        let cat = rs
+            .categories
+            .iter()
+            .find(|c| c.id == "cache.browser")
+            .unwrap();
+        assert_eq!(
+            cat.guard_processes,
+            vec!["chrome.exe".to_string(), "msedge.exe".to_string()],
+            "两个守卫都必须保留"
+        );
     }
 
     #[test]

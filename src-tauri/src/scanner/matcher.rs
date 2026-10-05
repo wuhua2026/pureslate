@@ -38,12 +38,14 @@ impl CompiledCategory {
         }
     }
 
-    /// 供 walk 层读取约束（min_size_mb）——整类取最大 min_size 作下限剪枝。
+    /// 供 walk 层读取剪枝下界——取各 include 的**最小** min_size（最宽松者）。
+    /// H3（v0.1.4）：原实现取最大值会剪掉匹配较小 include 的文件；类目级剪枝
+    /// 只做性能下界，per-include 精确校验在命中后由 `constraint_allows` 进行。
     pub fn min_size_bytes(&self) -> u64 {
         self.include_constraints
             .iter()
             .map(|(_, mb)| mb * 1024 * 1024)
-            .max()
+            .min()
             .unwrap_or(0)
     }
 
@@ -52,12 +54,30 @@ impl CompiledCategory {
         risk
     }
 
-    /// 判断绝对路径是否命中该 category。
+    /// 判断绝对路径是否命中该 category，并返回**命中的 include 约束**（H3 · v0.1.4）。
     /// `base_root` 为该 category 的 target 展开根：glob 模式相对它匹配。
-    /// include 命中且不被 exclude 排除。constraints（age/size）在 walker 处校验。
-    pub fn matches_any(&self, path: &std::path::Path, base_root: &std::path::Path) -> bool {
+    /// 返回 None = 不命中（或被 exclude 排除）；命中约束由 walker 按
+    /// `constraint_allows` 做 per-include 校验（age/size）。
+    pub fn match_include(
+        &self,
+        path: &std::path::Path,
+        base_root: &std::path::Path,
+    ) -> Option<IncludeConstraint> {
         let rel = relative_to(path, base_root);
-        self.include.is_match(&rel) && !self.exclude.is_match(&rel)
+        if self.exclude.is_match(&rel) {
+            return None;
+        }
+        let idx = self.include.matches(&rel).into_iter().next()?;
+        let (age_days, min_mb) = self.include_constraints.get(idx)?;
+        Some(IncludeConstraint {
+            max_age_days: *age_days,
+            min_size_bytes: *min_mb * 1024 * 1024,
+        })
+    }
+
+    /// 判断绝对路径是否命中该 category（不取约束的旧语义包装）。
+    pub fn matches_any(&self, path: &std::path::Path, base_root: &std::path::Path) -> bool {
+        self.match_include(path, base_root).is_some()
     }
 
     /// 判断路径是否是 include 集合之一（供 walker 决定是否探索子目录）。
@@ -65,6 +85,38 @@ impl CompiledCategory {
     pub fn could_contain(&self, _path: &std::path::Path) -> bool {
         true
     }
+}
+
+/// 命中的 include 约束（per-include，v0.1.4 H3）。
+#[derive(Debug, Clone, Copy)]
+pub struct IncludeConstraint {
+    /// maxAgeDays（0 = 不限）：文件 mtime 距今须 ≥ N 天——老文件才入清理候选，
+    /// 保护最近写入/修改的文件。
+    pub max_age_days: u32,
+    /// minSizeMB（0 = 不限）：文件大小下限。
+    pub min_size_bytes: u64,
+}
+
+/// per-include 约束校验（H3 · v0.1.4）。`now_ms` 注入供测试。
+/// 返回 false = 不满足清理条件（宁缺勿错：mtime 异常/不可得一律排除——
+/// 无法证明"足够老"就不该进直清候选）。
+pub fn constraint_allows(
+    c: &IncludeConstraint,
+    size_bytes: u64,
+    mtime_ms: i64,
+    now_ms: i64,
+) -> bool {
+    if c.min_size_bytes > 0 && size_bytes < c.min_size_bytes {
+        return false;
+    }
+    if c.max_age_days > 0 {
+        // mtime 在未来或 epoch 前等异常形态：年龄按 0 处理 → maxAge>0 时排除。
+        let age_ms = if mtime_ms <= 0 { 0 } else { now_ms - mtime_ms };
+        if age_ms < (c.max_age_days as i64) * 86_400_000 {
+            return false;
+        }
+    }
+    true
 }
 
 /// 追加一个 glob 规则到 builder；非法模式忽略。
@@ -91,6 +143,107 @@ fn relative_to(path: &std::path::Path, base_root: &std::path::Path) -> String {
 mod tests {
     use super::*;
     use crate::rules::model::{Disposition, GlobRule, Target, TargetType};
+
+    #[test]
+    fn constraint_allows_age_semantics() {
+        // H3（v0.1.4）：maxAgeDays = 文件至少 N 天未修改（老文件才入清理候选）。
+        let now = 1_800_000_000_000i64;
+        let day = 86_400_000i64;
+        let c = IncludeConstraint {
+            max_age_days: 7,
+            min_size_bytes: 0,
+        };
+        // 刚写入（3 天前）→ 排除（保护最近文件，审查 H3 的核心诉求）。
+        assert!(!constraint_allows(&c, 100, now - 3 * day, now));
+        // 8 天前 → 命中。
+        assert!(constraint_allows(&c, 100, now - 8 * day, now));
+        // 恰好 7 天 → 命中（≥ 语义）。
+        assert!(constraint_allows(&c, 100, now - 7 * day, now));
+        // mtime 异常（未来/epoch 前）→ 排除（宁缺勿错）。
+        assert!(!constraint_allows(&c, 100, now + day, now));
+        assert!(!constraint_allows(&c, 100, -1, now));
+        // maxAgeDays=0 → 不限（任何 mtime 命中）。
+        let c0 = IncludeConstraint {
+            max_age_days: 0,
+            min_size_bytes: 0,
+        };
+        assert!(constraint_allows(&c0, 100, now, now));
+    }
+
+    #[test]
+    fn constraint_allows_min_size() {
+        let c = IncludeConstraint {
+            max_age_days: 0,
+            min_size_bytes: 1024,
+        };
+        assert!(!constraint_allows(&c, 1023, 100, 100));
+        assert!(constraint_allows(&c, 1024, 100, 100));
+    }
+
+    #[test]
+    fn min_size_prune_takes_min_not_max() {
+        // H3 回归：类目级剪枝下界取最小者——原取最大值会剪掉匹配较小 include 的文件。
+        let cat = Category {
+            includes: vec![
+                GlobRule {
+                    pattern: "a/*".into(),
+                    recursive: true,
+                    max_age_days: 0,
+                    min_size_mb: 10,
+                },
+                GlobRule {
+                    pattern: "b/*".into(),
+                    recursive: true,
+                    max_age_days: 0,
+                    min_size_mb: 0,
+                },
+            ],
+            ..cat()
+        };
+        let compiled = CompiledCategory::compile(&cat);
+        assert_eq!(compiled.min_size_bytes(), 0, "剪枝下界应取最小（最宽松）");
+    }
+
+    #[test]
+    fn match_include_returns_per_include_constraint() {
+        let cat = Category {
+            includes: vec![
+                GlobRule {
+                    pattern: "a/*".into(),
+                    recursive: true,
+                    max_age_days: 7,
+                    min_size_mb: 1,
+                },
+                GlobRule {
+                    pattern: "b/*".into(),
+                    recursive: true,
+                    max_age_days: 0,
+                    min_size_mb: 0,
+                },
+            ],
+            ..cat()
+        };
+        let compiled = CompiledCategory::compile(&cat);
+        let base = std::path::Path::new("C:\\t");
+        let ca = compiled
+            .match_include(std::path::Path::new("C:\\t\\a\\x.tmp"), base)
+            .unwrap();
+        assert_eq!(ca.max_age_days, 7);
+        assert_eq!(ca.min_size_bytes, 1024 * 1024);
+        let cb = compiled
+            .match_include(std::path::Path::new("C:\\t\\b\\y.tmp"), base)
+            .unwrap();
+        assert_eq!(cb.max_age_days, 0);
+        // exclude 优先。
+        let c2 = Category {
+            excludes: vec![cat.includes[1].clone()],
+            ..cat
+        };
+        let compiled2 = CompiledCategory::compile(&c2);
+        assert!(compiled2
+            .match_include(std::path::Path::new("C:\\t\\b\\y.tmp"), base)
+            .is_none());
+    }
 
     fn cat() -> Category {
         Category {
@@ -123,7 +276,7 @@ mod tests {
                 max_age_days: 0,
                 min_size_mb: 0,
             }],
-            guard_process: None,
+            guard_processes: Vec::new(),
         }
     }
 

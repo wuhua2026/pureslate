@@ -14,14 +14,17 @@
 use std::path::{Path, PathBuf};
 
 use super::execute::CleanTarget;
-use crate::safety::whitelist::is_whitelisted;
+use crate::contract::Disposition;
+use crate::safety::whitelist::{is_user_core_data, is_whitelisted};
 
 /// 复核一个待清理目标。`Ok(())` 放行；`Err(reason)` 拒绝（原因入 journal/审计）。
 pub fn verify(t: &CleanTarget) -> Result<(), String> {
     let p = &t.path;
 
-    // 1) 白名单最终复核。
-    if is_whitelisted(p) {
+    // 1) 白名单最终复核（H1 · v0.1.4 语义分层：白名单根全类目拦；§2.4 用户核心
+    //    目录对 quarantine 去向放行——隔离区可还原 + 逐项确认，与扫描期一致；
+    //    direct/recycle 仍整树拦——用户文档绝不进直清/回收站候选）。
+    if is_whitelisted(p) || (t.disposition != Disposition::Quarantine && is_user_core_data(p)) {
         return Err(format!(
             "执行前复核：目标命中安全白名单，已拒绝 ({})",
             p.to_string_lossy()
@@ -94,7 +97,7 @@ mod tests {
             disposition: Disposition::Direct,
             category_id: "temp.user".into(),
             size_bytes: size,
-            guard_process: None,
+            guard_processes: Vec::new(),
             mtime_ms: mtime,
         }
     }

@@ -61,8 +61,9 @@ pub struct Category {
     pub targets: Vec<Target>,
     pub includes: Vec<GlobRule>,
     pub excludes: Vec<GlobRule>,
-    /// 进程守卫；空 = 无守卫。
-    pub guard_process: Option<String>,
+    /// 进程守卫列表（v0.1.4 修复 H2：多 `<guard>` 声明全部生效，此前后者覆盖前者）；
+    /// 空 = 无守卫。
+    pub guard_processes: Vec<String>,
 }
 
 impl Category {

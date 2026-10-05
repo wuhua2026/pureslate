@@ -127,7 +127,7 @@ fn direct_target(path: &Path) -> CleanTarget {
         disposition: Disposition::Direct,
         category_id: "temp.compat".into(),
         size_bytes: fs::metadata(path).map(|m| m.len()).unwrap_or(0),
-        guard_process: None,
+        guard_processes: Vec::new(),
         mtime_ms: Some(modified_ms(path)),
     }
 }

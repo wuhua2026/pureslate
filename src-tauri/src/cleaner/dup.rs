@@ -58,14 +58,23 @@ impl DupGroup {
 }
 
 /// 遍历 `root` 收集全部候选文件（只读），白名单过滤（SAFETY §2）、取消贯穿。
+/// H1（v0.1.4）：dup 类目为 🟡/quarantine——§2.4 用户核心目录不再整树剪除
+/// （原实现 Documents/Pictures/Desktop/Videos 四个 target 被自家白名单废掉，
+/// 只剩 Downloads）；候选仍需用户逐项确认且入隔离区可还原。
 /// 空文件（size==0）跳过——它们全空哈希会对海量空文件误判成一组，且"保留最早"无意义。
 pub fn collect_candidates(root: &Path, cancel: &CancelToken) -> Vec<DupCandidate> {
+    use crate::contract::Disposition;
     let mut out = Vec::new();
-    if crate::safety::whitelist::is_whitelisted(root) {
+    if crate::safety::whitelist::is_excluded_from_scan(root, Disposition::Quarantine) {
         return out;
     }
-    let walker = walkdir::WalkDir::new(root).follow_links(false).into_iter();
-    for entry in walker.filter_entry(|e| !crate::safety::whitelist::is_whitelisted(e.path())) {
+    let walker = walkdir::WalkDir::new(root)
+        .follow_links(false)
+        .into_iter()
+        .filter_entry(|e| {
+            !crate::safety::whitelist::is_excluded_from_scan(e.path(), Disposition::Quarantine)
+        });
+    for entry in walker {
         if cancel.is_cancelled() {
             break;
         }
@@ -76,7 +85,7 @@ pub fn collect_candidates(root: &Path, cancel: &CancelToken) -> Vec<DupCandidate
         if !e.file_type().is_file() {
             continue;
         }
-        if crate::safety::whitelist::is_whitelisted(e.path()) {
+        if crate::safety::whitelist::is_excluded_from_scan(e.path(), Disposition::Quarantine) {
             continue;
         }
         let meta = match e.metadata() {
@@ -84,6 +93,10 @@ pub fn collect_candidates(root: &Path, cancel: &CancelToken) -> Vec<DupCandidate
             Err(_) => continue,
         };
         let size = meta.len();
+        // M5（SAFETY §2.7）：云盘占位文件跳过——dup 的全量哈希会触发按需下载。
+        if crate::scanner::is_cloud_placeholder(&meta) {
+            continue;
+        }
         if size == 0 {
             continue;
         }

@@ -66,6 +66,16 @@ pub fn should_auto_check(opt_in: bool, last_check_at: i64, now: i64) -> bool {
     opt_in && (last_check_at == 0 || now - last_check_at >= WEEKLY_MS)
 }
 
+/// M3（v0.1.4）：规则包 URL 域白名单（纯函数）。仅接受本项目三个已知通道域
+/// （与 `channel_urls` 生成的形态一致；REPO_SLUG 变更时同步）。
+pub fn is_allowed_rules_url(url: &str) -> bool {
+    url.starts_with(&format!("https://raw.githubusercontent.com/{REPO_SLUG}/"))
+        || url.starts_with(&format!("https://cdn.jsdelivr.net/gh/{REPO_SLUG}"))
+        || url.starts_with(&format!(
+            "https://ghproxy.net/https://raw.githubusercontent.com/{REPO_SLUG}/"
+        ))
+}
+
 /// 通道 URL 链（纯函数）：按 mirrorFirst 排序，任一成功即停。
 /// jsDelivr/ghproxy 记为 mirror 通道，GitHub raw 直连记为 github 通道。
 pub fn channel_urls(mirror_first: bool, slug: &str, manifest_path: &str) -> Vec<(Channel, String)> {
@@ -247,12 +257,30 @@ pub fn check(
     let has_update = has_newer_version(current_version, &m.app_version);
 
     // 规则包：版本不同且给了 URL 才下载（校验失败 → 丢弃 + rulesPackHashOk=false）。
+    // M3（v0.1.4）：rules_url 先过**域白名单**——manifest 与其 sha256 同通道分发，
+    // sha256 校验只能防传输损坏、防不了"劫持源连恶意带正确哈希的规则"；限定
+    // 本项目三个已知通道域（与 `channel_urls` 一致），域外一律按校验失败丢弃。
     let mut rules_ok: Option<bool> = None;
     if !m.rules_url.is_empty() && m.rules_version != current_rules_version {
-        match verify_and_install_pack_with(&fetch_bytes, &m.rules_url, &m.rules_sha256) {
-            Ok(true) => rules_ok = Some(true),
-            Ok(false) => rules_ok = Some(false),
-            Err(_) => rules_ok = Some(false),
+        if !is_allowed_rules_url(&m.rules_url) {
+            let _ = crate::logging::audit::record(&crate::contract::LogEntry {
+                ts: crate::logging::audit::now_ms(),
+                op: "update".into(),
+                tx_id: None,
+                category_id: None,
+                path: Some(m.rules_url.clone()),
+                size_bytes: None,
+                disposition: None,
+                result: Some("fail".into()),
+                detail: Some("规则包 URL 不在已知通道域白名单内，已拒绝下载".into()),
+            });
+            rules_ok = Some(false);
+        } else {
+            match verify_and_install_pack_with(&fetch_bytes, &m.rules_url, &m.rules_sha256) {
+                Ok(true) => rules_ok = Some(true),
+                Ok(false) => rules_ok = Some(false),
+                Err(_) => rules_ok = Some(false),
+            }
         }
     }
 

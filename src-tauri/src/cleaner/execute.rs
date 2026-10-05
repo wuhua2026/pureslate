@@ -24,8 +24,8 @@ pub struct CleanTarget {
     pub disposition: Disposition,
     pub category_id: String,
     pub size_bytes: u64,
-    /// 类目 guard 进程基名（来自规则）；运行中 → 整类阻止。
-    pub guard_process: Option<String>,
+    /// 类目 guard 进程基名列表（来自规则，可多条）；任一运行中 → 整类阻止。
+    pub guard_processes: Vec<String>,
     /// 扫描记录的 mtime（epoch ms）；执行前一致性复核用（T-1）。
     pub mtime_ms: Option<i64>,
 }
@@ -55,7 +55,7 @@ pub fn resolve_targets(
             disposition: item.disposition,
             category_id: item.category_id.clone(),
             size_bytes: item.size_bytes,
-            guard_process: cat.guard_process.clone(),
+            guard_processes: cat.guard_processes.clone(),
             mtime_ms: item.mtime,
         });
     }
@@ -131,10 +131,8 @@ pub fn execute(
     for cat_id in &order {
         let group = &groups[cat_id];
         // 进程守卫：运行中 → 整类阻止（不做半清）。
-        let guard_blocked = group[0]
-            .guard_process
-            .as_deref()
-            .is_some_and(|p| guard::any_running(&[p.to_string()]));
+        let guard_blocked =
+            !group[0].guard_processes.is_empty() && guard::any_running(&group[0].guard_processes);
         if guard_blocked {
             for t in group {
                 push_progress(
@@ -171,11 +169,51 @@ pub fn execute(
                 continue;
             }
 
-            let _ = journal.intent(&t.path, t.disposition);
+            // M1（v0.1.4 · 红线 #2）：intent 写失败（磁盘满等）= "先日志后动手"前提
+            // 不成立 → 该目标 **fail-closed 跳过，绝不动手**。与 journal open 失败
+            // 整体中止的既有语义对齐；单目标跳过不中断事务其余目标。
+            if let Err(e) = journal.intent(&t.path, t.disposition) {
+                let reason = format!("journal intent 写入失败，已跳过该目标（fail-closed）: {e}");
+                eprintln!("[clean] {reason}");
+                push_progress(
+                    progress,
+                    t,
+                    CleanProgressState::Fail,
+                    done_bytes,
+                    total_bytes,
+                );
+                done_bytes += t.size_bytes;
+                report.total += 1;
+                report.fail += 1;
+                report.failures.push(CleanFailure {
+                    path: t.path.to_string_lossy().into_owned(),
+                    reason: reason.clone(),
+                });
+                let _ = crate::logging::audit::record(&crate::contract::LogEntry {
+                    ts: crate::logging::audit::now_ms(),
+                    op: "clean".into(),
+                    tx_id: Some(tx_id.to_string()),
+                    category_id: Some(t.category_id.clone()),
+                    path: Some(t.path.to_string_lossy().into_owned()),
+                    size_bytes: Some(t.size_bytes),
+                    disposition: Some(t.disposition),
+                    result: Some("fail".into()),
+                    detail: Some(reason),
+                });
+                continue;
+            }
             let outcome = apply_one(t, retention_days);
             let ok = outcome.is_ok();
             let reason = outcome.err().map(|e| e.to_string());
-            let _ = journal.result(&t.path, ok, reason.as_deref());
+            // result 写失败：操作已完成无法回滚——但缺 result 行会被启动恢复协议
+            // 当孤儿处理（quarantine → 还原、direct/recycle → 标记），语义安全兜底
+            // 存在；此处显式告警不吞错（M1）。
+            if let Err(e) = journal.result(&t.path, ok, reason.as_deref()) {
+                eprintln!(
+                    "[clean] journal result 写入失败（启动恢复协议将兜底）: path={} err={e}",
+                    t.path.to_string_lossy()
+                );
+            }
 
             // 审计日志（覆盖 clean 操作，M8=100%）。
             let _ = crate::logging::audit::record(&crate::contract::LogEntry {
@@ -318,7 +356,7 @@ mod tests {
             disposition,
             category_id: "cat".into(),
             size_bytes: meta.as_ref().map(|m| m.len()).unwrap_or(0),
-            guard_process: None,
+            guard_processes: Vec::new(),
             mtime_ms: meta
                 .as_ref()
                 .and_then(|m| m.modified().ok())
@@ -398,7 +436,7 @@ mod tests {
         std::fs::write(&f, "x").unwrap();
         // guard_process 指向当前进程自身名不可得；用空 Vec 转 Option -> 无效进程名，确保不命中即正常清理。
         let mut t = tgt(&r, "g.tmp", Disposition::Direct, Grade::Green);
-        t.guard_process = Some("__pureslate_never_running__.exe".into());
+        t.guard_processes = vec!["__pureslate_never_running__.exe".into()];
         let rep = execute("tx-guard", &[t], &cancel, 14, &mut |_, _, _, _, _| {});
         // 空 guard 不阻止：文件被删。
         assert_eq!(rep.ok, 1);

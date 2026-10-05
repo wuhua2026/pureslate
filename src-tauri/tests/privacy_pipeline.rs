@@ -227,7 +227,7 @@ fn guard_running_blocks_whole_privacy_category() {
             disposition: Disposition::Quarantine,
             category_id: "privacy.edge-history".into(),
             size_bytes: 11,
-            guard_process: Some(own_exe),
+            guard_processes: vec![own_exe],
             mtime_ms: None,
         },
         CleanTarget {
@@ -236,7 +236,7 @@ fn guard_running_blocks_whole_privacy_category() {
             disposition: Disposition::Quarantine,
             category_id: "privacy.edge-history".into(),
             size_bytes: 3,
-            guard_process: Some("msedge.exe".into()),
+            guard_processes: vec!["msedge.exe".into()],
             mtime_ms: None,
         },
     ];
@@ -295,7 +295,14 @@ fn shipped_privacy_rules_load_clean() {
             pureslate_lib::rules::model::Disposition::Quarantine,
             "{id}"
         );
-        assert_eq!(cat.guard_process.as_deref().unwrap_or(""), guard, "{id}");
+        assert_eq!(
+            cat.guard_processes
+                .first()
+                .map(String::as_str)
+                .unwrap_or(""),
+            guard,
+            "{id}"
+        );
     }
 }
 

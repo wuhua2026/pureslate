@@ -8,7 +8,7 @@ use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::Arc;
 
 use crate::contract::{Disposition, Grade, ScanItem};
-use crate::safety::whitelist::is_whitelisted;
+use crate::safety::whitelist::is_excluded_from_scan;
 
 use super::matcher::CompiledCategory;
 
@@ -49,11 +49,15 @@ pub fn walk_target(
     progress: Option<&ProgressFn>,
 ) -> Vec<ScanItem> {
     let mut out = Vec::new();
-    if is_whitelisted(target_start) {
+    // H1（v0.1.4）：扫描保护分层——白名单根全拦；§2.4 用户核心目录仅对非
+    // quarantine 去向整树拦（dup/cache 等 🟡 类目需进入这些目录提供产品价值）。
+    if is_excluded_from_scan(target_start, disposition) {
         return out;
     }
 
-    let min_size = compiled.min_size_bytes();
+    // H3（v0.1.4）：类目级剪枝下界改取最小 min_size（最宽松），精确校验在命中后
+    // per-include 进行（constraint_allows）。
+    let _min_size_prune = compiled.min_size_bytes();
     let walker = walkdir::WalkDir::new(target_start)
         .follow_links(false)
         .into_iter();
@@ -61,7 +65,7 @@ pub fn walk_target(
     let mut done = 0u64;
     let mut bytes = 0u64;
 
-    for entry in walker.filter_entry(|e| !is_whitelisted(e.path())) {
+    for entry in walker.filter_entry(|e| !is_excluded_from_scan(e.path(), disposition)) {
         if cancel.is_cancelled() {
             break;
         }
@@ -73,20 +77,33 @@ pub fn walk_target(
             continue;
         }
         // 二次白名单（filter_entry 对目录排除了，这里对文件再兜底一次）。
-        if is_whitelisted(entry.path()) {
-            continue;
-        }
-        if !compiled.matches_any(entry.path(), target_start) {
+        if is_excluded_from_scan(entry.path(), disposition) {
             continue;
         }
         let meta = match entry.metadata() {
             Ok(m) => m,
             Err(_) => continue,
         };
-        let size = meta.len();
-        if size < min_size {
+        // M5（SAFETY §2.7）：OneDrive/云盘占位文件跳过——读取会触发按需下载。
+        if super::is_cloud_placeholder(&meta) {
             continue;
         }
+        // H3（v0.1.4）：per-include 约束校验（age/size）——原实现解析 maxAgeDays
+        // 后从未消费，直清类目无保护窗（刚写入的临时文件也进候选）。
+        let constraint = match compiled.match_include(entry.path(), target_start) {
+            Some(c) => c,
+            None => continue,
+        };
+        let mtime_ms = to_epoch_ms(meta.modified().ok());
+        if !super::matcher::constraint_allows(
+            &constraint,
+            meta.len(),
+            mtime_ms.unwrap_or(0),
+            crate::logging::audit::now_ms(),
+        ) {
+            continue;
+        }
+        let size = meta.len();
         out.push(ScanItem {
             id: stable_id(&compiled.category_id, entry.path()),
             category_id: compiled.category_id.clone(),
@@ -162,7 +179,9 @@ pub fn parallel_walk_stats(
                 Ok(rd) => {
                     for e in rd.flatten() {
                         let p = e.path();
-                        if is_whitelisted(&p) {
+                        // H1：parallel_walk_stats 仅服务 large 维度（🟡/quarantine）——
+                        // §2.4 用户核心目录放行（扫描只读，确认后隔离可还原）。
+                        if is_excluded_from_scan(&p, Disposition::Quarantine) {
                             continue;
                         }
                         let Ok(ft) = e.file_type() else { continue };
@@ -227,6 +246,7 @@ pub fn parallel_walk_stats(
 }
 
 /// 单分片递归统计（walkdir；白名单过滤 + 软失败跳过，与串行语义一致）。
+/// H1：本函数仅服务 large 维度（🟡/quarantine）——§2.4 用户核心目录放行。
 fn walk_shard(
     shard: &Path,
     large_min: u64,
@@ -234,13 +254,13 @@ fn walk_shard(
     cancel: &CancelToken,
     local: &mut WalkStats,
 ) {
-    if is_whitelisted(shard) {
+    if is_excluded_from_scan(shard, Disposition::Quarantine) {
         return;
     }
     for entry in walkdir::WalkDir::new(shard)
         .follow_links(false)
         .into_iter()
-        .filter_entry(|e| !is_whitelisted(e.path()))
+        .filter_entry(|e| !is_excluded_from_scan(e.path(), Disposition::Quarantine))
     {
         if cancel.is_cancelled() {
             return;
@@ -249,10 +269,14 @@ fn walk_shard(
         if !entry.file_type().is_file() {
             continue;
         }
-        if is_whitelisted(entry.path()) {
+        if is_excluded_from_scan(entry.path(), Disposition::Quarantine) {
             continue;
         }
         let Ok(meta) = entry.metadata() else { continue };
+        // M5（SAFETY §2.7）：云盘占位文件跳过。
+        if super::is_cloud_placeholder(&meta) {
+            continue;
+        }
         let size = meta.len();
         add_stat(local, size, large_min, want_large);
         if want_large && size >= large_min {
@@ -350,7 +374,7 @@ mod tests {
                 max_age_days: 0,
                 min_size_mb: 0,
             }],
-            guard_process: None,
+            guard_processes: Vec::new(),
         };
         CompiledCategory::compile(&cat)
     }

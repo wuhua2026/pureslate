@@ -13,7 +13,7 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
 use crate::contract::{Disposition, Grade, ScanItem};
-use crate::safety::whitelist::is_whitelisted;
+use crate::safety::whitelist::is_excluded_from_scan;
 
 use super::matcher::CompiledCategory;
 use super::walk::{walk_target, CancelToken, ProgressFn};
@@ -92,7 +92,8 @@ impl MftSession {
         // 无需预置 cache 种子。
         let mut cache: HashMap<u64, PathBuf> = HashMap::new();
 
-        let min_size = compiled.min_size_bytes();
+        // H3（v0.1.4）：类目级剪枝下界不再使用——per-include 精确校验在命中后进行。
+        let _min_size_prune = compiled.min_size_bytes();
         let mut out = Vec::new();
         let mut done = 0u64;
         let mut bytes = 0u64;
@@ -113,22 +114,41 @@ impl MftSession {
             if path.strip_prefix(target_start).is_err() {
                 continue;
             }
-            if is_whitelisted(&path) {
+            // H1（v0.1.4）：walk_target 服务的规则类目按其去向分层——quarantine
+            // 类目（cache/privacy）在 §2.4 用户核心目录内仍可扫描。
+            if is_excluded_from_scan(&path, disposition) {
                 continue;
             }
-            if !compiled.matches_any(&path, target_start) {
-                continue;
-            }
+            // H3（v0.1.4）：per-include 约束校验（age/size），替代类目级 max 剪枝。
+            let constraint = match compiled.match_include(&path, target_start) {
+                Some(c) => c,
+                None => continue,
+            };
             // USN 记录无长度/mtime：命中项补一次 stat（命中集远小于全盘，代价可控；
             // stat 失败=文件已消失/不可达，软跳过）。
             let meta = match std::fs::metadata(&path) {
                 Ok(m) => m,
                 Err(_) => continue,
             };
-            let size = meta.len();
-            if size < min_size {
+            // M5（SAFETY §2.7）：云盘占位文件跳过。
+            if super::is_cloud_placeholder(&meta) {
                 continue;
             }
+            let mtime_ms = meta
+                .modified()
+                .ok()
+                .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+                .map(|d| d.as_millis() as i64)
+                .unwrap_or(0);
+            if !super::matcher::constraint_allows(
+                &constraint,
+                meta.len(),
+                mtime_ms,
+                crate::logging::audit::now_ms(),
+            ) {
+                continue;
+            }
+            let size = meta.len();
             out.push(ScanItem {
                 id: stable_id(&compiled.category_id, &path),
                 category_id: compiled.category_id.clone(),
@@ -727,7 +747,7 @@ mod tests {
                 min_size_mb: 0,
             }],
             excludes: vec![],
-            guard_process: None,
+            guard_processes: Vec::new(),
         }
     }
 

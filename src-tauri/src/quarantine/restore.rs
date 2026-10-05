@@ -80,6 +80,9 @@ pub fn restore_one(root: &Path, entry: &ManifestEntry) -> RestoreOutcome {
     }
     let orig = PathBuf::from(&entry.original_path);
     // T-2 ③：还原目标不得落白名单禁区。
+    // H1（v0.1.4）语义说明：is_whitelisted 已不含 §2.4 用户核心目录（H1 拆出）——
+    // 还原到 Documents 等是**恢复用户数据**而非删除，本就应放行；系统目录等
+    // 白名单根仍拦截（防伪造 manifest 写特权目录）。
     if crate::safety::whitelist::is_whitelisted(&orig) {
         return RestoreOutcome::Failed(format!(
             "还原目标位于安全白名单禁区，拒绝: {}",
