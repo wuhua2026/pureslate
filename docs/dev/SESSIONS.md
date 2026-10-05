@@ -5,6 +5,14 @@
 > 维护（AGENTS.md §9）：任务完成时 agent 自动追加/更新当前会话条目，随任务同一提交。格式：`## YYYY-MM-DD | 主题`。
 > 本初版由历史会话记忆回溯整理（截至 2026-09-29），细节以 git 历史与 TASKS.md 为准。
 
+## 2026-10-05 | v0.1.4 发布（外部审查修复 3 高危+5 中危）+ 本地半截 commit 连环事故
+
+- **做了什么**：按外部全面代码审查修复 8 项——**H1** 白名单 §2.4 与 quarantine 扫描分层（dup 维度 4/5 target 曾被自家白名单整树剪除；`is_user_core_data`+`is_excluded_from_scan` 分层，direct/recycle 仍整树拦、restore 同步放行用户文档；评审文档 P4-08，SAFETY §2.4 修订）；**H2** guard_processes Vec（多守卫不再折叠，chrome.exe 守卫曾被 msedge.exe 顶掉）；**H3** maxAgeDays/minSize per-include 落地（原解析后从未消费——matcher `match_include`+`constraint_allows`，剪枝下界 max→min，temp.user 7 天/微信 30 天保护窗真实生效）；**M1** journal intent fail-closed；**M2** manifest 原子写（temp+rename）；**M3** rules_url 域白名单；**M5** OneDrive 占位跳过（三处 stat 点）；**M6** 两处 expect 清零。
+- **连环事故与教训（本轮最大收获）**：fae5504 **只提交了 4 个文档、514 行源码修复全在工作区**（git add 链中一处 pathspec 错误 + `2>/dev/null` 吞错 → 整条 add 失败但被掩盖）→ 已发布的 v0.1.4 安装包不含修复。连环触发器全部被既有防护拦住：①tag/版本一致性校验 step 首跑即拦截（tag 配旧版本内容）；②manifest 回推的 checkout 冲突暴露工作区脏；③最终靠 `git diff --cached --stat` 对照工作区 514 行才发现半截 commit。补救链：补提交 702edff（514 行）→ 删错误 Release+tag → 重打 v0.1.4 → 流水线重发成功（run 37353986830）。
+- **教训**：①`git add` 多文件路径严禁 `2>/dev/null`，add 后必须 `git diff --cached --stat` 核对行数与预期一致再 commit；②发版前以"tag commit 的源码内容"而非"本地工作区"为准；③本地工具目录（.mimosa/.zcodeignore）已 gitignore，add 用显式文件清单。
+- **验证**：cargo 176/0 + clippy 零警告 + pnpm 54/54；Release v0.1.4 四资产（安装包 747KB/便携 3.76MB）+ manifest appVersion=0.1.4（aa86de8）。
+- **下一步**：用户真机复测（重复文件维度应首次呈现文档/图片/桌面/视频的重复副本；临时/缓存类目数量因 7/30 天保护窗减少）；挂账 M4/M7/低危 L 系列下批；SignPath/P4-07 照旧。
+
 ## 2026-10-05 | v0.1.3 发布（自动提权）+ tag/内容不符事故与流水线防护
 
 - **做了什么**：用户要求"自动提权成管理员"——`build.rs` 按 `PROFILE` 区分嵌入 Windows manifest：**release 构建嵌 `requireAdministrator`**（保留 tauri-build 默认的 Common-Controls v6 依赖），debug/test 保持 asInvoker（tauri dev/cargo test 非提权终端不受影响）。本地双 profile 验证：release exe 含 requireAdministrator/trustInfo、debug 不含。收益：①MFT 快速引擎安装/便携双形态恒启用（深度体检大容量盘分钟级）；②HKLM 启动项管理恢复可写（P3-02 asInvoker 限制解除）；③Scan 非提权提示自动消失（isElevated=true）。
