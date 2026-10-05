@@ -38,3 +38,6 @@ docs/prd-*.md
 docs/dev-plan-*.md
 docs/verify/security-audit-*.md
 tools/diag/
+
+# 项目状态报告（仅本地查阅，不入公开仓库）
+docs/verify/report-*.md
