@@ -91,3 +91,13 @@
 - **H3** `maxAgeDays`/`minSize` per-include 实现落地（原解析后从未消费）：`match_include` 返回命中约束 + `constraint_allows` 校验（mtime 注入可测，异常一律排除=宁缺勿错）；类目级剪枝下界 max→min；temp.user 7 天/微信缓存 30 天保护窗从此真实生效。
 - **M1** journal intent 写失败 → 该目标 fail-closed 跳过（原吞错后照常删除，违反红线 #2）；result 写失败显式告警（恢复协议兜底）。**M2** manifest 状态迁移/行清理改同盘 temp+rename 原子替换（崩溃窗口不再丢全部行）。**M3** rules_url 域白名单（三通道域+REPO_SLUG 绑定，域外拒绝+审计）。**M5** OneDrive 占位文件（RECALL_ON_DATA_ACCESS/OFFLINE）walk/mft/dup 三处跳过（SAFETY §2.7 落地）。**M6** whitelist 两处 expect → into_inner（红线 #6 清零）。
 - **验证**：cargo fmt/clippy -D warnings/test 全绿（176 passed，+5 测试）；pnpm typecheck/vitest(54)/build 全绿。评审文档 docs/review/P4-08.md（破坏面：H1 为"扩大扫描面、收窄删除面"变更，direct 候选在 §2.4 仍整树拦）。挂账：M4/M7/低危 L 系列下批。
+
+### v0.1.5 真机反馈批量修复（多盘扫描/报告错误处理/动效/启动项扩展）
+
+- **契约修正（镜像不一致）**：`StartupSource` Rust 端 serde 由 camelCase（"hkcuRun"）改 **snake_case**（"hkcu_run"）——与 ipc.ts/mock 既定事实源对齐（原不一致导致真实模式来源列显示空白，从未被走查发现）。
+- **契约加性**：①`StartupSource` 增 `startup_folder_all_users` / `active_setup` 两源；②`StartupEntry.systemDisabled?: boolean`（StartupApproved 系统禁用态，只读展示）；③`ScanResult.volume` 语义扩展为"覆盖卷串"（全部固定盘如 "C:+D:"，单盘机器与旧行为一致；消费面已核：仅前端展示/断言非空，后端不解析）。
+- **反馈 1（多盘）**：大文件维度枚举全部固定盘逐卷遍历（原仅首个 target 所在卷）；temp.user 追加非系统固定盘根下 Temp/tmp/_scratch 顶层目录（代码级枚举）。
+- **反馈 2（动效）**：Scan 页旋转扫描动效+阶段图标+多卷"第 N/共 M 卷"提示（盘数取 disk_usage，零契约改动）。
+- **反馈 3（报告空）**：scan_get_items 拉取失败 → itemsError 错误分支+重试（闭环外部审查 L13）；事件过滤器竞态自愈（scanId 空时采纳首事件）；完成态显式出口（取消后"查看已收集结果"）；空态文案细分。
+- **反馈 4（启动项）**：新增全体用户启动文件夹（ProgramData）+ Active Setup（HKLM/HKCU Installed Components StubPath，HKLM 优先）两源，枚举+禁用（.reg/文件备份）+还原同批交付；StartupApproved 只读判定系统禁用态（不写系统批准状态）。
+- **验证**：cargo fmt/clippy --all-targets -D warnings/test 全绿（154 lib+24 集成，startup 新增 Active Setup/全体用户文件夹 roundtrip、approved 字节语义等 4 例）；pnpm typecheck/vitest(56)/build 全绿。

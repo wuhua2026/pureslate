@@ -11,7 +11,13 @@ export type Grade = "green" | "yellow" | "red";
 export type Disposition = "direct" | "recycle" | "quarantine";
 export type ScanDimension = "temp" | "large" | "dup" | "cache" | "startup" | "privacy";
 export type QuarantineState = "quarantined" | "restored" | "purged";
-export type StartupSource = "hkcu_run" | "hklm_run" | "startup_folder" | "task_scheduler";
+export type StartupSource =
+  | "hkcu_run"
+  | "hklm_run"
+  | "startup_folder"
+  | "startup_folder_all_users"
+  | "task_scheduler"
+  | "active_setup";
 export type Impact = "high" | "medium" | "low";
 export type Channel = "github" | "mirror";
 export type ScanPhase = "walking" | "hashing" | "aggregating";
@@ -112,6 +118,8 @@ export interface StartupEntry {
   source: StartupSource;
   impact: Impact;
   enabled: boolean;
+  /** v0.1.5 加性：系统级已禁用（StartupApproved）——UI 标注"系统已禁用"，不提供恢复入口。 */
+  systemDisabled?: boolean;
 }
 
 // ---- 更新 ----

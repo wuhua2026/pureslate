@@ -104,7 +104,16 @@ describe("mock 扫描数据（P0-04）", () => {
     for (const s of StartupListStub) {
       expect(s.id).toBeTruthy();
       expect(typeof s.enabled).toBe("boolean");
-      expect(s.source).oneOf(["hkcu_run", "hklm_run", "startup_folder", "task_scheduler"]);
+      expect(s.source).oneOf([
+        "hkcu_run",
+        "hklm_run",
+        "startup_folder",
+        "startup_folder_all_users",
+        "task_scheduler",
+        "active_setup",
+      ]);
     }
+    // v0.1.5：系统级禁用样本（systemDisabled）与普通禁用并存。
+    expect(StartupListStub.some((s) => s.systemDisabled === true)).toBe(true);
   });
 });

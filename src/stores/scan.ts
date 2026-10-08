@@ -43,6 +43,10 @@ export const useScanStore = defineStore("scan", () => {
   const result = ref<ScanResult | null>(null);
   const items = ref<ScanItem[]>([]);
   const error = ref("");
+  /** 报告明细拉取失败（v0.1.5 反馈 3）：扫描成功但 items 获取失败——报告页显示错误分支+重试。 */
+  const itemsError = ref("");
+  /** 本次扫描被用户取消（v0.1.5 反馈 3）：完成后不自动跳报告，提供"查看已收集结果"入口。 */
+  const cancelled = ref(false);
 
   let timer: number | undefined;
   let unlisten: Array<() => void> = [];
@@ -60,6 +64,8 @@ export const useScanStore = defineStore("scan", () => {
     result.value = null;
     items.value = [];
     error.value = "";
+    itemsError.value = "";
+    cancelled.value = false;
   }
 
   function summarize(list: ScanItem[]): FoundBytes {
@@ -107,8 +113,11 @@ export const useScanStore = defineStore("scan", () => {
 
   // ---- 真实扫描 ----
   async function runReal() {
+    // 竞态自愈（v0.1.5 反馈 3）：scan_start 的响应与事件到达存在先后窗口——
+    // scanId 尚空时采纳首到事件，非空才比对（既覆盖赋值窗口，又防背靠背扫描串台）。
     unlisten.push(
       await events.onScanProgress((p) => {
+        if (!scanId.value) scanId.value = p.scanId;
         if (p.scanId !== scanId.value) return;
         phase.value = p.phase;
         percent.value = p.percent;
@@ -119,10 +128,11 @@ export const useScanStore = defineStore("scan", () => {
     );
     unlisten.push(
       await events.onScanDone(async (r) => {
+        if (!scanId.value) scanId.value = r.scanId;
         if (r.scanId !== scanId.value) return;
         result.value = r;
         running.value = false;
-        items.value = await commands.scan_get_items({ scanId: r.scanId, offset: 0, limit: 100000 });
+        await loadItems();
       }),
     );
 
@@ -133,6 +143,28 @@ export const useScanStore = defineStore("scan", () => {
       return;
     }
     scanId.value = id;
+  }
+
+  /** 拉取报告明细。失败进入 itemsError 态（v0.1.5 反馈 3）：不允许静默空报告——
+   *  跳转照常发生，报告页展示错误分支并提供重试。 */
+  async function loadItems(): Promise<void> {
+    if (!scanId.value) return;
+    try {
+      items.value = await commands.scan_get_items({
+        scanId: scanId.value,
+        offset: 0,
+        limit: 100000,
+      });
+      itemsError.value = "";
+    } catch (e) {
+      items.value = [];
+      itemsError.value = String(e);
+    }
+  }
+
+  /** 报告页重试入口：重发明细拉取。 */
+  function retryLoadItems(): Promise<void> {
+    return loadItems();
   }
 
   /** 深度体检开关（v0.1.2）：Home 页"深度体检"按钮置位，Scan.vue onMounted 启动时
@@ -161,6 +193,7 @@ export const useScanStore = defineStore("scan", () => {
 
   function cancel() {
     if (!running.value) return;
+    cancelled.value = true;
     if (isMockMode()) {
       teardownTimers();
       running.value = false;
@@ -182,11 +215,14 @@ export const useScanStore = defineStore("scan", () => {
     result,
     items,
     error,
+    itemsError,
+    cancelled,
     deepScan,
     setDeepScan,
     foundBytesTotal,
     isDone,
     start,
     cancel,
+    retryLoadItems,
   };
 });

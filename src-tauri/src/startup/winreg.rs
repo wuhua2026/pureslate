@@ -76,6 +76,16 @@ extern "system" {
         access: u32,
         result: *mut HKey,
     ) -> i32;
+    fn RegEnumKeyExW(
+        hkey: HKey,
+        index: u32,
+        lpname: *mut u16,
+        lpcchname: *mut u32,
+        reserved: *mut u32,
+        lpclass: *const u16,
+        lpcchclass: *const u32,
+        lpftlastwritetime: *mut u64,
+    ) -> i32;
     fn RegCreateKeyExW(
         hkey: HKey,
         lpsubkey: *const u16,
@@ -158,6 +168,42 @@ impl Drop for OpenKey {
         // 安全性：句柄必来自 RegOpenKeyExW/RegCreateKeyExW 成功路径。
         unsafe { RegCloseKey(self.0) };
     }
+}
+
+/// 枚举某键下全部子键名（v0.1.5 反馈 4：Active Setup 枚举用）。
+pub fn enum_subkeys(hive: Hive, subkey: &str) -> io::Result<Vec<String>> {
+    let key = OpenKey::open(hive, subkey, KEY_READ)?;
+    let mut out = Vec::new();
+    let mut index: u32 = 0;
+    loop {
+        let mut name_buf = vec![0u16; 512];
+        let mut name_len = name_buf.len() as u32;
+        // 安全性：句柄有效；缓冲区长度与指针配对传入，API 不越界写。
+        let code = unsafe {
+            RegEnumKeyExW(
+                key.0,
+                index,
+                name_buf.as_mut_ptr(),
+                &mut name_len,
+                std::ptr::null_mut(),
+                std::ptr::null(),
+                std::ptr::null(),
+                std::ptr::null_mut(),
+            )
+        };
+        match code {
+            ERROR_SUCCESS => {
+                out.push(String::from_utf16_lossy(&name_buf[..name_len as usize]));
+                index += 1;
+            }
+            ERROR_MORE_DATA => {
+                name_buf.resize(name_len as usize + 2, 0);
+            }
+            ERROR_NO_MORE_ITEMS => break,
+            e => return Err(io::Error::from_raw_os_error(e)),
+        }
+    }
+    Ok(out)
 }
 
 /// UTF-8 → UTF-16 NUL 结尾（路径/值名一律走此转换，UTF-16 安全）。

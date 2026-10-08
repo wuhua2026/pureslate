@@ -1,9 +1,11 @@
-//! 启动项（R07，SPEC §6.4）。
+//! 启动项（R07，SPEC §6.4；v0.1.5 反馈 4 扩至 7 源）。
 //!
-//! 枚举 5 源：HKCU Run、HKLM Run、HKLM WOW6432Node Run（展示归入 hklm_run）、
-//! 用户启动文件夹（shell:startup）、登录触发计划任务。
+//! 枚举源：HKCU Run、HKLM Run、HKLM WOW6432Node Run（展示归入 hklm_run）、
+//! 用户启动文件夹（shell:startup）、**全体用户启动文件夹**（ProgramData）、
+//! **Active Setup**（HKLM/HKCU Installed Components 的 StubPath）、登录触发计划任务。
 //! 禁用 = 备份后移除（备份即事务记录，先备份后动手）、不删源程序；`toggle(id, true)` 还原。
 //! 全程审计（disable_startup / enable_startup）。
+//! Run/文件夹类条目附带 **StartupApproved** 系统禁用状态（只读展示，不写系统批准状态）。
 
 pub mod backup;
 pub mod impact;
@@ -14,7 +16,7 @@ pub mod winreg;
 
 use std::collections::HashSet;
 use std::fs;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use sha2::{Digest, Sha256};
 
@@ -26,6 +28,15 @@ use winreg::Hive;
 const RUN_SUBKEY: &str = "Software\\Microsoft\\Windows\\CurrentVersion\\Run";
 /// HKLM 32 位视图 Run 子键。
 const RUN_SUBKEY_WOW64: &str = "Software\\WOW6432Node\\Microsoft\\Windows\\CurrentVersion\\Run";
+/// Active Setup 自启位根（v0.1.5 反馈 4）。
+const ACTIVE_SETUP_ROOT: &str = "Software\\Microsoft\\Active Setup\\Installed Components";
+/// StartupApproved 系统批准状态（v0.1.5：只读判定"任务管理器口径的已禁用"）。
+const STARTUP_APPROVED_RUN: &str =
+    "Software\\Microsoft\\Windows\\CurrentVersion\\Explorer\\StartupApproved\\Run";
+const STARTUP_APPROVED_RUN32: &str =
+    "Software\\Microsoft\\Windows\\CurrentVersion\\Explorer\\StartupApproved\\Run32";
+const STARTUP_APPROVED_FOLDER: &str =
+    "Software\\Microsoft\\Windows\\CurrentVersion\\Explorer\\StartupApproved\\StartupFolder";
 
 /// 一个活动启动项（含 toggle 定位信息）。
 #[derive(Debug, Clone)]
@@ -35,6 +46,9 @@ pub struct RawItem {
     pub command: String,
     pub source: StartupSource,
     pub kind: ItemKind,
+    /// 系统级已禁用（StartupApproved 判定）：展示 enabled=false + systemDisabled 标注，
+    /// 但**不是**本应用备份所致——不提供恢复入口（不写系统批准状态）。
+    pub system_disabled: bool,
 }
 
 /// 启动项的定位与备份/还原方式。
@@ -77,9 +91,127 @@ fn startup_folder() -> Option<PathBuf> {
     p.is_dir().then_some(p)
 }
 
+/// 全体用户启动文件夹（ProgramData，v0.1.5 反馈 4）。
+fn startup_folder_all_users() -> Option<PathBuf> {
+    let pd = std::env::var_os("ProgramData").map(PathBuf::from)?;
+    let p = pd
+        .join("Microsoft")
+        .join("Windows")
+        .join("Start Menu")
+        .join("Programs")
+        .join("StartUp");
+    p.is_dir().then_some(p)
+}
+
+/// StartupApproved 二进制判定（纯函数）：首字节 02/03 = 系统级已禁用（06=启用）。
+fn is_approved_disabled(data: &[u8]) -> bool {
+    !data.is_empty() && (data[0] == 2 || data[0] == 3)
+}
+
+/// 系统"已禁用"条目名集合（StartupApproved 三子键，只读；键缺失=空集）。
+/// 值名统一小写化（注册表值名大小写不敏感，字符串比对敏感）。
+fn approved_disabled_names() -> HashSet<String> {
+    let mut out = HashSet::new();
+    for subkey in [
+        STARTUP_APPROVED_RUN,
+        STARTUP_APPROVED_RUN32,
+        STARTUP_APPROVED_FOLDER,
+    ] {
+        if let Ok(values) = winreg::enum_values(Hive::CurrentUser, subkey) {
+            for v in values {
+                if is_approved_disabled(&v.data) {
+                    out.insert(v.name.to_lowercase());
+                }
+            }
+        }
+    }
+    out
+}
+
+/// 启动文件夹枚举（用户/全体用户共用；approved 键 = 文件名含扩展名）。
+fn folder_items(
+    dir: &Path,
+    source: StartupSource,
+    approved: &HashSet<String>,
+    out: &mut Vec<RawItem>,
+) {
+    let Ok(rd) = fs::read_dir(dir) else {
+        return;
+    };
+    for entry in rd.filter_map(Result::ok) {
+        let path = entry.path();
+        if !path.is_file() {
+            continue;
+        }
+        let name = path
+            .file_stem()
+            .map(|s| s.to_string_lossy().into_owned())
+            .unwrap_or_default();
+        let file_name = path
+            .file_name()
+            .map(|s| s.to_string_lossy().into_owned())
+            .unwrap_or_default();
+        let tag = format!("folder|{}", path.to_string_lossy());
+        out.push(RawItem {
+            id: stable_id(&tag),
+            name,
+            command: path.to_string_lossy().into_owned(),
+            source,
+            kind: ItemKind::FolderFile { path },
+            system_disabled: approved.contains(&file_name.to_lowercase()),
+        });
+    }
+}
+
+/// Active Setup 自启位枚举（v0.1.5 反馈 4）。参数化子键根（测试可注入）；
+/// HKLM 与 HKCU 同名组件取 HKLM 优先；StubPath 为字符串类才入选。
+fn active_setup_items(root_subkey: &str, out: &mut Vec<RawItem>) {
+    let mut seen: HashSet<String> = HashSet::new();
+    for hive in [Hive::LocalMachine, Hive::CurrentUser] {
+        let Ok(subkeys) = winreg::enum_subkeys(hive, root_subkey) else {
+            continue;
+        };
+        for sk in subkeys {
+            if !seen.insert(sk.clone()) {
+                continue; // HKLM 优先（先遍历）
+            }
+            let full = format!("{root_subkey}\\{sk}");
+            let Ok(values) = winreg::enum_values(hive, &full) else {
+                continue;
+            };
+            let Some(v) = values.iter().find(|v| {
+                v.name == "StubPath"
+                    && (v.kind == winreg::REG_SZ || v.kind == winreg::REG_EXPAND_SZ)
+            }) else {
+                continue;
+            };
+            let command = winreg::reg_data_to_string(&v.data);
+            if command.is_empty() {
+                continue;
+            }
+            let tag = format!("activesetup|{full}");
+            out.push(RawItem {
+                id: stable_id(&tag),
+                name: sk,
+                command,
+                source: StartupSource::ActiveSetup,
+                kind: ItemKind::RunValue {
+                    hive,
+                    subkey: full,
+                    value_name: "StubPath".into(),
+                    value_kind: v.kind,
+                    data: v.data.clone(),
+                },
+                system_disabled: false,
+            });
+        }
+    }
+}
+
 /// 枚举全部活动启动项（只读）。
 pub fn live_items() -> Vec<RawItem> {
     let mut out = Vec::new();
+    let approved = approved_disabled_names();
 
     // 注册表 3 键（wow64 展示归入 hklm_run，契约 source 无独立 wow64 值）。
     let run_keys: [(Hive, &str, StartupSource); 3] = [
@@ -98,6 +230,7 @@ pub fn live_items() -> Vec<RawItem> {
             }
             let command = winreg::reg_data_to_string(&v.data);
             let tag = format!("run|{subkey}|{}", v.name);
+            let system_disabled = approved.contains(&v.name.to_lowercase());
             out.push(RawItem {
                 id: stable_id(&tag),
                 name: v.name.clone(),
@@ -110,33 +243,26 @@ pub fn live_items() -> Vec<RawItem> {
                     value_kind: v.kind,
                     data: v.data,
                 },
+                system_disabled,
             });
         }
     }
 
-    // 用户启动文件夹。
+    // 用户启动文件夹 + 全体用户启动文件夹（v0.1.5 反馈 4）。
     if let Some(dir) = startup_folder() {
-        if let Ok(rd) = fs::read_dir(&dir) {
-            for entry in rd.filter_map(Result::ok) {
-                let path = entry.path();
-                if !path.is_file() {
-                    continue;
-                }
-                let name = path
-                    .file_stem()
-                    .map(|s| s.to_string_lossy().into_owned())
-                    .unwrap_or_default();
-                let tag = format!("folder|{}", path.to_string_lossy());
-                out.push(RawItem {
-                    id: stable_id(&tag),
-                    name,
-                    command: path.to_string_lossy().into_owned(),
-                    source: StartupSource::StartupFolder,
-                    kind: ItemKind::FolderFile { path },
-                });
-            }
-        }
+        folder_items(&dir, StartupSource::StartupFolder, &approved, &mut out);
     }
+    if let Some(dir) = startup_folder_all_users() {
+        folder_items(
+            &dir,
+            StartupSource::StartupFolderAllUsers,
+            &approved,
+            &mut out,
+        );
+    }
+
+    // Active Setup（v0.1.5 反馈 4）。
+    active_setup_items(ACTIVE_SETUP_ROOT, &mut out);
 
     // 登录触发计划任务。
     for t in tasks::enumerate_logon_tasks() {
@@ -147,6 +273,7 @@ pub fn live_items() -> Vec<RawItem> {
             command: t.command,
             source: StartupSource::TaskScheduler,
             kind: ItemKind::Task { task_name: t.name },
+            system_disabled: false,
         });
     }
 
@@ -165,7 +292,8 @@ fn to_entry(item: &RawItem) -> StartupEntry {
         command: item.command.clone(),
         source: item.source,
         impact: impact::estimate_impact(item.source, &item.command, &item.name),
-        enabled: true,
+        enabled: !item.system_disabled,
+        system_disabled: item.system_disabled.then_some(true),
     }
 }
 
@@ -179,6 +307,7 @@ fn entry_from_record(rec: &backup::BackupRecord) -> StartupEntry {
         source: rec.source,
         impact: impact::estimate_impact(rec.source, &rec.command, &rec.name),
         enabled: false,
+        system_disabled: None,
     }
 }
 
@@ -427,7 +556,10 @@ mod tests {
 
     impl Sandbox {
         fn new(tag: &str) -> Self {
-            let guard = crate::storage::TEST_DATA_ROOT_LOCK.lock().unwrap();
+            // 抗中毒（LESSONS：某用例失败持锁 panic 不应级联废掉其余用例）。
+            let guard = crate::storage::TEST_DATA_ROOT_LOCK
+                .lock()
+                .unwrap_or_else(|e| e.into_inner());
             let root = std::env::temp_dir().join(format!(
                 "pureslate-startup-{tag}-{}",
                 std::time::SystemTime::now()
@@ -475,6 +607,7 @@ mod tests {
                 value_kind: winreg::REG_SZ,
                 data: values[0].data.clone(),
             },
+            system_disabled: false,
         };
 
         // 禁用：备份文件存在 + 值被移除 + manifest 有记录
@@ -528,6 +661,7 @@ mod tests {
             command: orig.to_string_lossy().into_owned(),
             source: StartupSource::StartupFolder,
             kind: ItemKind::FolderFile { path: orig.clone() },
+            system_disabled: false,
         };
 
         disable_item(&item).unwrap();
@@ -550,6 +684,108 @@ mod tests {
     fn toggle_disable_missing_id_fails() {
         let _sb = Sandbox::new("missing");
         assert!(!toggle("no-such-id-1234", false));
+    }
+
+    /// v0.1.5 反馈 4：Active Setup 枚举 + 禁用/还原 roundtrip（HKCU 自建测试键）。
+    #[test]
+    fn active_setup_disable_enable_roundtrip() {
+        let _sb = Sandbox::new("activesetup");
+        let root = format!(
+            "Software\\PureSlateSelfTest\\ActiveSetup-{}",
+            std::process::id()
+        );
+        let comp = format!("{root}\\{{TEST-GUID}}");
+        let data = winreg::string_to_reg_data("rundll32.exe setup.dll,Setup");
+        winreg::set_value(Hive::CurrentUser, &comp, "StubPath", winreg::REG_SZ, &data).unwrap();
+        // 无 StubPath 的兄弟组件：不入选。
+        winreg::set_value(
+            Hive::CurrentUser,
+            &format!("{root}\\{{NO-STUB}}"),
+            "Version",
+            winreg::REG_SZ,
+            &winreg::string_to_reg_data("1.0"),
+        )
+        .unwrap();
+
+        let mut items = Vec::new();
+        active_setup_items(&root, &mut items);
+        assert_eq!(items.len(), 1, "只有含 StubPath 的组件入选");
+        let item = &items[0];
+        assert_eq!(item.name, "{TEST-GUID}");
+        assert_eq!(item.source, StartupSource::ActiveSetup);
+        assert!(item.command.contains("rundll32"));
+
+        // 禁用（备份 .reg + 删 StubPath）→ 还原（写回）。
+        disable_item(item).unwrap();
+        assert!(
+            winreg::enum_values(Hive::CurrentUser, &comp)
+                .unwrap()
+                .is_empty(),
+            "StubPath 须被移除"
+        );
+        let recs = backup::load_manifest();
+        assert_eq!(recs.len(), 1);
+        assert_eq!(recs[0].source, StartupSource::ActiveSetup);
+        assert!(recs[0].reg_file.is_some(), "Active Setup 须 .reg 备份");
+
+        enable_record(&recs[0]).unwrap();
+        let after = winreg::enum_values(Hive::CurrentUser, &comp).unwrap();
+        assert_eq!(after.len(), 1);
+        assert_eq!(after[0].name, "StubPath");
+        assert!(backup::load_manifest().is_empty());
+
+        // 清理测试键。
+        winreg::delete_key(Hive::CurrentUser, &comp).unwrap();
+        winreg::delete_key(Hive::CurrentUser, &format!("{root}\\{{NO-STUB}}")).unwrap();
+        winreg::delete_key(Hive::CurrentUser, &root).unwrap();
+    }
+
+    /// v0.1.5 反馈 4：全体用户启动文件夹 = FolderFile 同款禁用/还原语义（注入目录）。
+    #[test]
+    fn folder_all_users_roundtrip_via_injected_dir() {
+        let _sb = Sandbox::new("folderall");
+        let dir = std::env::temp_dir().join(format!(
+            "pureslate-startup-folderall-{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        fs::create_dir_all(&dir).unwrap();
+        let orig = dir.join("Team Agent.lnk");
+        fs::write(&orig, b"lnk").unwrap();
+
+        let mut items = Vec::new();
+        let approved = HashSet::new();
+        folder_items(
+            &dir,
+            StartupSource::StartupFolderAllUsers,
+            &approved,
+            &mut items,
+        );
+        assert_eq!(items.len(), 1);
+        assert_eq!(items[0].source, StartupSource::StartupFolderAllUsers);
+        assert!(!items[0].system_disabled);
+
+        disable_item(&items[0]).unwrap();
+        assert!(!orig.exists());
+        let recs = backup::load_manifest();
+        assert_eq!(recs[0].source, StartupSource::StartupFolderAllUsers);
+        enable_record(&recs[0]).unwrap();
+        assert!(orig.exists());
+
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    /// StartupApproved 判定：首字节 02/03 = 禁用；06/空 = 未禁用。
+    #[test]
+    fn startup_approved_byte_semantics() {
+        assert!(is_approved_disabled(&[
+            0x02, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0
+        ]));
+        assert!(is_approved_disabled(&[0x03, 0, 0, 0]));
+        assert!(!is_approved_disabled(&[0x06, 0, 0, 0]));
+        assert!(!is_approved_disabled(&[]));
     }
 
     #[test]
@@ -584,9 +820,10 @@ mod tests {
             .find(|e| e.id == "zz-disabled-item")
             .expect("已禁用项应出现在列表");
         assert!(!e.enabled);
-        // 活动项默认 enabled=true
-        assert!(entries
-            .iter()
-            .all(|e| e.enabled || e.id == "zz-disabled-item"));
+        // enabled=false 只允许两类：本应用备份项（zz-disabled-item）或系统级禁用
+        // （StartupApproved 判定，v0.1.5 起真实机器上可能存在）。
+        assert!(entries.iter().all(|e| {
+            e.enabled || e.id == "zz-disabled-item" || e.system_disabled == Some(true)
+        }));
     }
 }

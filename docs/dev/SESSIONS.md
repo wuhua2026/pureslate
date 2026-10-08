@@ -5,6 +5,13 @@
 > 维护（AGENTS.md §9）：任务完成时 agent 自动追加/更新当前会话条目，随任务同一提交。格式：`## YYYY-MM-DD | 主题`。
 > 本初版由历史会话记忆回溯整理（截至 2026-09-29），细节以 git 历史与 TASKS.md 为准。
 
+## 2026-10-08 | v0.1.5 代码批次交付（真机反馈四项 + StartupApproved 附加项）
+
+- **做了什么**：按 feedback-fixes-v0.1.5.md R2 方案全批落地——反馈1a 大文件枚举全部固定盘逐卷遍历 + `ScanResult.volume` 语义扩为覆盖卷串（消费面 grep 核验：仅展示/非空断言）；反馈1b temp.user 追加非系统固定盘根 Temp/tmp/_scratch（代码级枚举，候选清单保守定稿，"下载缓存"明确排除）；反馈2 Scan 页旋转动效+阶段图标+"第 N/共 M 卷"（disk_usage 盘数+currentPath 盘符推进，零契约改动）；反馈3 items 拉取 catch+itemsError 错误分支+重试（闭环 L13）+事件过滤器竞态自愈（scanId 空采纳首事件）+取消后"查看已收集结果"+空态细分；反馈4 全体用户启动文件夹（ProgramData）+ Active Setup 两新源（枚举/禁用 .reg 备份/还原同批）+ StartupApproved 系统禁用态只读展示（不写系统批准状态）。**顺带修出既有镜像 bug**：StartupSource Rust 端 serde 是 camelCase 与 ipc.ts snake_case 不符——真实模式来源列自 P3-03 起一直显示空白，本次对齐修正。
+- **关键结论**：①契约镜像不一致能潜伏五个版本——"mock 测试全绿 + 真机从不走查该列"的盲区；②Active Setup 完全复用 RunValue 定位与 .reg 备份（任意键路径本就支持），方案预估的"格式扩展"实际零改动；③StartupApproved 只读展示是正确边界——写系统批准状态会引入新破坏面且语义与"备份可恢复"冲突；④list 断言要考虑真实机器状态（本机存在系统禁用项导致断言失败→锁中毒级联，抗中毒锁再次立功）。
+- **验证**：cargo fmt/clippy -D warnings/test 全绿（154 lib+24 集成；startup 新增 4 例：Active Setup roundtrip/全体用户文件夹 roundtrip/approved 字节语义/list 系统禁用态）；pnpm typecheck/vitest(56)/build 全绿。版本号未 bump——发布（tag/CI/Release）待真机验证后走 v0.1.5 流程。
+- **下一步**：真机验证四项（多盘条目/动效/报告不再静默空/启动项数量对齐任务管理器）→ 版本号 0.1.5 + tag 发布；RunOnce/盘符勾选/M4 分页挂 v0.1.6。
+
 ## 2026-10-05 | v0.1.4 发布（外部审查修复 3 高危+5 中危）+ 本地半截 commit 连环事故
 
 - **做了什么**：按外部全面代码审查修复 8 项——**H1** 白名单 §2.4 与 quarantine 扫描分层（dup 维度 4/5 target 曾被自家白名单整树剪除；`is_user_core_data`+`is_excluded_from_scan` 分层，direct/recycle 仍整树拦、restore 同步放行用户文档；评审文档 P4-08，SAFETY §2.4 修订）；**H2** guard_processes Vec（多守卫不再折叠，chrome.exe 守卫曾被 msedge.exe 顶掉）；**H3** maxAgeDays/minSize per-include 落地（原解析后从未消费——matcher `match_include`+`constraint_allows`，剪枝下界 max→min，temp.user 7 天/微信 30 天保护窗真实生效）；**M1** journal intent fail-closed；**M2** manifest 原子写（temp+rename）；**M3** rules_url 域白名单；**M5** OneDrive 占位跳过（三处 stat 点）；**M6** 两处 expect 清零。

@@ -153,6 +153,10 @@ export const StartupListStub: StartupEntry[] = [
   { id: "st-0003", name: "CloudSync Agent", publisher: "CloudSoft Ltd.", command: "C:\\Program Files\\CloudSync\\agent.exe --autostart", source: "hklm_run", impact: "high", enabled: true },
   { id: "st-0004", name: "登录统计任务", command: "C:\\Windows\\System32\\log.bat", source: "task_scheduler", impact: "low", enabled: true },
   { id: "st-0005", name: "旧输入法快捷助手", publisher: "未知", command: "C:\\Users\\u\\AppData\\Roaming\\Microsoft\\Windows\\Start Menu\\Programs\\Startup\\ime-helper.lnk", source: "startup_folder", impact: "medium", enabled: false },
+  // v0.1.5 反馈 4：两新源 + StartupApproved 系统禁用样本
+  { id: "st-0006", name: "Team Agent", publisher: "某企业管理套件", command: "C:\\ProgramData\\Microsoft\\Windows\\Start Menu\\Programs\\StartUp\\team-agent.lnk", source: "startup_folder_all_users", impact: "high", enabled: true },
+  { id: "st-0007", name: "{22d6f0f0-xxxx-xxxx}", publisher: "系统组件", command: "rundll32.exe advpack.dll,LaunchINFSection xxx.inf,DefaultInstall", source: "active_setup", impact: "medium", enabled: true },
+  { id: "st-0008", name: "OneDrive", publisher: "Microsoft Corporation", command: "C:\\Users\\u\\AppData\\Local\\Microsoft\\OneDrive\\OneDrive.exe /background", source: "hkcu_run", impact: "high", enabled: false, systemDisabled: true },
 ];
 
 // ---- 清理进度假事件（P2-06 执行页联调，mock 模式） ----

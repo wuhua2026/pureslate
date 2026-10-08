@@ -45,3 +45,4 @@ docs/verify/report-*.md
 # Mimosa 安全扫描插件状态（本地）
 .mimosa/
 .zcodeignore
+docs/verify/feedback-*.md

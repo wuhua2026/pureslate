@@ -21,8 +21,10 @@ const TRANSIENT_KEYWORDS: [&str; 6] =
 /// 基准档位：机器级 > 用户级；登录触发的计划任务多为一次性动作，基准最低。
 fn base_level(source: StartupSource) -> Impact {
     match source {
-        StartupSource::HklmRun => Impact::High,
-        StartupSource::HkcuRun | StartupSource::StartupFolder => Impact::Medium,
+        StartupSource::HklmRun | StartupSource::StartupFolderAllUsers => Impact::High,
+        StartupSource::HkcuRun | StartupSource::StartupFolder | StartupSource::ActiveSetup => {
+            Impact::Medium
+        }
         StartupSource::TaskScheduler => Impact::Low,
     }
 }

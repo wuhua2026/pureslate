@@ -42,12 +42,16 @@ pub enum QuarantineState {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
+// v0.1.5：修正镜像不一致（原 camelCase "hkcuRun" 与 ipc.ts/mock 的 "hkcu_run" 不符，
+// 真实模式来源列显示空白）+ 加性两源（v0.1.5 反馈 4）。
+#[serde(rename_all = "snake_case")]
 pub enum StartupSource {
     HkcuRun,
     HklmRun,
     StartupFolder,
+    StartupFolderAllUsers,
     TaskScheduler,
+    ActiveSetup,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -198,6 +202,10 @@ pub struct StartupEntry {
     pub source: StartupSource,
     pub impact: Impact,
     pub enabled: bool,
+    /// v0.1.5 加性：系统级已禁用（StartupApproved 判定）——enabled=false 且非本应用
+    /// 备份所致；UI 标注"系统已禁用"且不提供恢复入口（不写系统批准状态）。
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub system_disabled: Option<bool>,
 }
 
 // ---- 更新 ----

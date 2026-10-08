@@ -119,6 +119,35 @@ pub fn volume_of(path: &Path) -> Option<String> {
     }
 }
 
+/// v0.1.5 反馈 1b：**非系统固定盘**根下的垃圾目录候选（顶层存在才产出，不递归整盘）。
+///
+/// 候选清单保守定稿：`Temp` / `tmp` / `_scratch`——只认明确"临时"语义的目录名；
+/// "下载缓存"类不属于安全默认（下载目录是用户数据）。走代码级枚举而非静态 XML：
+/// 静态清单无法表达"每个固定盘根"，且会产生大量"路径不存在"的无效 walkdir 错误流。
+/// 白名单/junction/云占位防护由 walk 层统一继承；maxAgeDays 保护窗随 temp.user 规则生效。
+pub fn multi_drive_temp_roots() -> Vec<PathBuf> {
+    let sys_drive = std::env::var("SystemDrive")
+        .unwrap_or_else(|_| "C:".into())
+        .trim_end_matches(':')
+        .to_uppercase();
+    crate::quarantine::fixed_drive_roots()
+        .into_iter()
+        .filter(|root| {
+            let v = root
+                .to_string_lossy()
+                .trim_end_matches(['\\', ':'])
+                .to_uppercase();
+            !v.is_empty() && v != sys_drive
+        })
+        .flat_map(|root| {
+            ["Temp", "tmp", "_scratch"]
+                .into_iter()
+                .map(move |name| root.join(name))
+                .filter(|p| p.is_dir())
+        })
+        .collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

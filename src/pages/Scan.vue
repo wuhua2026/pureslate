@@ -1,7 +1,7 @@
 <script setup lang="ts">
-import { onMounted, ref, watch } from "vue";
+import { computed, onMounted, onUnmounted, ref, watch } from "vue";
 import { useRouter } from "vue-router";
-import { app_meta } from "../api/commands";
+import { app_meta, disk_usage } from "../api/commands";
 import { useScanStore } from "../stores/scan";
 
 const store = useScanStore();
@@ -12,6 +12,28 @@ const router = useRouter();
 const elevated = ref<boolean | null>(null);
 const isDeep = store.deepScan;
 
+// v0.1.5 反馈 3：完成态显式出口——自动跳转 3s 未离开/被取消时显示大按钮。
+const doneExit = ref(false);
+let doneTimer: number | undefined;
+
+// v0.1.5 反馈 2：多卷进度提示——固定盘总数（disk_usage）+ currentPath 盘符推进序号。
+const totalVolumes = ref(0);
+const seenVolumes = ref<string[]>([]);
+const volumeHint = computed(() => {
+  if (totalVolumes.value <= 1 || seenVolumes.value.length === 0) return "";
+  return `第 ${Math.min(seenVolumes.value.length, totalVolumes.value)} / ${totalVolumes.value} 卷`;
+});
+
+watch(
+  () => store.currentPath,
+  (p) => {
+    const v = p.slice(0, 2);
+    if (/^[A-Za-z]:$/.test(v) && !seenVolumes.value.includes(v)) {
+      seenVolumes.value = [...seenVolumes.value, v];
+    }
+  },
+);
+
 onMounted(async () => {
   try {
     const meta = await app_meta();
@@ -19,13 +41,28 @@ onMounted(async () => {
   } catch {
     elevated.value = null;
   }
+  try {
+    const disks = await disk_usage();
+    totalVolumes.value = disks.length;
+  } catch {
+    totalVolumes.value = 0;
+  }
   void store.start();
+});
+
+onUnmounted(() => {
+  if (doneTimer !== undefined) window.clearTimeout(doneTimer);
 });
 
 const PHASE_CN: Record<string, string> = {
   walking: "遍历扫描中",
   hashing: "哈希比对中",
   aggregating: "结果聚合中",
+};
+const PHASE_ICON: Record<string, string> = {
+  walking: "📂",
+  hashing: "🔍",
+  aggregating: "🧮",
 };
 
 function formatBytes(b: number): string {
@@ -42,11 +79,17 @@ function fmtElapsed(ms: number): string {
   return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;
 }
 
-// 完成 → 跳转报告页。
+// 完成 → 跳转报告页（v0.1.5 反馈 3：取消后不自动跳，给"查看已收集结果"入口；
+// 正常完成 3s 未离开也显示显式出口按钮兜底）。
 watch(
   () => store.isDone,
   (done) => {
-    if (done) router.push("/report");
+    if (!done) return;
+    if (!store.cancelled) router.push("/report");
+    const delay = store.cancelled ? 0 : 3000;
+    doneTimer = window.setTimeout(() => {
+      doneExit.value = true;
+    }, delay);
   },
 );
 </script>
@@ -66,11 +109,30 @@ watch(
       可取消后右键"以管理员身份运行"本程序再次体检（快速体检不受影响）。
     </p>
 
+    <!-- v0.1.5 反馈 3：取消后的部分结果入口 / 完成态兜底出口 -->
+    <section v-else-if="store.isDone && doneExit" class="card done-card">
+      <p class="done-text">{{ store.cancelled ? "体检已取消" : "体检完成" }}</p>
+      <p class="done-sub">
+        {{ store.cancelled ? "已收集的部分结果可查看（不写入任何文件）" : "正在进入报告…" }}
+      </p>
+      <button class="btn-done" @click="router.push('/report')">
+        {{ store.cancelled ? "查看已收集结果" : "体检完成 → 查看报告" }}
+      </button>
+    </section>
+
     <section class="card" v-else>
-      <!-- 阶段与百分比 -->
-      <div class="phase-row">
-        <span class="phase">{{ PHASE_CN[store.phase] ?? store.phase }}</span>
-        <span class="pct">{{ store.percent }}%</span>
+      <!-- v0.1.5 反馈 2：旋转扫描动效 + 阶段图标 -->
+      <div class="scan-visual">
+        <div class="radar" :class="{ paused: !store.running }">
+          <div class="radar-core">{{ PHASE_ICON[store.phase] ?? "📂" }}</div>
+        </div>
+        <div class="phase-col">
+          <span class="phase">
+            {{ PHASE_CN[store.phase] ?? store.phase }}
+            <span v-if="volumeHint" class="vol">（{{ volumeHint }}）</span>
+          </span>
+          <span class="pct">{{ store.percent }}%</span>
+        </div>
       </div>
       <div class="bar">
         <div class="bar-fill" :style="{ width: store.percent + '%' }"></div>
@@ -93,7 +155,7 @@ watch(
         </div>
       </div>
 
-      <!-- 当前路径 -->
+      <!-- 当前路径（v0.1.5 反馈 2：滚动高亮） -->
       <div class="path-block">
         <span class="m-label">当前扫描</span>
         <span class="path" :title="store.currentPath">{{ store.currentPath || "初始化…" }}</span>
@@ -128,16 +190,6 @@ watch(
   color: var(--text-2);
   font-size: 0.9rem;
 }
-.slow-hint {
-  margin: 0 0 12px;
-  padding: 10px 14px;
-  border: 1px solid var(--grade-yellow);
-  background: #fdf8ee;
-  border-radius: 8px;
-  color: var(--text);
-  font-size: 0.83rem;
-  line-height: 1.6;
-}
 .error {
   color: var(--grade-red);
   background: var(--surface);
@@ -154,10 +206,80 @@ watch(
   flex-direction: column;
   gap: 1.25rem;
 }
-.phase-row {
-  display: flex;
-  justify-content: space-between;
+.done-card {
+  align-items: center;
+  text-align: center;
+}
+.done-text {
+  margin: 0;
+  font-size: 1.2rem;
+  font-weight: 700;
+  color: var(--text);
+}
+.done-sub {
+  margin: 0.25rem 0 0;
+  color: var(--text-2);
+  font-size: 0.85rem;
+}
+.btn-done {
+  margin-top: 0.75rem;
+  padding: 0.7rem 2.2rem;
+  border: none;
+  border-radius: 10px;
+  background: var(--accent);
+  color: #fff;
+  font-size: 1rem;
   font-weight: 600;
+  cursor: pointer;
+}
+/* v0.1.5 反馈 2：旋转扫描动效（纯 CSS，零依赖） */
+.scan-visual {
+  display: flex;
+  align-items: center;
+  gap: 1.25rem;
+}
+.radar {
+  position: relative;
+  width: 72px;
+  height: 72px;
+  flex: none;
+  border-radius: 50%;
+  background: conic-gradient(from 0deg, var(--accent) 0deg, var(--accent) 40deg, transparent 40deg);
+  animation: radar-spin 1.4s linear infinite;
+}
+.radar.paused {
+  animation-play-state: paused;
+  opacity: 0.35;
+}
+.radar-core {
+  position: absolute;
+  inset: 8px;
+  border-radius: 50%;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 1.4rem;
+}
+@keyframes radar-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+.phase-col {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+  font-weight: 600;
+}
+.phase .vol {
+  color: var(--accent);
+  font-size: 0.85rem;
+}
+.pct {
+  font-size: 1.6rem;
+  font-weight: 700;
 }
 .bar {
   height: 14px;
@@ -243,5 +365,13 @@ watch(
   margin: 0;
   font-size: 0.8rem;
   color: var(--text-2);
+}
+.slow-hint {
+  color: var(--grade-yellow);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 1rem 1.25rem;
+  margin: 0;
 }
 </style>

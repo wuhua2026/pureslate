@@ -110,21 +110,29 @@ pub fn run_scan(
             }
         } else {
             let compiled = CompiledCategory::compile(cat);
+            let mut starts: Vec<PathBuf> = Vec::new();
             for target in &cat.targets {
+                if let Some(start) = expand_target(target) {
+                    starts.push(start);
+                }
+            }
+            // v0.1.5 反馈 1b：temp.user 追加非系统固定盘根下的垃圾目录（代码级枚举——
+            // 静态 XML 无法表达"每个固定盘根"，且会产生大量无效 walkdir 错误流）。
+            if cat.id == "temp.user" {
+                starts.extend(super::expand::multi_drive_temp_roots());
+            }
+            for start in &starts {
                 if cancel.is_cancelled() {
                     break;
                 }
-                let Some(start) = expand_target(target) else {
-                    continue;
-                };
                 if out.volume.is_empty() {
-                    if let Some(v) = volume_of(&start) {
+                    if let Some(v) = volume_of(start) {
                         out.volume = v;
                     }
                 }
                 current_path = start.to_string_lossy().into_owned();
                 cat_items.extend(walk_matching(
-                    &start,
+                    start,
                     &compiled,
                     grade,
                     disposition,
@@ -159,22 +167,46 @@ pub fn run_scan(
         );
     }
 
-    out.volume = if out.volume.is_empty() {
-        "C:".into()
-    } else {
-        out.volume
+    // v0.1.5 反馈 1a：volume 语义扩为"覆盖卷串"——全部固定盘（如 "C:+D:"）；
+    // 单盘机器与旧行为一致（"C:"）。消费面已核：仅前端展示/断言非空，后端不解析该串。
+    out.volume = {
+        let vols: Vec<String> = crate::quarantine::fixed_drive_roots()
+            .iter()
+            .map(|r| {
+                r.to_string_lossy()
+                    .trim_end_matches([':', '\\'])
+                    .to_string()
+            })
+            .collect();
+        if vols.is_empty() {
+            "C:".to_string()
+        } else {
+            vols.join("+")
+        }
     };
 
-    // large 维度（R05）：与规则类目无关的全卷并行遍历（P2-07 五层分片口径，
-    // 87 万文件冷缓存约 23.5s）；卷取首个已展开 target 所在卷，兜底系统盘。
-    // 已知 UX 缺口：large 遍历期间无中间进度事件（分片级进度回调留待后续）。
+    // large 维度（R05）：**全部固定盘**逐卷并行遍历（v0.1.5 反馈 1a：原仅扫首个
+    // target 所在卷，其他盘大文件完全不进结果）。逐卷推进 progress（currentPath=卷根）。
+    // 已知 UX 缺口：单卷遍历期间无中间进度事件（分片级进度回调留待后续）。
     if dims.contains(&ScanDimension::Large) && !cancel.is_cancelled() {
-        let vol_root = volume_root_of(&out.volume);
-        let items = scan_large_items(&vol_root, LARGE_MIN_BYTES, cancel);
-        let count = items.len();
+        let large_start = out.items.len();
+        for vol_root in crate::quarantine::fixed_drive_roots() {
+            if cancel.is_cancelled() {
+                break;
+            }
+            out.items
+                .extend(scan_large_items(&vol_root, LARGE_MIN_BYTES, cancel));
+            progress(
+                ScanPhase::Walking,
+                done,
+                total,
+                vol_root.to_string_lossy().into_owned(),
+                found_bytes(&out.items),
+            );
+        }
+        let count = out.items.len() - large_start;
         if count > 0 {
-            out.items.extend(items);
-            let cat_slice = &out.items[out.items.len() - count..];
+            let cat_slice = &out.items[large_start..];
             out.aggregates.push(category_aggregate(
                 "large.file",
                 "大文件",
@@ -184,13 +216,6 @@ pub fn run_scan(
                 cat_slice,
             ));
         }
-        progress(
-            ScanPhase::Walking,
-            done,
-            total,
-            vol_root.to_string_lossy().into_owned(),
-            found_bytes(&out.items),
-        );
     }
 
     out.found = found_bytes(&out.items);
@@ -310,21 +335,6 @@ pub fn scan_large_items(vol_root: &Path, large_min: u64, cancel: &CancelToken) -
     items
 }
 
-/// 卷字符串（"C:" / "C:\"）→ 卷根路径；非法则回退系统盘。
-fn volume_root_of(vol: &str) -> PathBuf {
-    let v = vol.trim_end_matches([':', '\\']);
-    let valid = v.len() == 1 && v.as_bytes()[0].is_ascii_alphabetic();
-    let drive = if valid {
-        v.to_owned()
-    } else {
-        std::env::var("SystemDrive")
-            .unwrap_or_else(|_| "C:".into())
-            .trim_end_matches(':')
-            .to_owned()
-    };
-    PathBuf::from(format!("{drive}:\\"))
-}
-
 /// 字节数人类可读（reason 文案用）。
 fn human_bytes(n: u64) -> String {
     const MB: u64 = 1024 * 1024;
@@ -387,16 +397,6 @@ mod tests {
             .all(|i| i.disposition == Disposition::Quarantine));
         assert!(items.iter().all(|i| i.mtime.is_some() && i.atime.is_some()));
         std::fs::remove_dir_all(&root).ok();
-    }
-
-    #[test]
-    fn volume_root_normalizes() {
-        assert_eq!(volume_root_of("C:"), PathBuf::from(r"C:\"));
-        assert_eq!(volume_root_of("D:\\"), PathBuf::from(r"D:\"));
-        // 非法卷回退系统盘（不硬编码盘符，跨机可跑）。
-        let sys = std::env::var("SystemDrive").unwrap_or_else(|_| "C:".into());
-        let expect = PathBuf::from(format!("{}:\\", sys.trim_end_matches([':', '\\'])));
-        assert_eq!(volume_root_of(""), expect);
     }
 
     #[test]

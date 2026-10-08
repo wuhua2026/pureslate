@@ -14,14 +14,17 @@ export function sortByImpactDesc(entries: StartupEntry[]): StartupEntry[] {
   );
 }
 
-/** 按启用状态分组（已禁用 = 备份在 PureSlate，可随时恢复）。 */
+/** 按启用状态分组。
+ *  - `disabled`：**本应用备份**的已禁用项（可恢复）；
+ *  - `enabled`：启用项 + **系统级已禁用**项（StartupApproved 判定——在注册表/文件夹中
+ *    仍存在，留主表展示"系统已禁用"标注，但不提供恢复入口，v0.1.5）。 */
 export function splitByEnabled(entries: StartupEntry[]): {
   enabled: StartupEntry[];
   disabled: StartupEntry[];
 } {
   return {
-    enabled: entries.filter((e) => e.enabled),
-    disabled: entries.filter((e) => !e.enabled),
+    enabled: entries.filter((e) => e.enabled || isSystemDisabled(e)),
+    disabled: entries.filter((e) => !e.enabled && !isSystemDisabled(e)),
   };
 }
 
@@ -34,8 +37,12 @@ export function sourceLabel(s: StartupSource): string {
       return "本机 · 注册表";
     case "startup_folder":
       return "启动文件夹";
+    case "startup_folder_all_users":
+      return "启动文件夹 · 全体用户";
     case "task_scheduler":
       return "计划任务";
+    case "active_setup":
+      return "Active Setup";
   }
 }
 
@@ -58,7 +65,15 @@ export function publisherLabel(p?: string): string {
 
 /** 禁用风险提示（确认面板文案）：明确"不删程序、可恢复"。 */
 export function disableRiskText(e: StartupEntry): string {
+  if (e.source === "active_setup") {
+    return `「${e.name}」是系统组件自启位（Active Setup），禁用将影响下次登录时的组件加载；原值已备份，可随时恢复。`;
+  }
   return `禁用后「${e.name}」不再开机自动运行；程序本身不会被删除，可随时在"已禁用"区恢复。`;
+}
+
+/** 系统级已禁用（v0.1.5）：StartupApproved 判定——非本应用所致，不提供恢复入口。 */
+export function isSystemDisabled(e: StartupEntry): boolean {
+  return e.systemDisabled === true;
 }
 
 /** toggle 失败提示（HKLM 级需管理员，其余提示重试）。 */

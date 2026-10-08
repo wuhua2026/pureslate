@@ -97,9 +97,17 @@ function onTokenConfirm(token: string) {
     </header>
 
     <div v-if="loading" class="state">加载中…</div>
+    <!-- v0.1.5 反馈 3：明细拉取失败 → 错误分支 + 重试（不允许静默空报告） -->
+    <div v-else-if="store.itemsError" class="state err">
+      报告数据加载失败：{{ store.itemsError }}
+      <button class="retry" @click="store.retryLoadItems()">重试</button>
+    </div>
     <div v-else-if="items.length === 0" class="state">
-      暂无扫描数据，请先「一键体检」。
-      <router-link to="/scan" class="go-scan">去体检 →</router-link>
+      <template v-if="store.result">本次体检未发现可清理项</template>
+      <template v-else>
+        暂无扫描数据，请先「一键体检」。
+        <router-link to="/scan" class="go-scan">去体检 →</router-link>
+      </template>
     </div>
     <template v-else>
       <!-- F-2：白名单降级明示（清理前必须可见） -->
@@ -242,6 +250,17 @@ function onTokenConfirm(token: string) {
 }
 .state.err {
   color: var(--grade-red);
+}
+.state.err .retry {
+  margin: 0.75rem auto 0;
+  display: block;
+  padding: 0.4rem 1.5rem;
+  border: 1px solid var(--grade-red);
+  border-radius: 8px;
+  background: var(--surface);
+  color: var(--grade-red);
+  font-size: 0.85rem;
+  cursor: pointer;
 }
 .go-scan {
   margin-left: 0.75rem;

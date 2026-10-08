@@ -5,6 +5,7 @@ import type { StartupEntry } from "../types/ipc";
 import {
   disableRiskText,
   impactLabel,
+  isSystemDisabled,
   publisherLabel,
   sortByImpactDesc,
   sourceLabel,
@@ -92,7 +93,7 @@ async function restore(item: StartupEntry): Promise<void> {
           </tr>
         </thead>
         <tbody>
-          <tr v-for="e in groups.enabled" :key="e.id">
+          <tr v-for="e in groups.enabled" :key="e.id" :class="{ muted: isSystemDisabled(e) }">
             <td class="name" :title="e.name">{{ e.name }}</td>
             <td class="pub" :class="{ unknown: publisherLabel(e.publisher) === '未知发布者' }">
               {{ publisherLabel(e.publisher) }}
@@ -101,7 +102,9 @@ async function restore(item: StartupEntry): Promise<void> {
             <td>{{ sourceLabel(e.source) }}</td>
             <td class="cmd" :title="e.command">{{ e.command }}</td>
             <td class="op">
+              <span v-if="isSystemDisabled(e)" class="sys-disabled">系统已禁用</span>
               <button
+                v-else
                 class="btn"
                 :disabled="busyId === e.id || pending !== null"
                 @click="pending = e"
@@ -259,6 +262,15 @@ async function restore(item: StartupEntry): Promise<void> {
 }
 .impact.low {
   color: var(--grade-green, #2e9e5b);
+}
+.list tr.muted .name,
+.list tr.muted .cmd {
+  opacity: 0.6;
+}
+.sys-disabled {
+  color: var(--text-2, #5a6472);
+  font-size: 0.78rem;
+  white-space: nowrap;
 }
 .cmd {
   max-width: 320px;
