@@ -5,6 +5,13 @@
 > 维护（AGENTS.md §9）：任务完成时 agent 自动追加/更新当前会话条目，随任务同一提交。格式：`## YYYY-MM-DD | 主题`。
 > 本初版由历史会话记忆回溯整理（截至 2026-09-29），细节以 git 历史与 TASKS.md 为准。
 
+## 2026-10-12 | R27-1 覆盖率事故修复（卸载列表 14→105；两层注册表常量 bug）
+
+- **现象与核对**：用户真机发现卸载页只列 14 个程序。写 PS 诊断脚本四视图分解（HKLM64 raw120/kept35、HKLM32 raw185/kept57、HKCU 各 kept14，去重后 105）+ MSI UserData 增量（146 个全部 SystemComponent=1，可见增量 0——Geek 该源仅供残留扫描不进列表）+ UWP（110 个，明确 non-goal）。
+- **根因（两层叠加，都是 R27-1/P3-02 常量写错）**：①winreg `KEY_READ=0x2001F`（真值 0x20019，含 SET_VALUE/CREATE_SUB_KEY 写位）→ 标准用户开 HKLM 被 ACL 拒（code 5），release 恒提权自 v0.1.3 起掩盖；②R27-1 WOW64 标志写成 0x10000/0x20000（真值 0x100/0x200）。非提权测试进程里 HKLM 两视图全灭，"跳过该源"容错静默吞掉 → 单测全绿。
+- **修复**：两常量改 winnt.h 原值+注释；新增 `all_four_views_open` 回归（非提权进程四视图必须可开）；14→105 与系统"程序和功能"同源一致；LESSONS ① 置顶记录。cargo 164/0 + clippy 零警告。
+- **结论**：Win32 程序覆盖率已与系统面板/Geek 列表对齐；与 Geek 的唯一列表差异是 UWP（110，设计上不做，系统设置可管）。
+
 ## 2026-10-12 | R27-1 安全卸载辅助·只读枚举交付（净室集成，方案先评审后落地）
 
 - **做了什么**：用户给 Geek Uninstaller 卸载模块逆向文档（仓库外）要求集成→先按四象限评审，指出三个正面冲突（破坏主体外移/启发式直删残留/SeDebug+强杀）与 PureSlate 信任范式，提出"安全卸载辅助"两层方案（官方卸载器编排 + 残留只进隔离区），用户拍板后落地第一批：SPEC §6.7/§9/§7/§2/§10 修订 + InstalledApp/uninstall_list 契约加性 + `uninstall/` 模块（Uninstall 四视图枚举、SystemComponent/ParentKeyName 过滤、跨视图去重、MSI GUID 识别与 `msiexec /X{GUID}` 构造、EstimatedSize 换算）+ winreg `_view` 变体 + Apps.vue 只读列表（搜索/徽章/mock）+ /apps 路由导航；TASKS 新增 R27 三任务批次表。

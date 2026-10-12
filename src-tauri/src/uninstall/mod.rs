@@ -399,6 +399,22 @@ mod tests {
         assert_ne!(c1.id, b.to_contract().id);
     }
 
+    /// 回归（覆盖率事故 2026-10-12）：WOW64 标志必须为 winnt.h 原值 0x0100/0x0200——
+    /// 曾误写为 0x10000/0x20000 导致 HKLM 两视图打开被静默跳过（只剩 HKCU 十几项）。
+    #[test]
+    fn all_four_views_open() {
+        for view in &VIEWS {
+            let keys = enum_subkeys_view(view.hive, UNINSTALL_SUBKEY, view.wow64);
+            assert!(
+                keys.is_ok(),
+                "{}/{} 视图 Uninstall 键必须可打开（WOW64 标志错误？）: {:?}",
+                view.scope,
+                view.arch,
+                keys.err()
+            );
+        }
+    }
+
     /// 真机只读冒烟：枚举不 panic，条目名非空、ID 唯一、arch/scope 合法。
     #[test]
     fn live_enumeration_smoke() {

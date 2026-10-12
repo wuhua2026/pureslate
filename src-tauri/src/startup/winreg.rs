@@ -15,11 +15,15 @@ pub const HKEY_CURRENT_USER: HKey = 0x8000_0001usize as *mut c_void;
 /// HKLM 预定义句柄（0x80000002）。
 pub const HKEY_LOCAL_MACHINE: HKey = 0x8000_0002usize as *mut c_void;
 
-/// 标准只读访问掩码。
-pub const KEY_READ: u32 = 0x0002_001F;
+/// 只读访问掩码（winnt.h KEY_READ 原值 = STANDARD_RIGHTS_READ | QUERY_VALUE |
+/// ENUMERATE_SUB_KEYS | NOTIFY = 0x20019）。
+/// **不得含 SET_VALUE/CREATE_SUB_KEY 写位**——标准用户对 HKLM 请求写位会被 ACL
+/// 直接拒绝（code 5），曾误用 0x2001F 致非提权形态 HKLM 枚举整源静默丢失。
+pub const KEY_READ: u32 = 0x0002_0019;
 /// WOW64 视图标志（R27 卸载枚举：x64 进程显式访问 64/32 位视图）。
-pub const KEY_WOW64_64KEY: u32 = 0x0001_0000;
-pub const KEY_WOW64_32KEY: u32 = 0x0002_0000;
+/// 取自 winnt.h 原值：64KEY=0x0100、32KEY=0x0200（注意不是 0x10000/0x20000）。
+pub const KEY_WOW64_64KEY: u32 = 0x0100;
+pub const KEY_WOW64_32KEY: u32 = 0x0200;
 const KEY_SET_VALUE: u32 = 0x0002;
 const ERROR_SUCCESS: i32 = 0;
 const ERROR_MORE_DATA: i32 = 234;
