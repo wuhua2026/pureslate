@@ -237,6 +237,32 @@ pub struct InstalledApp {
     pub estimated_size_bytes: Option<u64>,
 }
 
+/// R27-2 卸载进度事件（阶段文案单向推送；前端不轮询）。
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UninstallProgressEvent {
+    pub tx_id: String,
+    pub message: String,
+}
+
+/// R27-2 卸载完成事件。result ∈
+/// removed / reboot_pending / still_present / cancelled / timeout（拉起失败走命令 Err，不发本事件）。
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UninstallDoneEvent {
+    pub tx_id: String,
+    pub app_id: String,
+    pub name: String,
+    pub result: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub exit_code: Option<u32>,
+    pub key_still_present: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub install_location_still_present: Option<bool>,
+    pub reboot_pending: bool,
+    pub detail: String,
+}
+
 // ---- 更新 ----
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -509,6 +535,8 @@ pub mod events {
     pub const CLEAN_DONE: &str = "clean_done";
     pub const QUARANTINE_EXPIRY_WARNING: &str = "quarantine_expiry_warning";
     pub const UPDATE_AVAILABLE: &str = "update_available";
+    pub const UNINSTALL_PROGRESS: &str = "uninstall_progress";
+    pub const UNINSTALL_DONE: &str = "uninstall_done";
 }
 
 #[cfg(test)]

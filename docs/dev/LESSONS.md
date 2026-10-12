@@ -6,6 +6,26 @@
 
 ## ① 踩坑记录
 
+### 代码与注释/SPEC 直接矛盾而单测全绿：QuietUninstallString 误取在 R27-2 评审前自查才现形（2026-10-13，R27-2）
+- 现象：R27-1 提交的 `parse_app` 写的是 `string_value("QuietUninstallString").or_else(取 UninstallString)`，紧挨着的注释却写"Quiet 优先？——不：R27 编排交互卸载器"。SPEC §6.7 明确只取交互串（用户必须看到官方 UI）。R27-1 的 9 个单测全绿——没有一个用例同时构造 Quiet+Uninstall 两个值。
+- 后果：凡同时登记 QuietUninstallString 的程序（NSIS/Inno/厂商安装器很常见），会被**静默卸载串**拉起，用户看不到官方卸载窗口——直接击穿"编排者不是替代者"的信任范式。
+- 修复：只取 UninstallString；仅 Quiet 串的非 MSI 条目命令留空（UI 禁用）；回归测试 `never_uses_quiet_uninstall_string` 同时喂两串断言取舍。
+- 复利结论：①**"代码与注释矛盾"是评审信号，不是风格问题**——二者必有一错，以 SPEC 原文裁决；②测试数据只喂单值会漏掉"多选一"逻辑的优先级 bug，凡是 `.or_else`/fallback 链都要有"两值同时存在时取谁"的用例；③[DESTRUCTIVE] 任务开工先重读消费侧代码，别信上批次的"已完成"。
+
+### runas 兜底路径 PID=0：进程树闭包把全部顶层进程误判为后代（2026-10-13，R27-2）
+- 现象：ShellExecuteExW runas 成功但 GetProcessId 反查失败时兜底 pid=0；树等待以 0 为种子做 PPID BFS，系统中大量进程 PPID=0（顶层进程）→ 后代集永不清空 → 必然等到 480 轮（≈120s）超时，用户得到假"等待超时"。
+- 修复：wait_tree 主进程句柄退出后检测 root==0，直接 Exited 退化为"仅等主句柄"并注释在案。
+- 复利结论：**PID 是可空标识不是可空索引**——0 是 System Idle Process 且是合法 PPID 语义值，任何"以 PID 建树"的逻辑都要先处理 0/复用/环三件事（环已在同批单测覆盖：PID 复用可造 PPID 环，seen 去重保证不死循环）。
+
+### 测试断言本身会错：想当然的否定断言 + 大小写敏感的环境值（2026-10-13，R27-2）
+- 现象：两个"生产代码正确、断言错误"的失败——①`assert!(!pending_covers(entries, r"C:\Windows"))` 但条目是 `C:\Windows\Temp\x`，按目录前缀语义本就该覆盖，断言写反；②`exe.contains("Windows")` 失败，实测本机 `SystemRoot=C:\WINDOWS`（大写）。
+- 修复：否定断言换成真正无关路径（C:\Drivers）；环境变量断言改大小写不敏感。
+- 复利结论：①写断言前先把**被测函数的语义定义**念一遍（前缀覆盖的定义包含子目录），否定用例必须选语义上真的无关的值；②断言涉及真实环境变量/路径先 `echo` 看真实值（本机 SystemRoot 大写、%TEMP% 短名——环境形态假设已两次咬人）；③测试失败先怀疑断言再怀疑实现，尤其当失败信息显示的实际值"看起来明明对"。
+
+### Rust 1.98 clippy 新 lint 打在旧代码上：as_chunks / doc_lazy_continuation / redundant_closure（2026-10-13，R27-2）
+- 现象：R27-2 首次跑 clippy 即 3 error(-D warnings)，都在当批新写但沿用旧惯用法的代码里：`chunks_exact(2)` 被要求改 `as_chunks::<2>()`；doc comment 列表后直接接段落触发 doc_lazy_continuation（列表项与正文间须空 `///` 行）；`.map(|u| f(u))` → `.map(f)`。
+- 复利结论：工具链变新旧代码会冒出新警告，`-D warnings` 下"上批次绿"不保证"本批次绿"；新批次开工第一次 clippy 报错先判断是否 lint 换代，修法机械但必须本批清零。
+
 ### 注册表访问掩码含写位 + WOW64 常量写错 256 倍：非提权形态 HKLM 枚举整源静默丢失（2026-10-12，R27-1 真机核对）
 - 现象：软件卸载页真机只显示 14 项（恰等于 HKCU 条目数），HKLM 32/64 两视图约 90 项全部消失；单测因"枚举失败跳过该源"的容错设计而全绿。
 - 根因（两层叠加）：①`KEY_READ` 自 P3-02 起误写 `0x2001F`（真值 `0x20019`，多了 SET_VALUE 0x2 + CREATE_SUB_KEY 0x4 两个写位）→ 标准用户对 HKLM 请求写位被 ACL 拒（code 5）；②R27-1 新写的 WOW64 标志误为 `0x10000/0x20000`（真值 `0x100/0x200`）。release 恒提权（v0.1.3）掩盖了①——管理员带写位也能开 HKLM；非提权测试进程两雷齐爆。
@@ -167,6 +187,7 @@
 
 ## ③ 本机环境结论
 
+- 本机 `%SystemRoot%` 值为 **`C:\WINDOWS`（大写）**（2026-10-13 实测）——涉及该变量的断言/比较必须大小写不敏感；ExpandEnvironmentStringsW 展开结果保留注册表/环境原值大小写。
 - 开发机用户名不入公开文档（2026-10-04 脱敏；本机路径形如 `C:\Users\<本地账户>\`），Windows，系统盘 C: 为 NTFS。
 - Shell 为 Windows PowerShell 5.1（非 pwsh）：编码两坑见 §①。
 - 提权排障既定模式：`tools/diag/` 下 ASCII runner 脚本（`.probe-elevate.ps1` / `.fsctl-elevate.ps1` / `.bench-elevate.ps1`）+ 输出落盘 `*-out.txt`（已 gitignore）。

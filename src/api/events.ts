@@ -8,6 +8,8 @@ import type {
   QuarantineExpiryWarningEvent,
   ScanProgressEvent,
   ScanResult,
+  UninstallDoneEvent,
+  UninstallProgressEvent,
   UpdateStatus,
 } from "../types/ipc";
 import { listenApp } from "./client";
@@ -36,4 +38,14 @@ export function onQuarantineExpiryWarning(
 
 export function onUpdateAvailable(handler: (p: UpdateStatus) => void): Promise<() => void> {
   return listenApp<UpdateStatus>(IPCEvents.updateAvailable, handler);
+}
+
+export function onUninstallProgress(
+  handler: (p: UninstallProgressEvent) => void,
+): Promise<() => void> {
+  return listenApp<UninstallProgressEvent>(IPCEvents.uninstallProgress, handler);
+}
+
+export function onUninstallDone(handler: (p: UninstallDoneEvent) => void): Promise<() => void> {
+  return listenApp<UninstallDoneEvent>(IPCEvents.uninstallDone, handler);
 }

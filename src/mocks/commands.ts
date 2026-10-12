@@ -120,6 +120,17 @@ export const mockCommands = {
 
   uninstall_list: (): Promise<InstalledApp[]> => Promise.resolve(InstalledAppStub),
 
+  // R27-2：mock 有状态（dev 走查）——执行后从 stub 移除，重查列表可见条目消失。
+  // 进度/完成事件由页面 mock 分支按阶段模拟（与 scan store mock 同约定）。
+  uninstall_run: (appId: string): Promise<string> => {
+    const idx = InstalledAppStub.findIndex((a) => a.id === appId);
+    if (idx < 0) return Promise.reject(new Error("该程序已不在可卸载列表中（可能已卸载）"));
+    InstalledAppStub.splice(idx, 1);
+    return Promise.resolve(`uninstall-mock-${Date.now()}`);
+  },
+
+  uninstall_cancel: (_txId: string): Promise<boolean> => Promise.resolve(true),
+
   startup_toggle: (params: { id: string; enabled: boolean }): Promise<boolean> => {
     // mock 有状态翻转（dev 走查用）：直接改 stub 条目，同会话内 list 可见变化。
     const e = StartupListStub.find((x) => x.id === params.id);

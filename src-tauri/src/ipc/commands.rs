@@ -633,6 +633,109 @@ pub fn uninstall_list() -> Vec<InstalledApp> {
     crate::uninstall::list_apps()
 }
 
+/// 执行卸载（R27-2，[DESTRUCTIVE] 编排官方卸载器）。返回 txId（经事件推送进度/完成）。
+#[tauri::command]
+pub async fn uninstall_run(
+    app: tauri::AppHandle,
+    state: State<'_, AppState>,
+    app_id: String,
+) -> Result<String, String> {
+    // 同一程序同时只允许一个卸载事务。
+    let tx_id = format!("uninstall-{}", now_ms());
+    let cancel = std::sync::Arc::new(CancelToken::new());
+    {
+        let mut g = state
+            .uninstalls
+            .lock()
+            .map_err(|_| "状态锁不可用".to_string())?;
+        if !g.is_empty() {
+            // 已有事务进行中：拒绝（单实例语义，避免两个卸载器互相干扰）。
+            return Err("已有卸载任务进行中，请完成后再试".into());
+        }
+        g.insert(tx_id.clone(), cancel.clone());
+    }
+
+    let app_handle = app.clone();
+    let tx = tx_id.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let tx_for_cb = tx.clone();
+        let app_for_cb = app_handle.clone();
+        let result = crate::uninstall::run_app_uninstall(&app_id, &cancel, move |msg| {
+            let _ = app_for_cb.emit(
+                crate::contract::events::UNINSTALL_PROGRESS,
+                crate::contract::UninstallProgressEvent {
+                    tx_id: tx_for_cb.clone(),
+                    message: msg.to_string(),
+                },
+            );
+        });
+        // 事务结束即注销取消令牌。
+        if let Some(state) = app_handle.try_state::<AppState>() {
+            if let Ok(mut g) = state.uninstalls.lock() {
+                g.remove(&tx);
+            }
+        }
+        match result {
+            Ok(out) => {
+                let _ = app_handle.emit(
+                    crate::contract::events::UNINSTALL_DONE,
+                    crate::contract::UninstallDoneEvent {
+                        tx_id: tx,
+                        app_id: out.app_id,
+                        name: out.name,
+                        result: match out.kind {
+                            crate::uninstall::OutcomeKind::Removed => "removed",
+                            crate::uninstall::OutcomeKind::RebootPending => "reboot_pending",
+                            crate::uninstall::OutcomeKind::StillPresent => "still_present",
+                            crate::uninstall::OutcomeKind::Cancelled => "cancelled",
+                            crate::uninstall::OutcomeKind::Timeout => "timeout",
+                        }
+                        .to_string(),
+                        exit_code: out.exit_code,
+                        key_still_present: out.key_still_present,
+                        install_location_still_present: out.install_location_still_present,
+                        reboot_pending: out.reboot_pending,
+                        detail: out.detail,
+                    },
+                );
+            }
+            Err(e) => {
+                // 拉起失败：发一帧 done（result=launch_failed），前端统一走结果展示。
+                let _ = app_handle.emit(
+                    crate::contract::events::UNINSTALL_DONE,
+                    crate::contract::UninstallDoneEvent {
+                        tx_id: tx,
+                        app_id: app_id.clone(),
+                        name: String::new(),
+                        result: "launch_failed".to_string(),
+                        exit_code: None,
+                        key_still_present: true,
+                        install_location_still_present: None,
+                        reboot_pending: false,
+                        detail: e,
+                    },
+                );
+            }
+        }
+    });
+
+    Ok(tx_id)
+}
+
+/// 取消卸载等待（R27-2）：只停止等待，**不强杀卸载器进程**。
+#[tauri::command]
+pub fn uninstall_cancel(state: State<'_, AppState>, tx_id: String) -> bool {
+    let Ok(g) = state.uninstalls.lock() else {
+        return false;
+    };
+    if let Some(token) = g.get(&tx_id) {
+        token.cancel();
+        true
+    } else {
+        false
+    }
+}
+
 /// 启动项启停（禁用=备份后移除，不删源程序；启用=按备份还原）。
 #[tauri::command]
 pub fn startup_toggle(_state: State<AppState>, params: StartupToggleParams) -> bool {

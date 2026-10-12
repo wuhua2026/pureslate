@@ -138,6 +138,36 @@ export interface InstalledApp {
   estimatedSizeBytes?: number;
 }
 
+// ---- R27-2 卸载执行（SPEC §6.7） ----
+/** 卸载最终结果（launch_failed 仅经 done 事件的 Err 分支出现）。 */
+export type UninstallResult =
+  | "removed"
+  | "reboot_pending"
+  | "still_present"
+  | "cancelled"
+  | "timeout"
+  | "launch_failed";
+
+/** `uninstall_progress` 事件：阶段文案单向推送。 */
+export interface UninstallProgressEvent {
+  txId: string;
+  message: string;
+}
+
+/** `uninstall_done` 事件：一次卸载编排的最终结论。 */
+export interface UninstallDoneEvent {
+  txId: string;
+  appId: string;
+  name: string;
+  result: UninstallResult;
+  /** 卸载器主进程退出码（非 0 仅警告；成功判据以后端重扫为准）。 */
+  exitCode?: number;
+  keyStillPresent: boolean;
+  installLocationStillPresent?: boolean;
+  rebootPending: boolean;
+  detail: string;
+}
+
 // ---- 更新 ----
 export interface UpdateStatus {
   currentVersion: string;
@@ -315,4 +345,6 @@ export const IPCEvents = {
   cleanDone: "clean_done",
   quarantineExpiryWarning: "quarantine_expiry_warning",
   updateAvailable: "update_available",
+  uninstallProgress: "uninstall_progress",
+  uninstallDone: "uninstall_done",
 } as const;

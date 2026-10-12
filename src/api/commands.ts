@@ -88,6 +88,18 @@ export const uninstall_list = () =>
     ? mockCommands.uninstall_list()
     : invokeApp<InstalledApp[]>("uninstall_list");
 
+/** R27-2：执行卸载编排；返回 txId，进度/完成经事件推送。 */
+export const uninstall_run = (appId: string) =>
+  useMock()
+    ? mockCommands.uninstall_run(appId)
+    : invokeApp<string>("uninstall_run", { appId });
+
+/** R27-2：取消等待（不强杀卸载器进程）。 */
+export const uninstall_cancel = (txId: string) =>
+  useMock()
+    ? mockCommands.uninstall_cancel(txId)
+    : invokeApp<boolean>("uninstall_cancel", { txId });
+
 export const startup_toggle = (params: { id: string; enabled: boolean }) =>
   useMock()
     ? mockCommands.startup_toggle(params)

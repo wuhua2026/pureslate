@@ -109,3 +109,12 @@
 - **前端**：/apps 只读列表页（搜索、本机/用户、x64/x86、MSI 徽章、大小/日期格式化），卸载按钮置灰（执行编排为 R27-2）；mock 三形态样本；appsModel 纯函数 6 例。
 - **边界**：全程零写入；UWP 不枚举；SPEC §9 Non-goals 同步声明（不默认强杀/不做 UWP/不替代系统"应用和功能"）。
 - **验证**：cargo fmt/clippy --all-targets -D warnings/test 全绿（163 单测+24 集成，uninstall 新增 9 例含真机只读冒烟）；pnpm typecheck/vitest(62)/build 全绿。
+
+### R27-2 安全卸载辅助：执行编排（SPEC §6.7，[DESTRUCTIVE]，契约加性）
+
+- **契约加性（双端同步 + 记此日志）**：新增命令 `uninstall_run(appId) → txId:string`（后台 spawn_blocking 编排，立即返回事务 id；单实例互斥，已有事务进行中则 Err）、`uninstall_cancel(txId) → bool`（只取消等待，不强杀）；新增事件 `uninstall_progress`（`UninstallProgressEvent{txId,message}`）与 `uninstall_done`（`UninstallDoneEvent{txId,appId,name,result,exitCode?,keyStillPresent,installLocationStillPresent?,rebootPending,detail}`，result ∈ removed/reboot_pending/still_present/cancelled/timeout/launch_failed）。ipc.ts ↔ contract.rs ↔ commands.rs/events.ts 四端一致；既有命令签名零改动。
+- **内核**：`uninstall/runner.rs` 编排官方卸载器——命令行纯函数拆分（环境变量展开/引号/.exe 边界，拒绝空白与未闭合引号）+ `CreateProcessW`（SW_SHOWNORMAL，8.3 短路径 GetLongPathNameW 还原）+ ERROR_ELEVATION_REQUIRED(740) 回退 `ShellExecuteExW "runas"` 标准 UAC；Toolhelp 进程树等待（BFS 深度上限 16 + PID 去重集合跨轮持久化防收养丢失 + PPID 环防死循环，250ms 轮询响应取消）；**不读单一退出码**——事后重扫 Uninstall 键 + InstallLocation 存在性 + `PendingFileRenameOperations`（REG_MULTI_SZ 解析，`\??\`/`\\?\`/斜杠/尾分隔符/大小写归一后的目录边界前缀匹配）三层判据；审计 op=uninstall（start/removed/reboot_pending/still_present/timeout/cancelled，含退出码警告）。
+- **R27-1 遗留修正（加性备注）**：`parse_app` 曾误取 `QuietUninstallString`（代码与注释/SPEC 矛盾），会静默拉起**静默卸载器**——改为只取交互 `UninstallString`，仅 Quiet 串的非 MSI 条目命令留空（UI 禁用），回归单测固化。
+- **前端**：/apps 三态执行流（确认面板明示三条边界 → 调起/等待进度（停止等待不强杀）→ 六结果语气结果态）；卸载按钮按 `canUninstall` 启用；mock 有状态（执行后 stub 移除）+ 阶段事件模拟；appsModel 新增 canUninstall/uninstallResultMeta 纯函数 2 组单测。
+- **边界**：本任务零自删（无 DeleteFile/MoveFile/注册表写）；破坏主体是第三方卸载器，UI 如实告知其删除不进 journal/隔离区；不申请 SeDebugPrivilege、不默认强杀、不碰 UWP；残留隔离清理属 R27-3。评审文档 `docs/review/R27-2.md`。
+- **验证**：cargo fmt/clippy -D warnings/test 全绿（178 lib+24 集成；uninstall 模块 24 例：命令行拆分 7 例/进程树闭包 3 例/待重启匹配 2 例/分类全矩阵/枚举 11 例含 Quiet 回归与真机冒烟）；pnpm typecheck/vitest(64)/build 全绿。

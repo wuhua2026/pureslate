@@ -1,12 +1,14 @@
-/** Apps 页模型单测（R27-1）。 */
+/** Apps 页模型单测（R27-1 枚举 / R27-2 执行流）。 */
 import { describe, expect, it } from "vitest";
 import type { InstalledApp } from "../../types/ipc";
 import {
+  canUninstall,
   filterApps,
   formatSize,
   installDateLabel,
   scopeLabel,
   summarizeApps,
+  uninstallResultMeta,
 } from "../appsModel";
 
 function app(partial: Partial<InstalledApp>): InstalledApp {
@@ -69,5 +71,33 @@ describe("文案", () => {
     expect(formatSize(0)).toBe("");
     expect(formatSize(5 * 1024 * 1024)).toBe("5.0 MB");
     expect(formatSize(3 * 1024 * 1024 * 1024)).toBe("3.00 GB");
+  });
+});
+
+describe("R27-2 执行流", () => {
+  it("canUninstall 仅认非空交互卸载命令", () => {
+    expect(canUninstall(app({ uninstallCommand: '"C:\\App\\un.exe" /S' }))).toBe(true);
+    expect(canUninstall(app({ uninstallCommand: "   " }))).toBe(false);
+    expect(canUninstall(app({ uninstallCommand: "" }))).toBe(false);
+  });
+
+  it("uninstallResultMeta 六结果语气/标题", () => {
+    expect(uninstallResultMeta("removed").tone).toBe("ok");
+    expect(uninstallResultMeta("reboot_pending").tone).toBe("info");
+    expect(uninstallResultMeta("cancelled").tone).toBe("info");
+    expect(uninstallResultMeta("still_present").tone).toBe("warn");
+    expect(uninstallResultMeta("timeout").tone).toBe("warn");
+    expect(uninstallResultMeta("launch_failed").tone).toBe("err");
+    // 标题非空（UI 直接渲染）。
+    for (const r of [
+      "removed",
+      "reboot_pending",
+      "cancelled",
+      "still_present",
+      "timeout",
+      "launch_failed",
+    ] as const) {
+      expect(uninstallResultMeta(r).title.length).toBeGreaterThan(0);
+    }
   });
 });

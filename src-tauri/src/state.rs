@@ -1,6 +1,8 @@
 //! 应用级共享状态（Tauri State）。
 
+use std::collections::HashMap;
 use std::sync::atomic::AtomicBool;
+use std::sync::Arc;
 use std::sync::Mutex;
 
 use crate::contract::{AppSettings, CrashRecoveryReport, ScanItem, ScanResult};
@@ -24,6 +26,8 @@ pub struct AppState {
     /// I-2（P4-06）：后端签发的一次性 🔴 二次确认令牌（`confirm_token_issue`
     /// 写入，`clean_execute`/`quarantine_purge` 取出消费）。None = 无待消费令牌。
     pub pending_confirm: Mutex<Option<String>>,
+    /// R27-2：进行中的卸载事务（txId → 取消令牌）。完成后移除。
+    pub uninstalls: Mutex<HashMap<String, Arc<CancelToken>>>,
 }
 
 impl AppState {
@@ -37,6 +41,7 @@ impl AppState {
             recovery_pending: AtomicBool::new(false),
             recovery_report: Mutex::new(None),
             pending_confirm: Mutex::new(None),
+            uninstalls: Mutex::new(HashMap::new()),
         }
     }
 }

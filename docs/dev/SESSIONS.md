@@ -5,6 +5,14 @@
 > 维护（AGENTS.md §9）：任务完成时 agent 自动追加/更新当前会话条目，随任务同一提交。格式：`## YYYY-MM-DD | 主题`。
 > 本初版由历史会话记忆回溯整理（截至 2026-09-29），细节以 git 历史与 TASKS.md 为准。
 
+## 2026-10-13 | R27-2 卸载执行编排交付（[DESTRUCTIVE] 评审关卡；零自删的"破坏外移"任务）
+
+- **做了什么**：`uninstall/runner.rs` 新文件——纯函数层（`split_exe_args` 命令行拆分/`expand_descendants` PPID 树闭包/`pending_covers` 待重启匹配/`classify`）+ FFI 薄层（CreateProcessW SW_SHOWNORMAL 拉起交互卸载器，740→ShellExecuteExW runas 标准 UAC 兜底；Toolhelp 进程树等待 250ms 轮询，深度 16+seen 跨轮持久+环防护，WAIT_ROUNDS=480≈120s 上限；PendingFileRenameOperations REG_MULTI_SZ 只读解析与归一化前缀匹配）；mod.rs `run_app_uninstall` 编排（重扫定位→审计 start→拉起→等树→三层判据→审计终态）；契约双端 `uninstall_run`/`uninstall_cancel`+progress/done 事件四端镜像；state 单实例事务表；Apps.vue 三态（确认面板三条边界明示/进度+停止等待不强杀/六结果语气）；mock 有状态+同构事件流；appsModel canUninstall/uninstallResultMeta；评审文档 docs/review/R27-2.md。
+- **评审前自查抓出 4 个问题**：①R27-1 遗留真 bug——`parse_app` 代码取 QuietUninstallString 而注释/SPEC 要求只取交互 UninstallString（会静默拉起静默卸载器，用户看不到官方 UI），修复+回归测试；②runas 路径 GetProcessId 失败 pid=0 时树闭包会把全部 PPID=0 顶层进程误判后代→120s 假超时，root=0 退化为仅等主句柄；③mod.rs 守卫性 `exit_code.unwrap()` 违红线 6 字面规则，改 let 分支；④launch 失败只留 start 审计无终态，补 launch_failed 审计。另加固：cwd=exe 父目录、命令不经 shell+exe 恒引号+不继承句柄。
+- **关键结论**：①[DESTRUCTIVE] 标签的任务可以是"零自删"——破坏主体外移到第三方进程，评审重心转为进程创建面最小化/取消纯等待/UI 信任边界告知；②测试断言本身会错（C:\Windows 本就覆盖其下条目，断言想当然写反；SystemRoot 本机是 C:\WINDOWS 大写，大小写敏感断言误报）——真机环境值必须先 echo 再写断言；③Rust 1.98 新 clippy lint（as_chunks/doc_lazy_continuation/redundant_closure），工具链升级后既有代码会冒出新警告；④"注释与代码矛盾"类 bug 单测绿不出来（R27-1 的 9 个单测全过），靠评审对照 SPEC 原文发现。
+- **验证**：cargo fmt/clippy --all-targets -D warnings/test 全绿（178 lib+24 集成；uninstall 24 例纯函数）；pnpm typecheck/vitest(64)/build 全绿。
+- **下一步**：真机走查（人类）：InnoSetup/NSIS/MSI 各样本实卸载、UAC 拒绝分支、停止等待时序、中文路径、待重启态；通过后随 v0.1.6 候选发布。R27-3 残留接入隔离管线（安装目录/开始菜单/AppData 三目录 ScanItem，默认 🟡/quarantine）。
+
 ## 2026-10-12 | R27-1 覆盖率事故修复（卸载列表 14→105；两层注册表常量 bug）
 
 - **现象与核对**：用户真机发现卸载页只列 14 个程序。写 PS 诊断脚本四视图分解（HKLM64 raw120/kept35、HKLM32 raw185/kept57、HKCU 各 kept14，去重后 105）+ MSI UserData 增量（146 个全部 SystemComponent=1，可见增量 0——Geek 该源仅供残留扫描不进列表）+ UWP（110 个，明确 non-goal）。
