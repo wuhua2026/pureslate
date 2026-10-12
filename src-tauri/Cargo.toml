@@ -4,6 +4,9 @@ version = "0.1.4"
 description = "PureSlate - Windows PC cleaning tool (Tauri 2 + Rust kernel)"
 authors = ["PureSlate Contributors"]
 edition = "2021"
+# 仓库含多个辅助 bin（bench-scan/probe-mft/restore-self-test 等），
+# `cargo run`（含 tauri dev）须显式指定默认目标为主程序。
+default-run = "pureslate"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
