@@ -627,6 +627,12 @@ pub fn startup_list(_state: State<AppState>) -> Vec<StartupEntry> {
     crate::startup::list()
 }
 
+/// 已安装程序列表（R27-1，只读枚举 Uninstall 四视图，SPEC §6.7）。
+#[tauri::command]
+pub fn uninstall_list() -> Vec<InstalledApp> {
+    crate::uninstall::list_apps()
+}
+
 /// 启动项启停（禁用=备份后移除，不删源程序；启用=按备份还原）。
 #[tauri::command]
 pub fn startup_toggle(_state: State<AppState>, params: StartupToggleParams) -> bool {

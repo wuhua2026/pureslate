@@ -15,7 +15,11 @@ pub const HKEY_CURRENT_USER: HKey = 0x8000_0001usize as *mut c_void;
 /// HKLM 预定义句柄（0x80000002）。
 pub const HKEY_LOCAL_MACHINE: HKey = 0x8000_0002usize as *mut c_void;
 
-const KEY_READ: u32 = 0x0002_001F;
+/// 标准只读访问掩码。
+pub const KEY_READ: u32 = 0x0002_001F;
+/// WOW64 视图标志（R27 卸载枚举：x64 进程显式访问 64/32 位视图）。
+pub const KEY_WOW64_64KEY: u32 = 0x0001_0000;
+pub const KEY_WOW64_32KEY: u32 = 0x0002_0000;
 const KEY_SET_VALUE: u32 = 0x0002;
 const ERROR_SUCCESS: i32 = 0;
 const ERROR_MORE_DATA: i32 = 234;
@@ -172,7 +176,12 @@ impl Drop for OpenKey {
 
 /// 枚举某键下全部子键名（v0.1.5 反馈 4：Active Setup 枚举用）。
 pub fn enum_subkeys(hive: Hive, subkey: &str) -> io::Result<Vec<String>> {
-    let key = OpenKey::open(hive, subkey, KEY_READ)?;
+    enum_subkeys_view(hive, subkey, 0)
+}
+
+/// 枚举子键（显式 WOW64 视图标志，R27：0=进程默认 / KEY_WOW64_64KEY / KEY_WOW64_32KEY）。
+pub fn enum_subkeys_view(hive: Hive, subkey: &str, wow64_flags: u32) -> io::Result<Vec<String>> {
+    let key = OpenKey::open(hive, subkey, KEY_READ | wow64_flags)?;
     let mut out = Vec::new();
     let mut index: u32 = 0;
     loop {
@@ -213,7 +222,12 @@ fn wide_null(s: &str) -> Vec<u16> {
 
 /// 枚举某键下全部值（原始字节）。键不可访问（如无权限）→ Err 传播，调用方跳过该源。
 pub fn enum_values(hive: Hive, subkey: &str) -> io::Result<Vec<RegValue>> {
-    let key = OpenKey::open(hive, subkey, KEY_READ)?;
+    enum_values_view(hive, subkey, 0)
+}
+
+/// 枚举值（显式 WOW64 视图标志，R27）。
+pub fn enum_values_view(hive: Hive, subkey: &str, wow64_flags: u32) -> io::Result<Vec<RegValue>> {
+    let key = OpenKey::open(hive, subkey, KEY_READ | wow64_flags)?;
     let mut out = Vec::new();
     let mut index: u32 = 0;
     'outer: loop {

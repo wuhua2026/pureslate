@@ -112,6 +112,21 @@
 
 ---
 
+## 附加批次 · R27 安全卸载辅助（v0.1.6 候选，SPEC §6.7）
+
+> 定位：官方卸载器的编排者而非替代者。破坏主体是第三方卸载器（如实告知用户）；
+> 残留只走既有 grade/preflight/journal/隔离区管线（🟡/quarantine，14 天可还原）。
+> 不申请 SeDebugPrivilege、不默认强杀、不做 UWP。净室依据：Geek Uninstaller 只读逆向的
+> **行为事实文档**（仓库外），代码全部自研，UI/代码不出现第三方品牌词。
+
+| ID | 任务 | 依赖 | 产出 / DoD | 验证 |
+|----|------|------|-----------|------|
+| R27-1 | ✅ 卸载枚举（只读） | — | ✅ `uninstall/` 模块：HKLM/HKCU × 64/32 四视图（显式 WOW64 标志）枚举 Uninstall 键；SystemComponent/ParentKeyName 过滤；跨视图去重（HKLM64>HKLM32>HKCU64>HKCU32）；MSI 识别（WindowsInstaller=1/GUID 键）+ `msiexec /X{GUID}` 构造；EstimatedSize KB→字节；`uninstall_list` 命令；InstalledApp 契约双端；Apps.vue 只读列表（搜索/范围/架构/MSI 徽章）+ /apps 路由导航；mock 三形态样本 | cargo fmt/clippy/test 全绿（163 lib+24 集成，uninstall 9 例：解析/过滤/MSI 构造/GUID 校验/去重优先级/ID 稳定性/真机只读冒烟）；typecheck/vitest(62)/build 全绿（appsModel 6 例）。备注：契约加性 InstalledApp+uninstall_list（CHANGELOG）；winreg 抽 `_view` 变体+公开 WOW64 常量 |
+| R27-2 | [DESTRUCTIVE] 卸载执行编排 | R27-1 | `uninstall_run(id)`/`uninstall_cancel(txId)` + 事件：CreateProcessW 拉起官方 UninstallString（SW_SHOWNORMAL）；8.3 短路径 GetLongPathNameW 还原；进程树等待（深度上限 16+PID 去重，不强杀）；三层成功判据（事后重扫 Uninstall 键/安装目录+退出码警告+PendingFileRenameOperations 待重启态）；审计 op=uninstall；评审关卡 | InnoSetup/NSIS/MSI 各 ≥3 样本真机；取消时序；沙箱命令行构造单测；docs/review/R27-2.md |
+| R27-3 | 卸载残留隔离清理 | R27-2 | 卸载后安装目录/开始菜单快捷方式/AppData 三目录候选产出 ScanItem（默认 🟡/quarantine，复用 preflight/journal/隔离区/审计）；删除前清单 UI 明示残留判定理由，逐项确认 | 黄金集补残留样本误报率；沙箱 roundtrip；无任何无回滚直删路径 |
+
+---
+
 ## 附：裁剪预案（校准点触发，人类决策）
 
 | 触发 | 动作 | 影响 |

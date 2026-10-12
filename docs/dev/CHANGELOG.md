@@ -101,3 +101,11 @@
 - **反馈 3（报告空）**：scan_get_items 拉取失败 → itemsError 错误分支+重试（闭环外部审查 L13）；事件过滤器竞态自愈（scanId 空时采纳首事件）；完成态显式出口（取消后"查看已收集结果"）；空态文案细分。
 - **反馈 4（启动项）**：新增全体用户启动文件夹（ProgramData）+ Active Setup（HKLM/HKCU Installed Components StubPath，HKLM 优先）两源，枚举+禁用（.reg/文件备份）+还原同批交付；StartupApproved 只读判定系统禁用态（不写系统批准状态）。
 - **验证**：cargo fmt/clippy --all-targets -D warnings/test 全绿（154 lib+24 集成，startup 新增 Active Setup/全体用户文件夹 roundtrip、approved 字节语义等 4 例）；pnpm typecheck/vitest(56)/build 全绿。
+
+### R27-1 安全卸载辅助：只读枚举（SPEC §6.7，契约加性）
+
+- **契约加性（双端同步 + 记此日志）**：新增 `InstalledApp`（id/name/publisher?/version?/installDate?/installLocation?/uninstallCommand/isMsi/arch/scope/estimatedSizeBytes?）与命令 `uninstall_list() → InstalledApp[]`；不改既有签名。
+- **枚举**：HKLM/HKCU × 64/32 位四视图 `...\Uninstall`（显式 KEY_WOW64_64KEY/32KEY）；过滤 SystemComponent≠0 / ParentKeyName 非空；name+publisher+version 跨视图去重（HKLM64 > HKLM32 > HKCU64 > HKCU32）；MSI（WindowsInstaller=1 或 {GUID} 键名）构造 `msiexec /X{GUID}`；EstimatedSize(KB)→字节；winreg 增 `enum_*_view` 与公开 WOW64 常量（既有调用零改动）。
+- **前端**：/apps 只读列表页（搜索、本机/用户、x64/x86、MSI 徽章、大小/日期格式化），卸载按钮置灰（执行编排为 R27-2）；mock 三形态样本；appsModel 纯函数 6 例。
+- **边界**：全程零写入；UWP 不枚举；SPEC §9 Non-goals 同步声明（不默认强杀/不做 UWP/不替代系统"应用和功能"）。
+- **验证**：cargo fmt/clippy --all-targets -D warnings/test 全绿（163 单测+24 集成，uninstall 新增 9 例含真机只读冒烟）；pnpm typecheck/vitest(62)/build 全绿。

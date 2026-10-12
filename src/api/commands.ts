@@ -13,6 +13,7 @@ import type {
   CrashUploadParams,
   CrashUploadReport,
   DiskUsageInfo,
+  InstalledApp,
   LogEntry,
   LogQueryFilter,
   PurgeReport,
@@ -80,6 +81,12 @@ export const quarantine_status = () =>
 
 export const startup_list = () =>
   useMock() ? mockCommands.startup_list() : invokeApp<StartupEntry[]>("startup_list");
+
+/** R27-1：已安装程序只读列表（SPEC §6.7）。 */
+export const uninstall_list = () =>
+  useMock()
+    ? mockCommands.uninstall_list()
+    : invokeApp<InstalledApp[]>("uninstall_list");
 
 export const startup_toggle = (params: { id: string; enabled: boolean }) =>
   useMock()

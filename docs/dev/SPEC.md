@@ -39,6 +39,7 @@ pureslate/
 │   │   ├── quarantine/           # R25: store(移入) manifest restore lifecycle
 │   │   ├── logging/              # R09: audit(JSONL)
 │   │   ├── startup/              # R07: 枚举(注册表/启动文件夹/计划任务) toggle(禁用不删源)
+│   │   ├── uninstall/            # R27: 安全卸载辅助（枚举 Uninstall 四视图/编排官方卸载器；残留复用清理管线）
 │   │   ├── privacy/              # R08: 浏览器历史/最近文档枚举
 │   │   ├── updates/              # R22: 版本检查 manifest校验 镜像回退
 │   │   ├── crash/                # R24: minidump 本地落盘
@@ -171,6 +172,7 @@ export interface AppSettings {
 | `quarantine_purge` | `ids: string[]`, `confirmToken` → `PurgeReport` | 硬删+审计 |
 | `quarantine_status` | — → `QuarantineStatus` | 容量上限状态（P3-06 加性新增） |
 | `startup_list` | — → `StartupEntry[]` | |
+| `uninstall_list` | — → `InstalledApp[]` | R27 只读枚举（§6.7） |
 | `startup_toggle` | `id, enabled` → `boolean` | 禁用=备份后移除启动项，不删源程序 |
 | `log_query` | `{from, to, op?}` → `LogEntry[]` | |
 | `log_export` | `path` → `boolean` | 导出指定范围 |
@@ -205,6 +207,12 @@ export interface StartupEntry {
   id: string; name: string; publisher?: string; command: string;
   source: 'hkcu_run' | 'hklm_run' | 'startup_folder' | 'task_scheduler';
   impact: 'high' | 'medium' | 'low'; enabled: boolean;
+}
+export interface InstalledApp {
+  id: string; name: string; publisher?: string; version?: string;
+  installDate?: string; installLocation?: string; uninstallCommand: string;
+  isMsi: boolean; arch: 'x64' | 'x86'; scope: 'machine' | 'user';
+  estimatedSizeBytes?: number;
 }
 export interface UpdateStatus {
   currentVersion: string; latestVersion?: string; hasUpdate: boolean;
@@ -242,9 +250,17 @@ journal 协议见 SAFETY §3。🟢 direct：`RemoveFile`（Windows API，绕过
 - opt-in 上传（`crashUploadOptIn`，默认 false）：上传前 `crash_preview` 展示内容预览（模块列表摘要 + 异常代码），用户在设置页显式点击才发送；端点为占位常量（P4-06 定稿）；
 - 主程序启动时扫描孤儿 journal 执行恢复（SAFETY §3 / T-6 协议，`crash/recover`）：**journal 只定位、manifest 唯一信任锚**——quarantine 孤儿经 `restore_one`（T-2 四重校验）自动还原；「已移入未登记」崩溃窗口按命名约定反查唯一候选补登记（不自动还原）；direct/recycle 不可逆去向只标记 orphan + 审计 + UI 提示；恢复期间 `clean_execute` 拒绝新事务。
 
+### 6.7 安全卸载辅助（R27，v0.1.5+）
+- **定位：官方卸载器的编排者，不是替代者**。破坏性删除的主体是程序自带卸载器（第三方进程，其删除不进本应用 journal/隔离区，必须在 UI 如实告知用户）；PureSlate 只做只读枚举、拉起、等待、事后判定，并把卸载**残留**纳入既有安全清理管线。
+- **枚举（只读）**：HKLM/HKCU 各 64/32 位视图的 `SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall`（x64 进程显式带 KEY_WOW64_64KEY/32KEY）；过滤 `SystemComponent≠0` 与 `ParentKeyName` 非空（补丁/更新子项）；同 `DisplayName+Publisher+Version` 跨视图去重，优先级 HKLM64 > HKLM32 > HKCU64 > HKCU32；MSI 条目（`WindowsInstaller=1` 或子键名为 `{GUID}`）卸载命令构造为 `msiexec /X{GUID}`；命令行含 8.3 短路径（`~`）时 `GetLongPathNameW` 还原。**UWP（Remove-AppxPackage）不在范围内**。
+- **执行（后续批次）**：`CreateProcessW` 拉起官方 UninstallString（SW_SHOWNORMAL，交互卸载器走自己的 UI）；**不申请 SeDebugPrivilege、默认不强杀**（占用冲突沿用 guard"提示退出"语义，强杀只能是专家模式+保护名单+用户显式确认）；进程树等待加递归深度上限 16 + 已访问 PID 集合去重；**不读单一退出码判成功**——事后重扫 Uninstall 键/安装目录是否消失，并检测 `PendingFileRenameOperations` 将相关项标"待重启完成"而非失败。
+- **残留**：卸载后对安装目录、开始菜单快捷方式、AppData 三目录的候选项产出为 ScanItem，默认 🟡/quarantine，复用 preflight + journal + 隔离区 + 审计（14 天可还原）；删除前 UI 明示完整清单与"判定为残留的理由"，逐项确认，不做无回滚直删。
+- **审计**：新增 op=`uninstall`（拉起/等待结论/待重启）；残留删除仍走既有 clean/quarantine op，覆盖率口径不变。
+- **契约**：`uninstall_list() → InstalledApp[]`（本批落地）；`uninstall_run(id)` / `uninstall_cancel(txId)` 与 `uninstall_progress`/`uninstall_done` 事件在执行批次加性扩展。
+
 ## 7. UI 规范
 
-页面（vue-router）：`/`（Home 屏1）`/scan`（屏5）`/report`（屏2/7）`/files`（大文件）`/startup` `/privacy` `/quarantine`（屏8）`/log`（屏4）`/settings`。
+页面（vue-router）：`/`（Home 屏1）`/scan`（屏5）`/report`（屏2/7）`/files`（大文件）`/startup` `/privacy` `/apps`（R27 软件卸载）`/quarantine`（屏8）`/log`（屏4）`/settings`。
 
 设计 token（CSS variables，WCAG AA）：
 
@@ -272,8 +288,8 @@ journal 协议见 SAFETY §3。🟢 direct：`RemoveFile`（Windows API，绕过
 
 ## 9. Non-goals（继承 PRD 第 8 章）
 
-不做杀毒/实时防护；不做"系统提速/注册表优化/内存整理"；无广告/推荐/全家桶（不可妥协）；不抄 Dism++/联想任何实现；MVP 不做端侧中文意图搜索；不做跨端；不做账号/云存储/远程控制。
+不做杀毒/实时防护；不做"系统提速/注册表优化/内存整理"；无广告/推荐/全家桶（不可妥协）；不抄 Dism++/联想任何实现；MVP 不做端侧中文意图搜索；不做跨端；不做账号/云存储/远程控制。R27 卸载辅助仅编排官方卸载器 + 隔离式残留清理：不做默认强杀进程、不做 UWP 应用卸载、不做驱动/服务级移除、不替代系统"应用和功能"。
 
 ## 10. 术语 ↔ PRD 需求映射
 
-R01→rules+scanner｜R02→safety｜R03→scan 编排｜R04→cleaner｜R05→scanner.large+pages/files｜R06→cleaner.dup（§6.3）｜R07→startup｜R08→privacy｜R09→logging｜R16→外壳｜R13/R14→pages/report｜R21→测试体系｜R22→updates｜R23→guard+兼容｜R24→crash+journal 恢复｜R25→quarantine｜R26→CI/签名。
+R01→rules+scanner｜R02→safety｜R03→scan 编排｜R04→cleaner｜R05→scanner.large+pages/files｜R06→cleaner.dup（§6.3）｜R07→startup｜R08→privacy｜R09→logging｜R16→外壳｜R13/R14→pages/report｜R21→测试体系｜R22→updates｜R23→guard+兼容｜R24→crash+journal 恢复｜R25→quarantine｜R26→CI/签名｜R27→uninstall（§6.7）。

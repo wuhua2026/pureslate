@@ -5,6 +5,13 @@
 > 维护（AGENTS.md §9）：任务完成时 agent 自动追加/更新当前会话条目，随任务同一提交。格式：`## YYYY-MM-DD | 主题`。
 > 本初版由历史会话记忆回溯整理（截至 2026-09-29），细节以 git 历史与 TASKS.md 为准。
 
+## 2026-10-12 | R27-1 安全卸载辅助·只读枚举交付（净室集成，方案先评审后落地）
+
+- **做了什么**：用户给 Geek Uninstaller 卸载模块逆向文档（仓库外）要求集成→先按四象限评审，指出三个正面冲突（破坏主体外移/启发式直删残留/SeDebug+强杀）与 PureSlate 信任范式，提出"安全卸载辅助"两层方案（官方卸载器编排 + 残留只进隔离区），用户拍板后落地第一批：SPEC §6.7/§9/§7/§2/§10 修订 + InstalledApp/uninstall_list 契约加性 + `uninstall/` 模块（Uninstall 四视图枚举、SystemComponent/ParentKeyName 过滤、跨视图去重、MSI GUID 识别与 `msiexec /X{GUID}` 构造、EstimatedSize 换算）+ winreg `_view` 变体 + Apps.vue 只读列表（搜索/徽章/mock）+ /apps 路由导航；TASKS 新增 R27 三任务批次表。
+- **关键结论**：①合规——Win32 API 序列+注册表契约是功能性事实，按行为规范自研可行；逆向材料永不入库、UI/代码零第三方品牌词（模块名 uninstall/）；②逆向文档 §5 自己指出的坑直接进设计：成功判据不读单一退出码（事后重扫+PendingFileRenameOperations 待重启态，R27-2）、强杀必须挂用户确认+保护名单、递归等待加深度 16+PID 去重；③MSI 判定两来源（WindowsInstaller=1 或键名 GUID 形态），纯函数 GUID 校验单测固化；④交互卸载器取 UninstallString 而非 QuietUninstallString——用户必须看到官方 UI。
+- **验证**：cargo 163 lib+24 集成全绿（uninstall 9 例含真机枚举冒烟：不 panic/名非空/ID 唯一）；clippy 零警告；pnpm typecheck/vitest(62)/build 全绿（appsModel 6 例）。
+- **下一步**：R27-2 [DESTRUCTIVE] 执行编排（CreateProcessW+进程树等待+三层判据+审计，评审关卡）→ R27-3 残留接入隔离管线。真机可先在 /apps 页核对列表与"应用和功能"覆盖率。
+
 ## 2026-10-08 | v0.1.5 代码批次交付（真机反馈四项 + StartupApproved 附加项）
 
 - **做了什么**：按 feedback-fixes-v0.1.5.md R2 方案全批落地——反馈1a 大文件枚举全部固定盘逐卷遍历 + `ScanResult.volume` 语义扩为覆盖卷串（消费面 grep 核验：仅展示/非空断言）；反馈1b temp.user 追加非系统固定盘根 Temp/tmp/_scratch（代码级枚举，候选清单保守定稿，"下载缓存"明确排除）；反馈2 Scan 页旋转动效+阶段图标+"第 N/共 M 卷"（disk_usage 盘数+currentPath 盘符推进，零契约改动）；反馈3 items 拉取 catch+itemsError 错误分支+重试（闭环 L13）+事件过滤器竞态自愈（scanId 空采纳首事件）+取消后"查看已收集结果"+空态细分；反馈4 全体用户启动文件夹（ProgramData）+ Active Setup 两新源（枚举/禁用 .reg 备份/还原同批）+ StartupApproved 系统禁用态只读展示（不写系统批准状态）。**顺带修出既有镜像 bug**：StartupSource Rust 端 serde 是 camelCase 与 ipc.ts snake_case 不符——真实模式来源列自 P3-03 起一直显示空白，本次对齐修正。

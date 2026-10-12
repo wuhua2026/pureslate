@@ -13,6 +13,7 @@ pub mod scanner;
 pub mod startup;
 pub mod state;
 pub mod storage;
+pub mod uninstall;
 pub mod updates;
 
 use crate::state::AppState;
@@ -103,6 +104,7 @@ pub fn run() {
             ipc::commands::quarantine_purge,
             ipc::commands::quarantine_status,
             ipc::commands::startup_list,
+            ipc::commands::uninstall_list,
             ipc::commands::startup_toggle,
             ipc::commands::log_query,
             ipc::commands::log_export,

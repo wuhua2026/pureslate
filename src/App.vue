@@ -11,6 +11,7 @@
         <router-link to="/files" class="nav-item">大文件</router-link>
         <router-link to="/startup" class="nav-item">启动项</router-link>
         <router-link to="/privacy" class="nav-item">隐私资料</router-link>
+        <router-link to="/apps" class="nav-item">软件卸载</router-link>
         <router-link to="/quarantine" class="nav-item">隔离区</router-link>
         <router-link to="/log" class="nav-item">操作日志</router-link>
         <router-link to="/settings" class="nav-item">设置</router-link>

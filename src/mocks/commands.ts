@@ -14,6 +14,7 @@ import type {
   CrashUploadParams,
   CrashUploadReport,
   DiskUsageInfo,
+  InstalledApp,
   LogEntry,
   LogQueryFilter,
   PurgeReport,
@@ -28,7 +29,7 @@ import type {
   UpdateStatus,
   LogExportParams,
 } from "../types/ipc";
-import { QuarantineListStub, StartupListStub, buildMockScanResult } from "./data";
+import { InstalledAppStub, QuarantineListStub, StartupListStub, buildMockScanResult } from "./data";
 
 export const mockCommands = {
   app_meta: (): Promise<AppMeta> =>
@@ -116,6 +117,8 @@ export const mockCommands = {
   },
 
   startup_list: (): Promise<StartupEntry[]> => Promise.resolve(StartupListStub),
+
+  uninstall_list: (): Promise<InstalledApp[]> => Promise.resolve(InstalledAppStub),
 
   startup_toggle: (params: { id: string; enabled: boolean }): Promise<boolean> => {
     // mock 有状态翻转（dev 走查用）：直接改 stub 条目，同会话内 list 可见变化。

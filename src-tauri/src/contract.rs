@@ -208,6 +208,35 @@ pub struct StartupEntry {
     pub system_disabled: Option<bool>,
 }
 
+// ---- 卸载辅助（R27 · SPEC §6.7）----
+/// 已安装程序条目（只读枚举 Uninstall 注册表四视图）。
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct InstalledApp {
+    /// sha256(scope|arch|子键名) 前 16 位；执行批次据此回查注册表定位。
+    pub id: String,
+    pub name: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub publisher: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub version: Option<String>,
+    /// 注册表原值 YYYYMMDD（不擅自格式化，展示层转换）。
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub install_date: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub install_location: Option<String>,
+    /// 可直接拉起的卸载命令（MSI 条目已构造为 msiexec /X{GUID}）。
+    pub uninstall_command: String,
+    pub is_msi: bool,
+    /// "x64" / "x86"（来自注册表视图，非 PE 头探测）。
+    pub arch: String,
+    /// "machine"（HKLM）/ "user"（HKCU）。
+    pub scope: String,
+    /// EstimatedSize（注册表单位 KB）换算字节；缺失为 None。
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub estimated_size_bytes: Option<u64>,
+}
+
 // ---- 更新 ----
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]

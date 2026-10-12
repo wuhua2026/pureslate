@@ -122,6 +122,22 @@ export interface StartupEntry {
   systemDisabled?: boolean;
 }
 
+/** R27 已安装程序（只读枚举；SPEC §6.7）。 */
+export interface InstalledApp {
+  id: string;
+  name: string;
+  publisher?: string;
+  version?: string;
+  /** 注册表原值 YYYYMMDD。 */
+  installDate?: string;
+  installLocation?: string;
+  uninstallCommand: string;
+  isMsi: boolean;
+  arch: "x64" | "x86";
+  scope: "machine" | "user";
+  estimatedSizeBytes?: number;
+}
+
 // ---- 更新 ----
 export interface UpdateStatus {
   currentVersion: string;

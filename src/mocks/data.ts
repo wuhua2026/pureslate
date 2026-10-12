@@ -8,6 +8,7 @@ import type {
   CleanProgressEvent,
   FoundBytes,
   Grade,
+  InstalledApp,
   QuarantineEntry,
   ScanItem,
   ScanResult,
@@ -157,6 +158,45 @@ export const StartupListStub: StartupEntry[] = [
   { id: "st-0006", name: "Team Agent", publisher: "某企业管理套件", command: "C:\\ProgramData\\Microsoft\\Windows\\Start Menu\\Programs\\StartUp\\team-agent.lnk", source: "startup_folder_all_users", impact: "high", enabled: true },
   { id: "st-0007", name: "{22d6f0f0-xxxx-xxxx}", publisher: "系统组件", command: "rundll32.exe advpack.dll,LaunchINFSection xxx.inf,DefaultInstall", source: "active_setup", impact: "medium", enabled: true },
   { id: "st-0008", name: "OneDrive", publisher: "Microsoft Corporation", command: "C:\\Users\\u\\AppData\\Local\\Microsoft\\OneDrive\\OneDrive.exe /background", source: "hkcu_run", impact: "high", enabled: false, systemDisabled: true },
+];
+
+// R27：已安装程序假数据（覆盖 machine/user × x64/x86 × MSI 各形态）。
+export const InstalledAppStub: InstalledApp[] = [
+  {
+    id: "app-0001",
+    name: "7-Zip 24.08 (x64)",
+    publisher: "Igor Pavlov",
+    version: "24.08",
+    installDate: "20260811",
+    installLocation: "C:\\Program Files\\7-Zip\\",
+    uninstallCommand: "\"C:\\Program Files\\7-Zip\\Uninstall.exe\"",
+    isMsi: false,
+    arch: "x64",
+    scope: "machine",
+    estimatedSizeBytes: 6_500_000,
+  },
+  {
+    id: "app-0002",
+    name: "示例运行库 x86",
+    publisher: "某软件公司",
+    version: "3.2.1",
+    installLocation: "C:\\Program Files (x86)\\Runtime\\",
+    uninstallCommand: "MsiExec.exe /X{11111111-2222-3333-4444-555555555555}",
+    isMsi: true,
+    arch: "x86",
+    scope: "machine",
+    estimatedSizeBytes: 22_000_000,
+  },
+  {
+    id: "app-0003",
+    name: "用户级工具",
+    version: "0.9.0",
+    installDate: "20260920",
+    uninstallCommand: "\"C:\\Users\\u\\AppData\\Local\\Tool\\unins000.exe\"",
+    isMsi: false,
+    arch: "x64",
+    scope: "user",
+  },
 ];
 
 // ---- 清理进度假事件（P2-06 执行页联调，mock 模式） ----
