@@ -28,6 +28,10 @@ quick-xml = "0.36"
 thiserror = "1"
 walkdir = "2"
 globset = "0.4"
+# R28-2 依赖决策：规则 include 路径段收紧（segment-regex，SPEC §4.1）。
+# 选 regex-lite 而非 regex：无 Unicode 表、编译快、体积小；路径段匹配只需 ASCII
+# 字符类/量词语义。体积增量实测见 R28-4 备注（门禁 <20MB）。
+regex-lite = "0.1.9"
 sha2 = "0.10"
 uuid = { version = "1", features = ["v4"] }
 

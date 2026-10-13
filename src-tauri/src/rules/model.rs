@@ -116,6 +116,31 @@ pub struct GlobRule {
     pub max_age_days: u32,
     /// 可选最小大小 (MB)；0 表示不限。
     pub min_size_mb: u64,
+    /// R28-2：路径段收紧——相对 target 根的段序号（0 起，含文件名段），
+    /// 与 `segment_regex` 成对出现；glob 命中后该段必须整段匹配正则。
+    pub segment_index: Option<u32>,
+    /// R28-2：段正则源串（自动首尾锚定）；编译失败的规则在加载期被丢弃（fail-closed）。
+    pub segment_regex: Option<String>,
+}
+
+impl GlobRule {
+    /// 测试/构造快捷方式：无任何可选约束的 glob 规则（递归）。
+    pub fn new(pattern: impl Into<String>) -> Self {
+        Self {
+            pattern: pattern.into(),
+            recursive: true,
+            max_age_days: 0,
+            min_size_mb: 0,
+            segment_index: None,
+            segment_regex: None,
+        }
+    }
+}
+
+/// R28-2：编译路径段收紧正则并自动首尾锚定（规则里不用写 `^$`）。
+/// 编译失败由调用方按 fail-closed 丢弃该条规则（loader/matcher 两处共用）。
+pub fn compile_segment_regex(src: &str) -> Result<regex_lite::Regex, regex_lite::Error> {
+    regex_lite::Regex::new(&format!("^(?:{src})$"))
 }
 
 /// 一条清理类目。解析失败/字段非法 → 整类丢弃并记日志。

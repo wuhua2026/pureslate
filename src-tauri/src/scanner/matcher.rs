@@ -2,8 +2,9 @@
 //! `globset::GlobSet`，判断命中与约束过滤。
 
 use globset::{Glob, GlobSet};
+use regex_lite::Regex;
 
-use crate::rules::model::{Category, GlobRule, Risk};
+use crate::rules::model::{compile_segment_regex, Category, GlobRule, Risk};
 
 /// 编译后的规则匹配器。一次编译复用多次匹配。
 pub struct CompiledCategory {
@@ -13,28 +14,43 @@ pub struct CompiledCategory {
     include: GlobSet,
     /// exclude 译成 GlobSet。
     exclude: GlobSet,
-    /// include 的 maxAgeDays / minSizeMB（一一对应 include，供按序核验）。
+    /// include 的 maxAgeDays / minSizeMB（与成功入集的 include 一一对应，供按序核验）。
     include_constraints: Vec<(u32, u64)>, // (max_age_days, min_size_mb)
+    /// include 的段收紧（R28-2），与 include_constraints 平行对齐；None=无段约束。
+    include_segments: Vec<Option<(u32, Regex)>>,
+    /// exclude 的段收紧，与 exclude GlobSet 入集顺序平行对齐。
+    exclude_segments: Vec<Option<(u32, Regex)>>,
 }
 
 impl CompiledCategory {
-    /// 编译 category。非法 glob 模式：编译失败时该条忽略（宁缺勿错，记日志）。
+    /// 编译 category。非法 glob/段正则：该条规则忽略（宁缺勿错，记日志；
+    /// loader 加载期已做同样校验，这里是第二道 fail-closed）。
     pub fn compile(cat: &Category) -> Self {
         let mut inc = globset::GlobSetBuilder::new();
         let mut exc = globset::GlobSetBuilder::new();
         let mut constraints = Vec::new();
+        let mut include_segments = Vec::new();
+        let mut exclude_segments = Vec::new();
         for g in &cat.includes {
-            append(&mut inc, g);
+            let Some(segment) = append(&mut inc, g) else {
+                continue;
+            };
             constraints.push((g.max_age_days, g.min_size_mb));
+            include_segments.push(segment);
         }
         for g in &cat.excludes {
-            append(&mut exc, g);
+            let Some(segment) = append(&mut exc, g) else {
+                continue;
+            };
+            exclude_segments.push(segment);
         }
         Self {
             category_id: cat.id.clone(),
             include: inc.build().unwrap_or_default(),
             exclude: exc.build().unwrap_or_default(),
             include_constraints: constraints,
+            include_segments,
+            exclude_segments,
         }
     }
 
@@ -64,15 +80,30 @@ impl CompiledCategory {
         base_root: &std::path::Path,
     ) -> Option<IncludeConstraint> {
         let rel = relative_to(path, base_root);
-        if self.exclude.is_match(&rel) {
+        // exclude 同样支持段收紧：glob 与其段约束都满足才算排除。
+        let excluded = self.exclude.matches(&rel).into_iter().any(|i| {
+            self.exclude_segments
+                .get(i)
+                .is_some_and(|s| segment_allows(&rel, s))
+        });
+        if excluded {
             return None;
         }
-        let idx = self.include.matches(&rel).into_iter().next()?;
-        let (age_days, min_mb) = self.include_constraints.get(idx)?;
-        Some(IncludeConstraint {
-            max_age_days: *age_days,
-            min_size_bytes: *min_mb * 1024 * 1024,
-        })
+        // 多个 include 可能同时 glob 命中；取第一个段约束也通过的（约束与入集索引对齐）。
+        for idx in self.include.matches(&rel) {
+            let Some(segment) = self.include_segments.get(idx) else {
+                continue;
+            };
+            if !segment_allows(&rel, segment) {
+                continue;
+            }
+            let (age_days, min_mb) = self.include_constraints.get(idx)?;
+            return Some(IncludeConstraint {
+                max_age_days: *age_days,
+                min_size_bytes: *min_mb * 1024 * 1024,
+            });
+        }
+        None
     }
 
     /// 判断绝对路径是否命中该 category（不取约束的旧语义包装）。
@@ -119,10 +150,33 @@ pub fn constraint_allows(
     true
 }
 
-/// 追加一个 glob 规则到 builder；非法模式忽略。
-fn append(b: &mut globset::GlobSetBuilder, g: &GlobRule) {
-    if let Ok(glob) = Glob::new(&g.pattern) {
-        b.add(glob);
+/// 追加一个 glob 规则到 builder；成功入集返回其段约束（None=无段约束）。
+/// glob 或段正则编译失败 → 不入集返回 None（调用方约束数组与其对齐，
+/// 修复了此前坏 glob 静默跳过导致约束索引错位的潜在问题）。
+fn append(b: &mut globset::GlobSetBuilder, g: &GlobRule) -> Option<Option<(u32, Regex)>> {
+    let glob = Glob::new(&g.pattern).ok()?;
+    let segment = match (g.segment_regex.as_ref(), g.segment_index) {
+        (Some(src), Some(idx)) => match compile_segment_regex(src) {
+            Ok(re) => Some((idx, re)),
+            Err(e) => {
+                eprintln!("[matcher] 丢弃段正则编译失败的规则 `{}`: {e}", g.pattern);
+                return None;
+            }
+        },
+        _ => None,
+    };
+    b.add(glob);
+    Some(segment)
+}
+
+/// R28-2：段收紧判定。段不存在（index 越界）= 不命中（fail-closed）。
+fn segment_allows(rel: &str, segment: &Option<(u32, Regex)>) -> bool {
+    match segment {
+        None => true,
+        Some((idx, re)) => rel
+            .split('/')
+            .nth(*idx as usize)
+            .is_some_and(|seg| re.is_match(seg)),
     }
 }
 
@@ -186,17 +240,10 @@ mod tests {
         let cat = Category {
             includes: vec![
                 GlobRule {
-                    pattern: "a/*".into(),
-                    recursive: true,
-                    max_age_days: 0,
                     min_size_mb: 10,
+                    ..GlobRule::new("a/*")
                 },
-                GlobRule {
-                    pattern: "b/*".into(),
-                    recursive: true,
-                    max_age_days: 0,
-                    min_size_mb: 0,
-                },
+                GlobRule::new("b/*"),
             ],
             ..cat()
         };
@@ -209,17 +256,11 @@ mod tests {
         let cat = Category {
             includes: vec![
                 GlobRule {
-                    pattern: "a/*".into(),
-                    recursive: true,
                     max_age_days: 7,
                     min_size_mb: 1,
+                    ..GlobRule::new("a/*")
                 },
-                GlobRule {
-                    pattern: "b/*".into(),
-                    recursive: true,
-                    max_age_days: 0,
-                    min_size_mb: 0,
-                },
+                GlobRule::new("b/*"),
             ],
             ..cat()
         };
@@ -255,24 +296,15 @@ mod tests {
             targets: vec![Target::simple(TargetType::Path, r"C:\x")],
             includes: vec![
                 GlobRule {
-                    pattern: "**/*.tmp".into(),
-                    recursive: true,
                     max_age_days: 7,
-                    min_size_mb: 0,
+                    ..GlobRule::new("**/*.tmp")
                 },
                 GlobRule {
-                    pattern: "Cache/**".into(),
-                    recursive: true,
-                    max_age_days: 0,
                     min_size_mb: 5,
+                    ..GlobRule::new("Cache/**")
                 },
             ],
-            excludes: vec![GlobRule {
-                pattern: "**/*.keep.tmp".into(),
-                recursive: true,
-                max_age_days: 0,
-                min_size_mb: 0,
-            }],
+            excludes: vec![GlobRule::new("**/*.keep.tmp")],
             guard_processes: Vec::new(),
         }
     }
@@ -285,5 +317,92 @@ mod tests {
         assert!(cc.matches_any(std::path::Path::new(r"C:\x\foo\bar.tmp"), root));
         assert!(cc.matches_any(std::path::Path::new(r"C:\x\Cache\b.tmp"), root));
         assert!(!cc.matches_any(std::path::Path::new(r"C:\x\foo\a.keep.tmp"), root));
+    }
+
+    // ---- R28-2 segment-regex ----
+
+    fn account_category(pattern: &str, regex: &str, index: u32) -> Category {
+        Category {
+            includes: vec![GlobRule {
+                segment_index: Some(index),
+                segment_regex: Some(regex.into()),
+                ..GlobRule::new(pattern)
+            }],
+            ..cat()
+        }
+    }
+
+    #[test]
+    fn segment_regex_passes_only_well_formed_segment() {
+        // rel: accounts/<id>/cache/<file>，收紧第 1 段为 6-12 位纯数字。
+        let cc =
+            CompiledCategory::compile(&account_category("accounts/*/cache/*", "[0-9]{6,12}", 1));
+        let root = std::path::Path::new(r"C:\x");
+        assert!(
+            cc.matches_any(std::path::Path::new(r"C:\x\accounts\123456\cache\f1"), root),
+            "形态正确的账号目录应命中"
+        );
+        assert!(
+            cc.matches_any(
+                std::path::Path::new(r"C:\x\accounts\123456789012\cache\f2"),
+                root
+            ),
+            "12 位数字仍在区间内"
+        );
+        assert!(
+            !cc.matches_any(std::path::Path::new(r"C:\x\accounts\evil\cache\f3"), root),
+            "非数字账号目录必须零命中"
+        );
+        assert!(
+            !cc.matches_any(std::path::Path::new(r"C:\x\accounts\12345\cache\f4"), root),
+            "5 位（少于 6）不命中"
+        );
+        assert!(
+            !cc.matches_any(
+                std::path::Path::new(r"C:\x\accounts\a123456\cache\f5"),
+                root
+            ),
+            "自动首尾锚定：夹带字母不命中"
+        );
+    }
+
+    #[test]
+    fn segment_index_out_of_range_never_matches() {
+        let cc = CompiledCategory::compile(&account_category("*/*", "[0-9]+", 5));
+        let root = std::path::Path::new(r"C:\x");
+        assert!(
+            !cc.matches_any(std::path::Path::new(r"C:\x\a\123"), root),
+            "段越界 = 不命中（fail-closed）"
+        );
+    }
+
+    #[test]
+    fn segment_regex_on_exclude_must_also_match() {
+        // exclude 的段约束不满足时，不应排除该文件。
+        let c = Category {
+            includes: vec![GlobRule::new("accounts/*/cache/*")],
+            excludes: vec![GlobRule {
+                segment_index: Some(1),
+                segment_regex: Some("[0-9]{6,12}".into()),
+                ..GlobRule::new("accounts/*/cache/secret.tmp")
+            }],
+            ..cat()
+        };
+        let cc = CompiledCategory::compile(&c);
+        let root = std::path::Path::new(r"C:\x");
+        assert!(
+            cc.matches_any(
+                std::path::Path::new(r"C:\x\accounts\evil\cache\secret.tmp"),
+                root
+            ),
+            "账号段不符排除正则 → 该文件不被排除"
+        );
+        assert!(
+            !cc.matches_any(
+                std::path::Path::new(r"C:\x\accounts\123456\cache\secret.tmp"),
+                root
+            ),
+            "账号段命中排除正则 → 排除生效"
+        );
     }
 }

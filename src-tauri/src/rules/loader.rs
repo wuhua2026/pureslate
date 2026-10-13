@@ -12,8 +12,8 @@ use quick_xml::events::Event;
 use quick_xml::Reader;
 
 use super::model::{
-    Category, Disposition, GlobRule, RegBase, RegHive, RegTargetSpec, RegView, Risk, RuleSetTable,
-    Ruleset, RulesetSource, Target, TargetType,
+    compile_segment_regex, Category, Disposition, GlobRule, RegBase, RegHive, RegTargetSpec,
+    RegView, Risk, RuleSetTable, Ruleset, RulesetSource, Target, TargetType,
 };
 
 /// 规则加载错误。
@@ -169,16 +169,23 @@ pub fn parse_ruleset(xml: &str) -> Result<Ruleset, RulesError> {
                             }
                         }
                     },
-                    "include" | "exclude" => {
-                        let rule = parse_glob_attrs(&e);
-                        if let Some(c) = cur.as_mut() {
-                            if name == "include" {
-                                c.includes.push(rule);
-                            } else {
-                                c.excludes.push(rule);
+                    "include" | "exclude" => match parse_glob_attrs(&e) {
+                        Ok(rule) => {
+                            if let Some(c) = cur.as_mut() {
+                                if name == "include" {
+                                    c.includes.push(rule);
+                                } else {
+                                    c.excludes.push(rule);
+                                }
                             }
                         }
-                    }
+                        // R28：include/exclude 属性非法（如段约束不成对）→ 丢整个 category。
+                        Err(reason) => {
+                            if let Some(c) = cur.as_mut() {
+                                c.fatal.get_or_insert(reason);
+                            }
+                        }
+                    },
                     "guard" => {
                         if let Some(c) = cur.as_mut() {
                             for a in e.attributes().flatten() {
@@ -394,12 +401,14 @@ fn parse_target(e: &quick_xml::events::BytesStart<'_>) -> Result<Target, String>
     }
 }
 
-/// glob 元素属性解析。
-fn parse_glob_attrs(e: &quick_xml::events::BytesStart<'_>) -> GlobRule {
+/// glob 元素属性解析。R28-2：segment-regex/segment-index 必须成对、index 可解析。
+fn parse_glob_attrs(e: &quick_xml::events::BytesStart<'_>) -> Result<GlobRule, String> {
     let mut pattern = None;
     let mut recursive = true;
     let mut max_age_days = 0u32;
     let mut min_size_mb = 0u64;
+    let mut segment_regex = None;
+    let mut segment_index: Option<u32> = None;
     for a in e.attributes().flatten() {
         let key = String::from_utf8_lossy(a.key.as_ref()).into_owned();
         let val = a.unescape_value().unwrap_or_default().into_owned();
@@ -408,15 +417,33 @@ fn parse_glob_attrs(e: &quick_xml::events::BytesStart<'_>) -> GlobRule {
             "recursive" => recursive = val != "false",
             "maxAgeDays" => max_age_days = val.parse().unwrap_or(0),
             "minSizeMB" => min_size_mb = val.parse().unwrap_or(0),
+            "segment-regex" => segment_regex = Some(val),
+            "segment-index" => {
+                segment_index = Some(
+                    val.parse()
+                        .map_err(|_| format!("segment-index `{val}` 不是合法 u32"))?,
+                );
+            }
             _ => {}
         }
     }
-    GlobRule {
+    match (segment_regex.is_some(), segment_index.is_some()) {
+        (true, false) => {
+            return Err("include/exclude 的 segment-regex 必须与 segment-index 成对出现".into())
+        }
+        (false, true) => {
+            return Err("include/exclude 的 segment-index 必须与 segment-regex 成对出现".into())
+        }
+        _ => {}
+    }
+    Ok(GlobRule {
         pattern: pattern.unwrap_or_default(),
         recursive,
         max_age_days,
         min_size_mb,
-    }
+        segment_index,
+        segment_regex,
+    })
 }
 
 fn parse_risk(s: &str) -> Risk {
@@ -469,24 +496,32 @@ struct PartialCategory {
 impl PartialCategory {
     /// 完成并校验（宁缺勿错）。
     fn finish(self) -> Result<Category, (String, String)> {
-        let id = match self.id {
+        let mut this = self;
+        let id = match this.id.take() {
             Some(v) if !v.is_empty() => v,
             _ => return Err(("category 缺少 id".into(), "<unknown>".into())),
         };
-        if let Some(reason) = self.fatal {
+        if let Some(reason) = this.fatal.take() {
             return Err((reason, id));
         }
-        let label = self.label.unwrap_or_else(|| id.clone());
-        if self.targets.is_empty() {
+        let label = this.label.take().unwrap_or_else(|| id.clone());
+        if this.targets.is_empty() {
             return Err(("category 无任何 target".into(), id.clone()));
         }
-        if self.includes.is_empty() {
+        if this.includes.is_empty() {
             return Err(("category 无任何 include 规则".into(), id.clone()));
         }
-        // R28 裸根闸：reg-value 路径来自注册表外部数据，禁止配裸根全收 include，
+        // R28-2：段正则编译失败的 include/exclude 在加载期丢弃（fail-closed：
+        // 收紧约束失效绝不退化为无约束裸 glob）。include 全被丢 → 类目丢弃。
+        drop_bad_segment_rules(&mut this.includes, &id, true);
+        drop_bad_segment_rules(&mut this.excludes, &id, false);
+        if this.includes.is_empty() {
+            return Err(("include 段正则全部编译失败".into(), id.clone()));
+        }
+        // R28-1 裸根闸：reg-value 路径来自注册表外部数据，禁止配裸根全收 include，
         // 防止异常注册表值（如卷根）导致整盘入候选（SPEC §4.1）。
-        if self.targets.iter().any(|t| t.ty == TargetType::RegValue) {
-            if let Some(pattern) = self
+        if this.targets.iter().any(|t| t.ty == TargetType::RegValue) {
+            if let Some(pattern) = this
                 .includes
                 .iter()
                 .map(|g| g.pattern.as_str())
@@ -503,13 +538,13 @@ impl PartialCategory {
         let cat = Category {
             id,
             label,
-            risk: self.risk,
-            disposition: self.disposition,
-            description: self.description,
-            targets: self.targets,
-            includes: self.includes,
-            excludes: self.excludes,
-            guard_processes: self.guard_processes,
+            risk: this.risk,
+            disposition: this.disposition,
+            description: this.description,
+            targets: this.targets,
+            includes: this.includes,
+            excludes: this.excludes,
+            guard_processes: this.guard_processes,
         };
         if !cat.is_valid_config() {
             let cid = cat.id.clone();
@@ -540,11 +575,37 @@ fn reg_include_is_bare_root(pattern: &str) -> bool {
     !has_literal_segment
 }
 
+/// R28-2：丢弃段正则编译失败的 include/exclude（fail-closed）。
+/// 编译失败的收紧约束绝不能退化成无约束 glob——直接移除该条规则并记日志。
+fn drop_bad_segment_rules(rules: &mut Vec<GlobRule>, category_id: &str, is_include: bool) {
+    let kind = if is_include { "include" } else { "exclude" };
+    rules.retain(|g| match g.segment_regex.as_ref() {
+        Some(src) => match compile_segment_regex(src) {
+            Ok(_) => true,
+            Err(e) => {
+                records::dropped_rule(
+                    category_id,
+                    kind,
+                    &g.pattern,
+                    &format!("段正则 `{src}` 编译失败: {e}"),
+                );
+                false
+            }
+        },
+        None => true,
+    });
+}
+
 /// 丢弃类目的软日志（临时使用 stderr；正式日志管线在 Phase 2 R09 接入）。
 mod records {
     pub fn dropped_category(id: &str, reason: &str) {
         // TODO(R09): 接入审计日志后替换为结构化记录。
         eprintln!("[rules] drop category `{id}`: {reason}");
+    }
+
+    /// R28-2：单条 include/exclude 被丢弃（如段正则编译失败）。
+    pub fn dropped_rule(category_id: &str, kind: &str, pattern: &str, reason: &str) {
+        eprintln!("[rules] drop {kind} `{pattern}` in category `{category_id}`: {reason}");
     }
 }
 
@@ -880,5 +941,50 @@ mod tests {
     <include pattern="*"/>
   </category>"#;
         assert_eq!(parse_one_category(xml).len(), 1);
+    }
+
+    // ---- R28-2 segment-regex ----
+
+    #[test]
+    fn segment_attrs_parse_as_pair() {
+        let xml = r#"<category id="cache.accounts" label="l" risk="yellow" disposition="quarantine">
+    <target type="path" value="C:\tmp"/>
+    <include pattern="accounts\*\cache\**" segment-regex="[0-9]{6,12}" segment-index="1"/>
+  </category>"#;
+        let cats = parse_one_category(xml);
+        let g = &cats[0].includes[0];
+        assert_eq!(g.segment_index, Some(1));
+        assert_eq!(g.segment_regex.as_deref(), Some("[0-9]{6,12}"));
+    }
+
+    #[test]
+    fn segment_attrs_unpaired_or_bad_index_drop_category() {
+        let cases = [
+            r#"<include pattern="a\**" segment-regex="[0-9]+"/>"#,
+            r#"<include pattern="a\**" segment-index="2"/>"#,
+            r#"<include pattern="a\**" segment-regex="[0-9]+" segment-index="x"/>"#,
+        ];
+        for inc in cases {
+            let frag = format!(
+                r#"<category id="bad" label="l" risk="yellow" disposition="quarantine"><target type="path" value="C:\tmp"/>{inc}</category>
+  <category id="good" label="ok" risk="yellow" disposition="quarantine"><target type="path" value="C:\tmp"/><include pattern="*"/></category>"#
+            );
+            let cats = parse_one_category(&frag);
+            assert_eq!(cats.len(), 1, "段属性非法应只丢 bad：{inc}");
+            assert_eq!(cats[0].id, "good");
+        }
+    }
+
+    #[test]
+    fn bad_segment_regex_drops_rule_and_category() {
+        // 唯一 include 的正则编译失败 → include 被丢 → category 无 include → 丢类目。
+        let xml = r#"<category id="bad" label="l" risk="yellow" disposition="quarantine">
+    <target type="path" value="C:\tmp"/>
+    <include pattern="a\**" segment-regex="[unclosed" segment-index="0"/>
+  </category>"#;
+        assert!(
+            parse_one_category(xml).is_empty(),
+            "坏正则必须 fail-closed 丢规则"
+        );
     }
 }

@@ -359,18 +359,8 @@ mod tests {
             disposition: RuleDisposition::Direct,
             description: None,
             targets: vec![Target::simple(TargetType::Path, String::new())],
-            includes: vec![GlobRule {
-                pattern: "**/*.tmp".into(),
-                recursive: true,
-                max_age_days: 0,
-                min_size_mb: 0,
-            }],
-            excludes: vec![GlobRule {
-                pattern: "**/keep.tmp".into(),
-                recursive: true,
-                max_age_days: 0,
-                min_size_mb: 0,
-            }],
+            includes: vec![GlobRule::new("**/*.tmp")],
+            excludes: vec![GlobRule::new("**/keep.tmp")],
             guard_processes: Vec::new(),
         };
         CompiledCategory::compile(&cat)
@@ -414,6 +404,55 @@ mod tests {
         assert!(!items.iter().any(|i| i.label == "sub"));
         // b.tmp 在 sub 内被匹配到。
         assert!(items.iter().any(|i| i.label == "b.tmp"));
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn segment_regex_scan_end_to_end() {
+        // R28-2 端到端：账号目录段收紧（6-12 位数字），异常目录名零命中。
+        let dir = std::env::temp_dir().join(format!(
+            "pureslate-walk-segment-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(dir.join("accounts\\123456\\cache")).unwrap();
+        std::fs::create_dir_all(dir.join("accounts\\evil-name\\cache")).unwrap();
+        std::fs::write(dir.join("accounts\\123456\\cache\\f1.tmp"), b"ok").unwrap();
+        std::fs::write(dir.join("accounts\\evil-name\\cache\\f2.tmp"), b"no").unwrap();
+
+        let cat = Category {
+            id: "cache.accounts".into(),
+            label: "t".into(),
+            risk: Risk::Green,
+            disposition: RuleDisposition::Direct,
+            description: None,
+            targets: vec![Target::simple(
+                TargetType::Path,
+                dir.to_string_lossy().into_owned(),
+            )],
+            includes: vec![GlobRule {
+                segment_index: Some(1),
+                segment_regex: Some("[0-9]{6,12}".into()),
+                ..GlobRule::new("accounts/*/cache/*")
+            }],
+            excludes: vec![],
+            guard_processes: Vec::new(),
+        };
+        let cc = CompiledCategory::compile(&cat);
+        let cancel = CancelToken::new();
+        let items = walk_target(&dir, &cc, Grade::Green, Disposition::Direct, &cancel, None);
+        let paths: Vec<String> = items.iter().map(|i| i.path.clone()).collect();
+        assert!(
+            paths.iter().any(|p| p.ends_with("f1.tmp")),
+            "形态正确的账号目录命中"
+        );
+        assert!(
+            !paths.iter().any(|p| p.contains("evil-name")),
+            "异常账号名必须零命中"
+        );
         std::fs::remove_dir_all(&dir).ok();
     }
 

@@ -737,12 +737,7 @@ mod tests {
             disposition: RuleDisposition::Direct,
             description: None,
             targets: vec![Target::simple(TargetType::Path, "C:\\alice")],
-            includes: vec![GlobRule {
-                pattern: "**/*.tmp".into(),
-                recursive: true,
-                max_age_days: 0,
-                min_size_mb: 0,
-            }],
+            includes: vec![GlobRule::new("**/*.tmp")],
             excludes: vec![],
             guard_processes: Vec::new(),
         }
