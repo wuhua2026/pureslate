@@ -48,6 +48,7 @@ onMounted(async () => {
 // 功能宫格（图标色为自定浅色块 + 深字色，纯本地配色无外部资源）。
 const tiles: Array<{
   to: string;
+  auto?: boolean;
   title: string;
   desc: string;
   icon:
@@ -63,7 +64,7 @@ const tiles: Array<{
   bg: string;
   deep?: boolean;
 }> = [
-  { to: "/scan", title: "一键体检", desc: "临时 · 缓存 · 隐私 · 启动项", icon: "scan", c: "#2563eb", bg: "#eaf1ff" },
+  { to: "/scan", auto: true, title: "一键体检", desc: "临时 · 缓存 · 隐私 · 启动项", icon: "scan", c: "#2563eb", bg: "#eaf1ff" },
   { to: "/report", title: "扫描报告", desc: "查看分级结果并清理", icon: "report", c: "#4f46e5", bg: "#ecebff" },
   { to: "/files", title: "大文件", desc: "定位占用空间的大文件", icon: "files", c: "#0891b2", bg: "#e0f4fa" },
   { to: "/startup", title: "启动项", desc: "管理开机自启程序", icon: "startup", c: "#16a34a", bg: "#e4f7ec" },
@@ -120,11 +121,11 @@ const promises = [
         </div>
       </div>
       <div class="hero-actions">
-        <router-link to="/scan" class="btn-main" @click="goScan(false)">
+        <router-link :to="{ path: '/scan', query: { auto: '1' } }" class="btn-main" @click="goScan(false)">
           <AppIcon name="scan" :size="19" />
           开始体检
         </router-link>
-        <router-link to="/scan" class="btn-ghost" @click="goScan(true)">深度体检</router-link>
+        <router-link :to="{ path: '/scan', query: { auto: '1' } }" class="btn-ghost" @click="goScan(true)">深度体检</router-link>
         <span class="deep-hint">深度含大文件/重复文件，大容量盘较慢</span>
       </div>
     </section>
@@ -162,7 +163,13 @@ const promises = [
         <h3>清理工具</h3>
       </div>
       <div class="tile-grid">
-        <router-link v-for="t in tiles" :key="t.to" :to="t.to" class="tile" @click="t.deep && goScan(true)">
+        <router-link
+          v-for="t in tiles"
+          :key="t.to"
+          :to="{ path: t.to, query: t.auto ? { auto: '1' } : {} }"
+          class="tile"
+          @click="t.deep && goScan(true)"
+        >
           <span class="tile-icon" :style="{ background: t.bg, color: t.c }">
             <AppIcon :name="t.icon" :size="22" />
           </span>

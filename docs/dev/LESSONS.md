@@ -6,6 +6,12 @@
 
 ## ① 踩坑记录
 
+### mock/真机双 IPC 通道的契约盲区：Tauri v2 结构体参数必须按参数名包一层（2026-10-13，真机反馈）
+- 现象（用户真机三连报）：①报告页 `scan_get_items missing required key params`；②操作日志 `log_query missing required key filter`；且这两处 typecheck/71 单测/build 全绿。
+- 根因：Tauri v2 命令反序列化按**函数参数名**取 invoke args 的 key（camelCase→snake_case）。Rust 端 `fn scan_get_items(state, params: ScanGetItemsParams)` 要求 JS 传 `invoke("scan_get_items", { params: {...} })`，前端却平铺成 `invoke("scan_get_items", { scanId, offset, limit })`。mock 模式走 `mockCommands.xxx(...)` 是**函数直调**，不经 Tauri 序列化，签名恰好匹配——所以 mock 全绿，真机 invoke 必炸。
+- 系统排查（不要只修报错的两处）：同一失配共 8 个命令——scan_get_items/clean_execute/quarantine_restore/quarantine_purge/startup_toggle/crash_preview/crash_upload 传 `{ params }`、log_query 传 `{ filter }`；log_export 后端是裸 `path: String`（不是结构体），传 `{ path }`。
+- 复利结论：①双通道（mock 直调 vs Tauri 序列化调用）天然绕开了参数名/结构这一层校验，**凡是 IPC 签名变更，真机冒烟必须过一遍该命令**，mock 绿不算数；②平铺标量参数（{ appId }/{ txId }）与结构体参数（{ params }）的区分要写进封装注释（已在 commands.ts 标注）；③真机反馈截图里的报错文案本身就是定位钥匙——"missing required key X"直接告诉你该用哪个 key。
+
 ### 给"永不删除"白名单开口：分层（硬/软）+ 后端信任锚，而不是加 if 放行（2026-10-13，R27-3）
 - 矛盾：R27-3 要清的安装目录残留恰在 SAFETY §2.2"程序目录永不入候选"内。第一版安全闸把 appdata/users/programdata 等段全塞进一个拒绝名单，结果枚举器**自构**的合法 AppData 候选（Users\u\AppData\Local\Vendor\App）也被自己挡死——外部值（注册表 InstallLocation）与内部构造路径需要的不是同一把尺。
 - 修复：拆双闸——`install_root_safety`（注册表外部值：绝对路径/硬保护/绝对段名单/末段共享名/Users 浅层/ProgramData 浅层）与 `asserted_root_safety`（枚举器自构根：只查硬保护+reparse+末段通用名）；白名单本体同步拆**硬根/软根**，软根仅在后端快照签发的精确 authorized_root 内放行。

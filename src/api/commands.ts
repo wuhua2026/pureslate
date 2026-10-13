@@ -51,10 +51,14 @@ export const scan_cancel = (scanId: string) =>
 export const scan_get_items = (params: ScanGetItemsParams) =>
   useMock()
     ? mockCommands.scan_get_items(params)
-    : invokeApp<ScanItem[]>("scan_get_items", params);
+    // Tauri v2：结构体参数必须按 Rust 端参数名 `params` 包一层（平铺会报
+    // missing required key params；mock 直调不经过此序列化，故此前未暴露）。
+    : invokeApp<ScanItem[]>("scan_get_items", { params });
 
 export const clean_execute = (params: CleanExecuteParams) =>
-  useMock() ? mockCommands.clean_execute(params) : invokeApp<string>("clean_execute", params);
+  useMock()
+    ? mockCommands.clean_execute(params)
+    : invokeApp<string>("clean_execute", { params });
 
 export const clean_cancel = (txId: string) =>
   useMock() ? mockCommands.clean_cancel(txId) : invokeApp<boolean>("clean_cancel", { txId });
@@ -67,12 +71,12 @@ export const quarantine_list = () =>
 export const quarantine_restore = (params: QuarantineRestoreParams) =>
   useMock()
     ? mockCommands.quarantine_restore(params)
-    : invokeApp<RestoreReport>("quarantine_restore", params);
+    : invokeApp<RestoreReport>("quarantine_restore", { params });
 
 export const quarantine_purge = (params: { ids: string[]; confirmToken: string }) =>
   useMock()
     ? mockCommands.quarantine_purge(params)
-    : invokeApp<PurgeReport>("quarantine_purge", params);
+    : invokeApp<PurgeReport>("quarantine_purge", { params });
 
 export const quarantine_status = () =>
   useMock()
@@ -117,13 +121,18 @@ export const uninstall_residue_clean = (
 export const startup_toggle = (params: { id: string; enabled: boolean }) =>
   useMock()
     ? mockCommands.startup_toggle(params)
-    : invokeApp<boolean>("startup_toggle", params);
+    : invokeApp<boolean>("startup_toggle", { params });
 
 export const log_query = (filter: LogQueryFilter) =>
-  useMock() ? mockCommands.log_query(filter) : invokeApp<LogEntry[]>("log_query", filter);
+  useMock()
+    ? mockCommands.log_query(filter)
+    : invokeApp<LogEntry[]>("log_query", { filter });
 
 export const log_export = (params: LogExportParams) =>
-  useMock() ? mockCommands.log_export(params) : invokeApp<boolean>("log_export", params);
+  useMock()
+    ? mockCommands.log_export(params)
+    // 后端参数名是 path: String（非结构体），按名传字符串。
+    : invokeApp<boolean>("log_export", { path: params.path });
 
 export const settings_get = () =>
   useMock() ? mockCommands.settings_get() : invokeApp<AppSettings>("settings_get");
@@ -153,12 +162,12 @@ export const crash_list = () =>
 export const crash_preview = (params: CrashPreviewParams) =>
   useMock()
     ? mockCommands.crash_preview(params)
-    : invokeApp<CrashDumpPreview>("crash_preview", params);
+    : invokeApp<CrashDumpPreview>("crash_preview", { params });
 
 export const crash_upload = (params: CrashUploadParams) =>
   useMock()
     ? mockCommands.crash_upload(params)
-    : invokeApp<CrashUploadReport>("crash_upload", params);
+    : invokeApp<CrashUploadReport>("crash_upload", { params });
 
 export const crash_recovery = () =>
   useMock()

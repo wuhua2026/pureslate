@@ -1,16 +1,28 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref, watch } from "vue";
-import { useRouter } from "vue-router";
+import { useRoute, useRouter } from "vue-router";
 import { app_meta, disk_usage } from "../api/commands";
 import { useScanStore } from "../stores/scan";
 
 const store = useScanStore();
 const router = useRouter();
+const route = useRoute();
 
 // v0.1.2：非提权提示——便携/双击运行通常无管理员权限，MFT 快速引擎不启用，
 // 深度维度（大文件全卷遍历/重复文件哈希）在大容量盘上会显著变慢。
 const elevated = ref<boolean | null>(null);
-const isDeep = store.deepScan;
+const isDeep = computed(() => store.deepScan);
+
+// v0.1.6：进入体检页默认"待命"，需用户点开始；仅首页主按钮带 ?auto=1 才自动扫
+//（侧栏"一键体检"是导航语义，不应一进页就开始扫描）。
+const idle = ref(true);
+
+/** 由待命卡片/首页 auto 入口调用：选定档位并开始。 */
+async function begin(deep: boolean): Promise<void> {
+  idle.value = false;
+  store.setDeepScan(deep);
+  await store.start();
+}
 
 // v0.1.5 反馈 3：完成态显式出口——自动跳转 3s 未离开/被取消时显示大按钮。
 const doneExit = ref(false);
@@ -47,7 +59,11 @@ onMounted(async () => {
   } catch {
     totalVolumes.value = 0;
   }
-  void store.start();
+  // 仅首页"开始体检/深度体检"主按钮（?auto=1）自动开扫；侧栏进入停留待命态。
+  if (route.query.auto === "1") {
+    idle.value = false;
+    void store.start();
+  }
 });
 
 onUnmounted(() => {
@@ -104,6 +120,40 @@ watch(
 
     <div v-if="store.error" class="error">扫描失败：{{ store.error }}</div>
 
+    <!-- v0.1.6：待命态——进页不自动扫描，用户选档后主动开始 -->
+    <section v-else-if="idle && !store.isDone" class="card idle-card">
+      <div class="idle-icon" aria-hidden="true">
+        <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M12 3.5 19 6v5.2c0 4.6-3.1 7.6-7 9.3-3.9-1.7-7-4.7-7-9.3V6Z" />
+          <path d="m8.8 12 2.2 2.2 4.2-4.4" />
+        </svg>
+      </div>
+      <div class="idle-body">
+        <h2>准备就绪</h2>
+        <p class="idle-desc">
+          体检为<strong>只读扫描</strong>，不会删除任何文件；扫描结束后按 绿/黄/红 分级列出结果，
+          清理什么、是否隔离或删除，全部由你逐项确认。
+        </p>
+        <ul class="idle-modes">
+          <li>
+            <strong>快速体检</strong>
+            <span>临时文件 · 缓存 · 隐私痕迹 · 启动项，几秒到几分钟</span>
+          </li>
+          <li>
+            <strong>深度体检</strong>
+            <span>在快速基础上加大文件与重复文件定位，大容量盘较慢</span>
+          </li>
+        </ul>
+        <div class="idle-actions">
+          <button class="btn-idle-main" @click="begin(false)">开始快速体检</button>
+          <button class="btn-idle-ghost" @click="begin(true)">深度体检</button>
+        </div>
+        <p v-if="elevated === false" class="idle-warn">
+          当前未以管理员运行：深度体检的大文件/重复文件维度会明显变慢，快速体检不受影响。
+        </p>
+      </div>
+    </section>
+
     <p v-else-if="isDeep && elevated === false" class="slow-hint">
       当前未以管理员运行：大文件/重复文件维度使用慢速遍历，大容量盘耗时明显变长。
       可取消后右键"以管理员身份运行"本程序再次体检（快速体检不受影响）。
@@ -115,9 +165,12 @@ watch(
       <p class="done-sub">
         {{ store.cancelled ? "已收集的部分结果可查看（不写入任何文件）" : "正在进入报告…" }}
       </p>
-      <button class="btn-done" @click="router.push('/report')">
-        {{ store.cancelled ? "查看已收集结果" : "体检完成 → 查看报告" }}
-      </button>
+      <div class="done-btns">
+        <button class="btn-done" @click="router.push('/report')">
+          {{ store.cancelled ? "查看已收集结果" : "体检完成 → 查看报告" }}
+        </button>
+        <button class="btn-done-ghost" @click="begin(store.deepScan)">再扫一次</button>
+      </div>
     </section>
 
     <section class="card" v-else>
@@ -206,6 +259,121 @@ watch(
   flex-direction: column;
   gap: 1.25rem;
 }
+/* 待命态 */
+.idle-card {
+  flex-direction: row;
+  align-items: flex-start;
+  gap: 1.4rem;
+}
+.idle-icon {
+  width: 64px;
+  height: 64px;
+  border-radius: 16px;
+  background: var(--accent-soft, #eaf1ff);
+  color: var(--accent);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+.idle-body {
+  flex: 1;
+  min-width: 0;
+}
+.idle-body h2 {
+  margin: 0 0 8px;
+  font-size: 1.1rem;
+}
+.idle-desc {
+  margin: 0 0 14px;
+  font-size: 0.87rem;
+  line-height: 1.7;
+  color: var(--text-2);
+  max-width: 44rem;
+}
+.idle-modes {
+  list-style: none;
+  margin: 0 0 18px;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.idle-modes li {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  font-size: 0.86rem;
+}
+.idle-modes strong {
+  min-width: 64px;
+  color: var(--text);
+}
+.idle-modes span {
+  color: var(--text-2);
+  font-size: 0.8rem;
+}
+.idle-actions {
+  display: flex;
+  gap: 10px;
+}
+.btn-idle-main {
+  background: var(--accent);
+  color: #fff;
+  border: none;
+  padding: 10px 22px;
+  border-radius: 10px;
+  font-size: 0.92rem;
+  font-weight: 700;
+  cursor: pointer;
+  box-shadow: 0 5px 14px rgba(37, 99, 235, 0.25);
+}
+.btn-idle-main:hover {
+  background: #1d4ed8;
+}
+.btn-idle-ghost {
+  background: var(--surface);
+  color: var(--text);
+  border: 1px solid var(--border-strong, #d7deea);
+  padding: 10px 18px;
+  border-radius: 10px;
+  font-size: 0.88rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+.btn-idle-ghost:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+.idle-warn {
+  margin: 12px 0 0;
+  font-size: 0.78rem;
+  color: var(--grade-yellow);
+}
+.done-btns {
+  margin-top: 10px;
+  display: flex;
+  gap: 10px;
+  align-items: center;
+}
+.btn-done-ghost {
+  padding: 0.7rem 1.4rem;
+  border: 1px solid var(--border-strong, #d7deea);
+  border-radius: 10px;
+  background: var(--surface);
+  color: var(--text-2);
+  font-size: 0.9rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+.btn-done-ghost:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+.btn-done {
+  margin-top: 0;
+}
+
 .done-card {
   align-items: center;
   text-align: center;
