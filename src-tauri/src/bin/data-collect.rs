@@ -387,6 +387,8 @@ fn expand_target(target: &Target) -> Option<PathBuf> {
             }
         }
         TargetType::KnownFolder => expand_known_folder(&target.value),
+        // R28：reg-value 直接走真实引擎（注册表只读解析），本采集镜像不复制该逻辑。
+        TargetType::RegValue => pureslate_lib::scanner::expand_target(target),
     };
     match p {
         Some(p) if p.as_os_str().is_empty() => None,

@@ -358,10 +358,7 @@ mod tests {
             risk: Risk::Green,
             disposition: RuleDisposition::Direct,
             description: None,
-            targets: vec![Target {
-                ty: TargetType::Path,
-                value: String::new(),
-            }],
+            targets: vec![Target::simple(TargetType::Path, String::new())],
             includes: vec![GlobRule {
                 pattern: "**/*.tmp".into(),
                 recursive: true,

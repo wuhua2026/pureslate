@@ -12,7 +12,8 @@ use quick_xml::events::Event;
 use quick_xml::Reader;
 
 use super::model::{
-    Category, Disposition, GlobRule, Risk, RuleSetTable, Ruleset, RulesetSource, Target, TargetType,
+    Category, Disposition, GlobRule, RegBase, RegHive, RegTargetSpec, RegView, Risk, RuleSetTable,
+    Ruleset, RulesetSource, Target, TargetType,
 };
 
 /// 规则加载错误。
@@ -155,12 +156,19 @@ pub fn parse_ruleset(xml: &str) -> Result<Ruleset, RulesError> {
                 let name = e.local_name();
                 let name = String::from_utf8_lossy(name.as_ref()).into_owned();
                 match name.as_str() {
-                    "target" => {
-                        let (ty, value) = parse_target_attrs(&e)?;
-                        if let Some(c) = cur.as_mut() {
-                            c.targets.push(Target { ty, value });
+                    "target" => match parse_target(&e) {
+                        Ok(t) => {
+                            if let Some(c) = cur.as_mut() {
+                                c.targets.push(t);
+                            }
                         }
-                    }
+                        // R28：target 非法只丢所属 category（软失败），不得让整文件解析失败。
+                        Err(reason) => {
+                            if let Some(c) = cur.as_mut() {
+                                c.fatal.get_or_insert(reason);
+                            }
+                        }
+                    },
                     "include" | "exclude" => {
                         let rule = parse_glob_attrs(&e);
                         if let Some(c) = cur.as_mut() {
@@ -309,30 +317,81 @@ fn parse_category_attrs(
     Ok(())
 }
 
-/// 从 target 元素的属性解析 TargetType + value。
-fn parse_target_attrs(
-    e: &quick_xml::events::BytesStart<'_>,
-) -> Result<(TargetType, String), RulesError> {
-    let mut ty = None;
-    let mut value = None;
+/// 解析 target 元素为模型（R28 起支持 env/path/knownFolder/reg-value）。
+/// 属性非法/缺失返回 Err —— 调用方据此**丢弃整个 category**（不是整个文件）。
+fn parse_target(e: &quick_xml::events::BytesStart<'_>) -> Result<Target, String> {
+    let mut ttype = None;
+    let mut tvalue = None;
+    let mut hive_s = None;
+    let mut key_s = None;
+    let mut view_s = None;
+    let mut base_s = None;
     for a in e.attributes().flatten() {
         let key = String::from_utf8_lossy(a.key.as_ref()).into_owned();
         let val = a.unescape_value().unwrap_or_default().into_owned();
         match key.as_str() {
-            "type" => ty = Some(val),
-            "value" => value = Some(val),
+            "type" => ttype = Some(val),
+            "value" => tvalue = Some(val),
+            "hive" => hive_s = Some(val),
+            "key" => key_s = Some(val),
+            "view" => view_s = Some(val),
+            "base" => base_s = Some(val),
             _ => {}
         }
     }
-    let ty = ty.ok_or(RulesError::Invalid("target 缺少 type".into()))?;
-    let value = value.ok_or(RulesError::Invalid("target 缺少 value".into()))?;
-    let ty = match ty.as_str() {
-        "env" => TargetType::Env,
-        "path" => TargetType::Path,
-        "knownFolder" => TargetType::KnownFolder,
-        other => return Err(RulesError::Invalid(format!("target type `{other}` 不合法"))),
-    };
-    Ok((ty, value))
+    let ttype = ttype.ok_or("target 缺少 type")?;
+    match ttype.as_str() {
+        "env" | "path" | "knownFolder" => {
+            let value = tvalue.ok_or_else(|| format!("target({ttype}) 缺少 value"))?;
+            if value.trim().is_empty() {
+                return Err(format!("target({ttype}) value 为空"));
+            }
+            let ty = match ttype.as_str() {
+                "env" => TargetType::Env,
+                "path" => TargetType::Path,
+                _ => TargetType::KnownFolder,
+            };
+            Ok(Target::simple(ty, value))
+        }
+        "reg-value" => {
+            // value 属性复用为注册表值名（SPEC §4.1：hive/key/value/view/base）。
+            let value_name = tvalue.ok_or("reg-value target 缺少 value（注册表值名）")?;
+            let key = key_s.ok_or("reg-value target 缺少 key")?;
+            if value_name.trim().is_empty() || key.trim().is_empty() {
+                return Err("reg-value target 的 key/value 不得为空".into());
+            }
+            let hive = match hive_s.as_deref() {
+                Some("HKCU") => RegHive::CurrentUser,
+                Some("HKLM") => RegHive::LocalMachine,
+                Some(other) => {
+                    return Err(format!("reg-value hive `{other}` 非法（仅 HKCU/HKLM）"))
+                }
+                None => return Err("reg-value target 缺少 hive".into()),
+            };
+            let view = match view_s.as_deref() {
+                None | Some("native") => RegView::Native,
+                Some("wow64") => RegView::Wow64,
+                Some(other) => {
+                    return Err(format!("reg-value view `{other}` 非法（仅 native/wow64）"))
+                }
+            };
+            let base = match base_s.as_deref() {
+                None | Some("path") => RegBase::Path,
+                Some("parent") => RegBase::Parent,
+                Some(other) => {
+                    return Err(format!("reg-value base `{other}` 非法（仅 path/parent）"))
+                }
+            };
+            Ok(Target::reg_value(RegTargetSpec {
+                hive,
+                key,
+                value_name,
+                view,
+                base,
+            }))
+        }
+        other => Err(format!("target type `{other}` 不合法")),
+    }
 }
 
 /// glob 元素属性解析。
@@ -403,6 +462,8 @@ struct PartialCategory {
     includes: Vec<GlobRule>,
     excludes: Vec<GlobRule>,
     guard_processes: Vec<String>,
+    /// 子元素解析期的致命原因（如非法 target）；finish 时据此丢弃整个 category。
+    fatal: Option<String>,
 }
 
 impl PartialCategory {
@@ -412,12 +473,32 @@ impl PartialCategory {
             Some(v) if !v.is_empty() => v,
             _ => return Err(("category 缺少 id".into(), "<unknown>".into())),
         };
+        if let Some(reason) = self.fatal {
+            return Err((reason, id));
+        }
         let label = self.label.unwrap_or_else(|| id.clone());
         if self.targets.is_empty() {
             return Err(("category 无任何 target".into(), id.clone()));
         }
         if self.includes.is_empty() {
             return Err(("category 无任何 include 规则".into(), id.clone()));
+        }
+        // R28 裸根闸：reg-value 路径来自注册表外部数据，禁止配裸根全收 include，
+        // 防止异常注册表值（如卷根）导致整盘入候选（SPEC §4.1）。
+        if self.targets.iter().any(|t| t.ty == TargetType::RegValue) {
+            if let Some(pattern) = self
+                .includes
+                .iter()
+                .map(|g| g.pattern.as_str())
+                .find(|p| reg_include_is_bare_root(p))
+            {
+                return Err((
+                    format!(
+                        "含 reg-value target 的 category 禁止裸根 include `{pattern}`（须含子目录段或纯扩展名 *.ext）"
+                    ),
+                    id,
+                ));
+            }
         }
         let cat = Category {
             id,
@@ -436,6 +517,27 @@ impl PartialCategory {
         }
         Ok(cat)
     }
+}
+
+/// R28：判断 include 模式对 reg-value target 是否为"裸根全收"。
+/// 规则（SPEC §4.1）：
+/// - 无路径分隔符时，仅允许纯扩展名形态 `*.ext`（ext 非空且不含通配符），
+///   `*`/`**`/`*.*`/`data_*` 等一律判裸根；
+/// - 含分隔符时，要求至少一个路径段含字面字符——`**/*`、`**/**` 这类全通配
+///   虽然带分隔符，仍是裸根；`cache\\**`、`**/*.dmp` 含具体段/扩展名，放行。
+fn reg_include_is_bare_root(pattern: &str) -> bool {
+    let normalized = pattern.trim().replace('/', "\\");
+    if !normalized.contains('\\') {
+        let is_pure_ext = normalized
+            .strip_prefix("*.")
+            .is_some_and(|ext| !ext.is_empty() && !ext.contains(['*', '?']));
+        return !is_pure_ext;
+    }
+    let has_literal_segment = normalized
+        .split('\\')
+        .filter(|s| !s.is_empty())
+        .any(|s| s.chars().any(|c| !matches!(c, '*' | '?' | '[' | ']' | '!')));
+    !has_literal_segment
 }
 
 /// 丢弃类目的软日志（临时使用 stderr；正式日志管线在 Phase 2 R09 接入）。
@@ -672,5 +774,111 @@ mod tests {
         assert_eq!(loader.ruleset_count(), before);
 
         std::fs::remove_dir_all(&dir).ok();
+    }
+
+    // ---- R28 reg-value target ----
+
+    const REG_VALID_CATEGORY: &str = r#"<category id="cache.reg" label="r" risk="yellow" disposition="quarantine">
+    <target type="reg-value" hive="HKCU" key="Software\ExampleVendor\ExampleApp" value="InstallDir" view="native" base="path"/>
+    <include pattern="data\accounts\*\cache\**"/>
+  </category>"#;
+
+    fn parse_one_category(xml_fragment: &str) -> Vec<Category> {
+        let xml = format!(r#"<ruleset id="r" version="1">{xml_fragment}</ruleset>"#);
+        parse_ruleset(&xml)
+            .expect("文件级解析应成功（非法只丢 category）")
+            .categories
+    }
+
+    #[test]
+    fn reg_value_target_parses_with_all_attrs() {
+        let cats = parse_one_category(REG_VALID_CATEGORY);
+        assert_eq!(cats.len(), 1);
+        let t = &cats[0].targets[0];
+        assert_eq!(t.ty, TargetType::RegValue);
+        let spec = t.reg.as_ref().expect("reg spec");
+        assert_eq!(spec.hive, RegHive::CurrentUser);
+        assert_eq!(spec.key, r"Software\ExampleVendor\ExampleApp");
+        assert_eq!(spec.value_name, "InstallDir");
+        assert_eq!(spec.view, RegView::Native);
+        assert_eq!(spec.base, RegBase::Path);
+    }
+
+    #[test]
+    fn reg_value_defaults_view_and_base() {
+        let xml = r#"<category id="c" label="l" risk="yellow" disposition="quarantine">
+    <target type="reg-value" hive="HKLM" key="K" value="V"/>
+    <include pattern="cache\*"/>
+  </category>"#;
+        let cats = parse_one_category(xml);
+        let spec = cats[0].targets[0].reg.as_ref().unwrap();
+        assert_eq!(spec.hive, RegHive::LocalMachine);
+        assert_eq!(spec.view, RegView::Native, "view 缺省 native");
+        assert_eq!(spec.base, RegBase::Path, "base 缺省 path");
+    }
+
+    #[test]
+    fn reg_value_invalid_attrs_drop_only_category() {
+        let cases = [
+            r#"<target type="reg-value" hive="HKCC" key="K" value="V"/>"#,
+            r#"<target type="reg-value" hive="HKCU" key="K"/>"#,
+            r#"<target type="reg-value" hive="HKCU" value="V"/>"#,
+            r#"<target type="reg-value" hive="HKCU" key="K" value="V" view="x64"/>"#,
+            r#"<target type="reg-value" hive="HKCU" key="K" value="V" base="file"/>"#,
+        ];
+        for bad_target in cases {
+            let frag = format!(
+                r#"<category id="bad" label="l" risk="yellow" disposition="quarantine">{bad_target}<include pattern="cache\*"/></category>
+  <category id="good" label="ok" risk="yellow" disposition="quarantine"><target type="path" value="C:\tmp"/><include pattern="*"/></category>"#
+            );
+            let cats = parse_one_category(&frag);
+            assert_eq!(cats.len(), 1, "非法 reg target 应只丢 bad、保留 good");
+            assert_eq!(cats[0].id, "good");
+        }
+    }
+
+    #[test]
+    fn reg_value_bare_root_include_rejected() {
+        // 裸根形态全部丢类目（无分隔符非纯扩展名；或全通配段）。
+        for bare in ["*", "**", "*.*", "**/*", "**/**", "**\\*", "data_*", "*.??"] {
+            let frag = format!(
+                r#"<category id="c-bare-{i}" label="l" risk="yellow" disposition="quarantine">
+      <target type="reg-value" hive="HKCU" key="K" value="V"/>
+      <include pattern="{bare}"/>
+    </category>"#,
+                i = bare.len(),
+                bare = bare
+            );
+            assert!(
+                parse_one_category(&frag).is_empty(),
+                "裸根 include `{bare}` 必须拒绝"
+            );
+        }
+        // 子目录形态、含扩展名的递归形态、纯扩展名形态保留。
+        for ok in ["cache\\**", "a/b/*.dmp", "*.dmp", "**/*.dmp"] {
+            let frag = format!(
+                r#"<category id="c-ok-{i}" label="l" risk="yellow" disposition="quarantine">
+      <target type="reg-value" hive="HKCU" key="K" value="V"/>
+      <include pattern="{ok}"/>
+    </category>"#,
+                i = ok.len(),
+                ok = ok
+            );
+            assert_eq!(
+                parse_one_category(&frag).len(),
+                1,
+                "`{ok}` 不是裸根，应保留"
+            );
+        }
+    }
+
+    #[test]
+    fn non_reg_target_still_allows_root_include() {
+        // 裸根闸只针对 reg-value；普通 path target 的 `*` 行为不变。
+        let xml = r#"<category id="temp.user" label="t" risk="green" disposition="direct">
+    <target type="path" value="C:\tmp"/>
+    <include pattern="*"/>
+  </category>"#;
+        assert_eq!(parse_one_category(xml).len(), 1);
     }
 }

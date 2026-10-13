@@ -252,10 +252,7 @@ mod tests {
             risk: Risk::Green,
             disposition: Disposition::Direct,
             description: None,
-            targets: vec![Target {
-                ty: TargetType::Path,
-                value: "C:\\x".into(),
-            }],
+            targets: vec![Target::simple(TargetType::Path, r"C:\x")],
             includes: vec![
                 GlobRule {
                     pattern: "**/*.tmp".into(),

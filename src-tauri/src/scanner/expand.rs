@@ -6,7 +6,8 @@
 
 use std::path::{Path, PathBuf};
 
-use crate::rules::model::{Target, TargetType};
+use crate::rules::model::{RegBase, RegHive, RegView, Target, TargetType};
+use crate::startup::winreg::{self, Hive, KEY_WOW64_32KEY, KEY_WOW64_64KEY};
 
 /// 展开单个 target 为起点路径。无法展开返回 `None`。
 pub fn expand_target(target: &Target) -> Option<PathBuf> {
@@ -14,6 +15,7 @@ pub fn expand_target(target: &Target) -> Option<PathBuf> {
         TargetType::Env => expand_env(&target.value),
         TargetType::Path => expand_path(&target.value),
         TargetType::KnownFolder => expand_known_folder(&target.value),
+        TargetType::RegValue => expand_reg_value(target.reg.as_ref()?),
     };
     match p {
         Some(p) if p.as_os_str().is_empty() => None,
@@ -45,6 +47,48 @@ fn expand_path(value: &str) -> Option<PathBuf> {
     } else {
         Some(PathBuf::from(value))
     }
+}
+
+/// reg-value target 展开（R28，SPEC §4.1）：只读查询注册表字符串值作为扫描根。
+///
+/// 机器相关软失败（全部返回 None，不报错）：键/值不存在、值非 REG_SZ/EXPAND_SZ、
+/// 值空白、base=parent 时无父目录、展开结果不是现存目录（语义=本机未安装/非默认位置）。
+/// 权限等 IO 错误同样按软失败处理并落 stderr（扫描不因单 target 中断）；
+/// 解析出的路径无任何信任——白名单在 walk 层另行强制（SAFETY §2）。
+fn expand_reg_value(spec: &crate::rules::model::RegTargetSpec) -> Option<PathBuf> {
+    let hive = match spec.hive {
+        RegHive::CurrentUser => Hive::CurrentUser,
+        RegHive::LocalMachine => Hive::LocalMachine,
+    };
+    let flags = match spec.view {
+        RegView::Native => KEY_WOW64_64KEY,
+        RegView::Wow64 => KEY_WOW64_32KEY,
+    };
+    let raw = match winreg::query_string_value_view(hive, &spec.key, &spec.value_name, flags) {
+        Ok(Some(s)) => s,
+        Ok(None) => return None,
+        Err(e) => {
+            eprintln!(
+                "[expand] reg-value 读取失败 {}\\{}!{}: {e}",
+                spec.hive_label(),
+                spec.key,
+                spec.value_name
+            );
+            return None;
+        }
+    };
+    let raw = raw.trim();
+    if raw.is_empty() {
+        return None;
+    }
+    let mut path = PathBuf::from(raw);
+    if spec.base == RegBase::Parent {
+        path = path.parent()?.to_path_buf();
+    }
+    if path.as_os_str().is_empty() || !path.is_dir() {
+        return None;
+    }
+    Some(path)
 }
 
 /// Known Folder 语义展开。规则自身对本仓库的可读英文值做映射，落到真实目录；
@@ -151,31 +195,23 @@ pub fn multi_drive_temp_roots() -> Vec<PathBuf> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::rules::model::RegTargetSpec;
 
     #[test]
     fn env_expands_dropping_percent() {
-        let t = Target {
-            ty: TargetType::Env,
-            value: "%TEMP%".into(),
-        };
+        let t = Target::simple(TargetType::Env, "%TEMP%");
         let _ = expand_target(&t); // 仅断言不 panic；路径取决于运行环境
     }
 
     #[test]
     fn unknown_env_is_none() {
-        let t = Target {
-            ty: TargetType::Env,
-            value: "%PURESLATE_NO_SUCH_ENV_xyz%".into(),
-        };
+        let t = Target::simple(TargetType::Env, "%PURESLATE_NO_SUCH_ENV_xyz%");
         assert!(expand_target(&t).is_none());
     }
 
     #[test]
     fn path_used_as_is() {
-        let t = Target {
-            ty: TargetType::Path,
-            value: r"C:\Sandbox\scan".into(),
-        };
+        let t = Target::simple(TargetType::Path, r"C:\Sandbox\scan");
         assert_eq!(
             expand_target(&t).unwrap(),
             PathBuf::from(r"C:\Sandbox\scan")
@@ -184,10 +220,7 @@ mod tests {
 
     #[test]
     fn empty_path_is_none() {
-        let t = Target {
-            ty: TargetType::Path,
-            value: "  ".into(),
-        };
+        let t = Target::simple(TargetType::Path, "  ");
         assert!(expand_target(&t).is_none());
     }
 
@@ -208,10 +241,7 @@ mod tests {
         let long = dir.join("ОченьДлинноеИмяКаталога").join("文件_样本.tmp");
         std::fs::create_dir_all(long.parent().unwrap()).unwrap();
         std::fs::write(&long, "x").unwrap();
-        let t = Target {
-            ty: TargetType::Path,
-            value: long.to_string_lossy().into_owned(),
-        };
+        let t = Target::simple(TargetType::Path, long.to_string_lossy().into_owned());
         let expanded = expand_target(&t).expect("长名 target 应正常展开");
         assert!(
             !expanded.to_string_lossy().contains('~'),
@@ -224,10 +254,7 @@ mod tests {
 
     #[test]
     fn known_folder_local_appdata_resolves() {
-        let t = Target {
-            ty: TargetType::KnownFolder,
-            value: "Local AppData".into(),
-        };
+        let t = Target::simple(TargetType::KnownFolder, "Local AppData");
         let p = expand_target(&t);
         assert!(p.is_some(), "Local AppData 应能展开");
         assert!(volume_of(&p.unwrap()).is_some());
@@ -235,10 +262,7 @@ mod tests {
 
     #[test]
     fn unknown_known_folder_is_none() {
-        let t = Target {
-            ty: TargetType::KnownFolder,
-            value: "NoSuchFolder".into(),
-        };
+        let t = Target::simple(TargetType::KnownFolder, "NoSuchFolder");
         assert!(expand_target(&t).is_none());
     }
 
@@ -247,5 +271,176 @@ mod tests {
         assert_eq!(volume_of(Path::new(r"C:\Users\x")), Some("C:".into()));
         assert_eq!(volume_of(Path::new(r"relative/path")), None);
         assert_eq!(volume_of(Path::new(r"\\server\share\x")), None);
+    }
+
+    // ---- R28 reg-value target ----
+
+    /// 构造唯一 HKCU 测试子键的 RAII 守卫：创建时给路径，drop 时尽力清理。
+    struct HkcuTestKey {
+        subkey: String,
+        values: Vec<&'static str>,
+    }
+
+    impl HkcuTestKey {
+        fn unique() -> Self {
+            let nano = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos();
+            Self {
+                subkey: format!(
+                    "Software\\PureSlateTests\\r28-{}-{nano}",
+                    std::process::id()
+                ),
+                values: Vec::new(),
+            }
+        }
+
+        fn set_sz(&mut self, name: &'static str, path: &str, expand: bool) {
+            let kind = if expand {
+                winreg::REG_EXPAND_SZ
+            } else {
+                winreg::REG_SZ
+            };
+            winreg::set_value(
+                Hive::CurrentUser,
+                &self.subkey,
+                name,
+                kind,
+                &winreg::string_to_reg_data(path),
+            )
+            .expect("测试键写入");
+            self.values.push(name);
+        }
+
+        fn set_dword(&mut self, name: &'static str, dword: u32) {
+            winreg::set_value(
+                Hive::CurrentUser,
+                &self.subkey,
+                name,
+                4u32, // REG_DWORD
+                &dword.to_le_bytes(),
+            )
+            .expect("测试键写入 DWORD");
+            self.values.push(name);
+        }
+
+        fn spec(&self, name: &str, base: RegBase) -> Target {
+            Target::reg_value(RegTargetSpec {
+                hive: RegHive::CurrentUser,
+                key: self.subkey.clone(),
+                value_name: name.into(),
+                view: RegView::Native,
+                base,
+            })
+        }
+    }
+
+    impl Drop for HkcuTestKey {
+        fn drop(&mut self) {
+            for v in std::mem::take(&mut self.values) {
+                let _ = winreg::delete_value(Hive::CurrentUser, &self.subkey, v);
+            }
+            // 叶子键可直接删；父键留给其它测试（unique，不共享）。
+            let _ = winreg::delete_key(Hive::CurrentUser, &self.subkey);
+        }
+    }
+
+    #[test]
+    fn reg_value_missing_key_is_none() {
+        let nano = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let t = Target::reg_value(RegTargetSpec {
+            hive: RegHive::CurrentUser,
+            key: format!("Software\\PureSlateNoSuch-{}-{nano}", std::process::id()),
+            value_name: "Nope".into(),
+            view: RegView::Native,
+            base: RegBase::Path,
+        });
+        assert!(expand_target(&t).is_none(), "键不存在须软失败");
+    }
+
+    #[test]
+    fn reg_value_sz_roundtrip_expands_to_dir() {
+        let dir = std::env::temp_dir().join(format!(
+            "pureslate-r28-sz-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        let mut k = HkcuTestKey::unique();
+        k.set_sz("InstallDir", &dir.to_string_lossy(), false);
+
+        let expanded = expand_target(&k.spec("InstallDir", RegBase::Path)).expect("REG_SZ 应展开");
+        // 经过长名归一，用 canonicalize 对拍避免 8.3 差异。
+        assert_eq!(
+            std::fs::canonicalize(&expanded).unwrap(),
+            std::fs::canonicalize(&dir).unwrap()
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn reg_value_expand_sz_env_unrolled() {
+        let leaf = format!(
+            "pureslate-r28-exp-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        );
+        let dir = std::env::temp_dir().join(&leaf);
+        std::fs::create_dir_all(&dir).unwrap();
+        let mut k = HkcuTestKey::unique();
+        k.set_sz("DataDir", &format!("%TEMP%\\{leaf}"), true);
+
+        let expanded =
+            expand_target(&k.spec("DataDir", RegBase::Path)).expect("REG_EXPAND_SZ 须展开环境变量");
+        assert_eq!(
+            std::fs::canonicalize(&expanded).unwrap(),
+            std::fs::canonicalize(&dir).unwrap()
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn reg_value_parent_base_returns_parent_dir() {
+        let dir = std::env::temp_dir().join(format!(
+            "pureslate-r28-parent-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        let dump = dir.join("memory.dmp");
+        std::fs::write(&dump, b"x").unwrap();
+        let mut k = HkcuTestKey::unique();
+        k.set_sz("DumpFile", &dump.to_string_lossy(), false);
+
+        let expanded =
+            expand_target(&k.spec("DumpFile", RegBase::Parent)).expect("base=parent 取父目录");
+        assert_eq!(
+            std::fs::canonicalize(&expanded).unwrap(),
+            std::fs::canonicalize(&dir).unwrap()
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn reg_value_non_string_type_is_none() {
+        let mut k = HkcuTestKey::unique();
+        k.set_dword("Count", 123);
+        assert!(
+            expand_target(&k.spec("Count", RegBase::Path)).is_none(),
+            "REG_DWORD 必须软失败而非误当路径"
+        );
     }
 }

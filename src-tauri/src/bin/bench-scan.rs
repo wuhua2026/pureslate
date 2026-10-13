@@ -264,6 +264,8 @@ fn expand_target(ty: TargetType, value: &str) -> Option<PathBuf> {
                 .or_else(|| std::env::temp_dir().into())
         }
         TargetType::KnownFolder => None, // 本环节用不到，不展开
+        // R28：基准二进制不评测 reg-value 类目（其 target 展开为机器相关动态路径）。
+        TargetType::RegValue => None,
     }
 }
 

@@ -124,9 +124,25 @@ extern "system" {
         lpdata: *const u8,
         cbdata: u32,
     ) -> i32;
+    fn RegQueryValueExW(
+        hkey: HKey,
+        lpvaluename: *const u16,
+        lpreserved: *mut u32,
+        lptype: *mut u32,
+        lpdata: *mut u8,
+        lpcbdata: *mut u32,
+    ) -> i32;
     fn RegDeleteValueW(hkey: HKey, lpvaluename: *const u16) -> i32;
     fn RegDeleteKeyW(hkey: HKey, lpsubkey: *const u16) -> i32;
 }
+
+#[link(name = "kernel32")]
+extern "system" {
+    fn ExpandEnvironmentStringsW(src: *const u16, dst: *mut u16, dst_chars: u32) -> u32;
+}
+
+/// ERROR_FILE_NOT_FOUND：注册表值/键不存在（与 IO 层 NotFound 同源语义）。
+const ERROR_FILE_NOT_FOUND: i32 = 2;
 
 /// 打开的键句柄（RAII 关闭）。
 pub struct OpenKey(HKey);
@@ -351,4 +367,92 @@ pub fn string_to_reg_data(s: &str) -> Vec<u8> {
         .chain(std::iter::once(0))
         .flat_map(|u| u.to_le_bytes())
         .collect()
+}
+
+/// 读取单个字符串值（进程默认注册表视图）。见 [`query_string_value_view`]。
+pub fn query_string_value(hive: Hive, subkey: &str, name: &str) -> io::Result<Option<String>> {
+    query_string_value_view(hive, subkey, name, 0)
+}
+
+/// 读取单个字符串值（显式 WOW64 视图标志，R28）。
+///
+/// 仅接受 REG_SZ / REG_EXPAND_SZ（后者自动展开 `%VAR%` 环境变量）。
+/// - 键/值不存在、值类型不是字符串 → `Ok(None)`：机器相关软失败，
+///   调用方按"本机未安装或不在默认位置"跳过 target，不报错；
+/// - 权限/其它 API 错误 → `Err` 传播。
+///
+/// 只读纪律：以 KEY_READ=0x20019（不含写位）打开；UTF-16 安全。
+pub fn query_string_value_view(
+    hive: Hive,
+    subkey: &str,
+    name: &str,
+    wow64_flags: u32,
+) -> io::Result<Option<String>> {
+    let key = OpenKey::open(hive, subkey, KEY_READ | wow64_flags)?;
+    let wide_name = wide_null(name);
+    let mut kind: u32 = 0;
+    let mut byte_len: u32 = 0;
+    // 第一次查询取字节长度（lpdata 传空指针，仅探尺寸）。
+    let code = unsafe {
+        RegQueryValueExW(
+            key.0,
+            wide_name.as_ptr(),
+            std::ptr::null_mut(),
+            &mut kind,
+            std::ptr::null_mut(),
+            &mut byte_len,
+        )
+    };
+    match code {
+        ERROR_FILE_NOT_FOUND => return Ok(None),
+        ERROR_SUCCESS | ERROR_MORE_DATA => {}
+        other => return Err(io::Error::from_raw_os_error(other)),
+    }
+    if kind != REG_SZ && kind != REG_EXPAND_SZ {
+        return Ok(None);
+    }
+    let mut buf = vec![0u8; byte_len as usize];
+    let mut actual_len = byte_len;
+    let code = unsafe {
+        RegQueryValueExW(
+            key.0,
+            wide_name.as_ptr(),
+            std::ptr::null_mut(),
+            &mut kind,
+            buf.as_mut_ptr(),
+            &mut actual_len,
+        )
+    };
+    match code {
+        ERROR_FILE_NOT_FOUND => return Ok(None),
+        ERROR_SUCCESS | ERROR_MORE_DATA => {}
+        other => return Err(io::Error::from_raw_os_error(other)),
+    }
+    buf.truncate(actual_len as usize);
+    let raw = reg_data_to_string(&buf);
+    if kind == REG_EXPAND_SZ {
+        Ok(Some(expand_environment_strings(&raw)?))
+    } else {
+        Ok(Some(raw))
+    }
+}
+
+/// ExpandEnvironmentStringsW 薄封装：展开字符串中的 `%VAR%` 环境变量（R28）。
+fn expand_environment_strings(input: &str) -> io::Result<String> {
+    let src: Vec<u16> = input.encode_utf16().chain(std::iter::once(0)).collect();
+    // 返回值含结尾 NUL；0 = 失败。
+    let needed = unsafe { ExpandEnvironmentStringsW(src.as_ptr(), std::ptr::null_mut(), 0) };
+    if needed == 0 {
+        return Err(io::Error::last_os_error());
+    }
+    let mut dst = vec![0u16; needed as usize];
+    let ret =
+        unsafe { ExpandEnvironmentStringsW(src.as_ptr(), dst.as_mut_ptr(), dst.len() as u32) };
+    if ret == 0 {
+        return Err(io::Error::last_os_error());
+    }
+    // ret 含结尾 NUL，截断时去掉。
+    let len = (ret as usize).saturating_sub(1);
+    dst.truncate(len);
+    Ok(String::from_utf16_lossy(&dst))
 }

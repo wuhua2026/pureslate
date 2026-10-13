@@ -30,6 +30,52 @@ pub enum TargetType {
     Env,         // 环境变量，value 形如 %TEMP%
     Path,        // 绝对路径
     KnownFolder, // Known Folder API（P1-02 展开）
+    RegValue,    // 注册表字符串值动态路径（R28，细节见 RegTargetSpec）
+}
+
+/// reg-value target 的注册表根键（R28，SPEC §4.1）。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RegHive {
+    CurrentUser,  // HKCU
+    LocalMachine, // HKLM
+}
+
+/// reg-value target 的 WOW64 视图（R28）。x64 进程显式选择，避免注册表重定向歧义。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum RegView {
+    #[default]
+    Native, // 64 位视图（KEY_WOW64_64KEY）
+    Wow64, // 32 位视图（KEY_WOW64_32KEY）
+}
+
+/// reg-value target 如何解释注册表值（R28）。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum RegBase {
+    #[default]
+    Path, // 值本身即目标目录
+    Parent, // 值是文件路径，取其父目录作为目标目录
+}
+
+/// reg-value target 的注册表定位信息（R28）。仅 `Target.ty == RegValue` 时存在。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RegTargetSpec {
+    pub hive: RegHive,
+    /// 子键路径（反斜杠分隔）。
+    pub key: String,
+    /// 注册表值名。
+    pub value_name: String,
+    pub view: RegView,
+    pub base: RegBase,
+}
+
+impl RegTargetSpec {
+    /// 日志可读的根键名。
+    pub fn hive_label(&self) -> &'static str {
+        match self.hive {
+            RegHive::CurrentUser => "HKCU",
+            RegHive::LocalMachine => "HKLM",
+        }
+    }
 }
 
 /// 单个匹配目标集合起点。
@@ -37,6 +83,28 @@ pub enum TargetType {
 pub struct Target {
     pub ty: TargetType,
     pub value: String,
+    /// 仅 ty == RegValue 时 Some；其它 target 类型恒为 None。
+    pub reg: Option<RegTargetSpec>,
+}
+
+impl Target {
+    /// env/path/knownFolder 三类传统 target 的构造器。
+    pub fn simple(ty: TargetType, value: impl Into<String>) -> Self {
+        Self {
+            ty,
+            value: value.into(),
+            reg: None,
+        }
+    }
+
+    /// reg-value target 构造器（路径不放在 value，全部来自注册表动态解析）。
+    pub fn reg_value(spec: RegTargetSpec) -> Self {
+        Self {
+            ty: TargetType::RegValue,
+            value: String::new(),
+            reg: Some(spec),
+        }
+    }
 }
 
 /// 包含/排除 glob 规则。

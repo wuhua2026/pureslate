@@ -80,13 +80,26 @@ pureslate/
     <include pattern="FileStorage\Cache\**" recursive="true"/>
     <guard process="WeChat.exe"/>
   </category>
+  <!-- R28 能力示例：注册表值动态目标 + 账号目录段正则收紧 + 递归深度封顶 -->
+  <category id="cache.im-accounts" label="多账号 IM 缓存（语法示例）" risk="yellow" disposition="quarantine"
+            description="仅收形态正确的账号目录下缓存；安装根目录由注册表值动态解析">
+    <target type="reg-value" hive="HKCU" key="Software\ExampleVendor\ExampleApp"
+            value="InstallDir" view="native" base="path"/>
+    <include pattern="data\accounts\*\cache\**" recursive="true"
+             segment-regex="[0-9]{6,12}" segment-index="2" max-depth="8"/>
+  </category>
 </ruleset>
 ```
 
 字段语义：
 - `risk`：green|yellow|red；`disposition`：direct|recycle|quarantine（green 只准 direct/recycle）；
-- `target type`：`env`（环境变量）｜`path`（绝对）｜`knownFolder`（Known Folder API）；
+- `target type`：
+  - `env`（环境变量）｜`path`（绝对路径）｜`knownFolder`（Known Folder API）；
+  - `reg-value`（R28，注册表字符串值动态路径）：属性 `hive`（HKLM｜HKCU）、`key`（子键路径，反斜杠分隔）、`value`（值名）、`view`（native=64 位视图，默认；wow64=32 位视图）、`base`（path=值本身即目标目录，默认；parent=注册表值是文件路径时取其父目录）。仅接受 REG_SZ / REG_EXPAND_SZ（后者先经 ExpandEnvironmentStrings 展开）；以 KEY_READ=0x20019（不含写位）只读打开，错误类型传播、生产路径无 unwrap（AGENTS 红线 6）。**机器相关软失败**：键/值不存在、类型不符、值为空、展开结果为空或不存在 → 跳过该 target（不丢弃 category，语义等同"本机未安装或不在默认位置"）并记日志；XML 属性非法（未知 hive/view/base、缺必填属性）→ 加载期丢弃整个 category。
+  - **reg-value 安全约束**：注册表值是外部数据，解析出的路径与其它 target 一样必经白名单（SAFETY §2）与分级去向，无任何豁免；另加一道 loader 闸——含 reg-value target 的 category，其每条 include 必须**含路径分隔符**（具体子目录）或为**纯扩展名形态**（`*.ext`），禁止裸根全收模式（`*`｜`**`｜`*.*`｜`**/*`），违反 → category 丢弃。该闸只防"异常注册表值指向卷根→整盘入候选"的失控面，不替代白名单。
 - `include/exclude`：glob（`*` `**`）；`maxAgeDays`=0 表示不限；可选 `minSizeMB`；
+  - `segment-regex` + `segment-index`（R28）：glob 命中之后的**单路径段收紧条件**。相对 target 根把路径按分隔符切段（index 0 起，含文件名所在段），第 index 段必须存在且整段匹配该正则（引擎自动首尾锚定，规则里不用写 `^$`）；段不存在或不匹配 → 该 include 不命中（**fail-closed**）。语法为 regex-lite 支持的语法（字符类、量词、`\d` 等，无反向引用）；正则编译失败 → **加载期丢弃该条 include/exclude 并记日志**（收紧约束失效时绝不退化为无约束的裸 glob）。典型用途：把多账号软件的账号目录从 `*` 收紧为形态确定的 ID 目录；具体形态必须基于本机实测，规则全部自研（AGENTS 红线 5）。
+  - `max-depth`（R28）：相对 target 根允许命中的最大路径段数（根直属文件 = 1）。category 遍历深度取全部 include 的最大值（walkdir `max_depth`），命中时每条 include 再按各自值裁尾；缺省 = 不限。`recursive="false"` 明确等价于 `max-depth="1"`（此前仅靠 glob 形状隐式约束）；二者同时声明且矛盾（recursive=false 且 max-depth>1）→ category 丢弃。
 - `guard process`：清理前进程守卫（SAFETY §5.1）；
 - 解析失败/字段非法 → 该 category 整体丢弃并记日志（**宁缺勿错**）；
 - 多 ruleset 同 id category 时后加载覆盖先加载（规则包更新语义）。
@@ -228,6 +241,7 @@ export interface RestoreReport { requested: number; restored: number; conflict: 
 ### 6.1 扫描引擎（R01/R03）
 - walkdir 遍历目标集合（由规则 target 展开），先过白名单（SAFETY §2）再匹配规则；reparse point 不跟随；取消令牌随时生效；
 - **DG-1 决策门（Phase 1）**：真机 1TB SSD 全维度扫描基准 >120s → 启用 `scanner/mft`（NTFS MFT 直读枚举，需管理员权限声明）；详见 TASKS P1-02；
+- R28 规则能力：target 支持 `reg-value`（注册表字符串值只读解析为路径，键值缺失按"未安装"软跳过）；遍历按 include `max-depth` 封顶深度；glob 命中后过 `segment-regex` 单段收紧（不匹配即不命中，编译失败丢规则，fail-closed）；
 - 聚合输出 CategoryAggregate[]；items 全量驻留内存后端（PathBuf 紧凑存储），前端分页拉取。
 
 ### 6.2 事务与清理（R04）
