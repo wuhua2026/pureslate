@@ -585,17 +585,26 @@ mod tests {
 
     /// 回归（覆盖率事故 2026-10-12）：WOW64 标志必须为 winnt.h 原值 0x0100/0x0200——
     /// 曾误写为 0x10000/0x20000 导致 HKLM 两视图打开被静默跳过（只剩 HKCU 十几项）。
+    ///
+    /// 错误语义区分（2026-10-13 CI 修正）：
+    /// - `ERROR_FILE_NOT_FOUND/ERROR_PATH_NOT_FOUND(2/3)`：该视图键在本用户配置单元
+    ///   不存在（GitHub Actions 干净 runner 的 HKCU 即如此）——生产枚举本就容错跳过，
+    ///   合法；
+    /// - `ERROR_ACCESS_DENIED(5)`：提权进程仍被拒 = KEY_READ/WOW64 标志错误的信号
+    ///   （正是 R27-1 事故），必须失败；其他错误同样报出。
     #[test]
     fn all_four_views_open() {
         for view in &VIEWS {
             let keys = enum_subkeys_view(view.hive, UNINSTALL_SUBKEY, view.wow64);
-            assert!(
-                keys.is_ok(),
-                "{}/{} 视图 Uninstall 键必须可打开（WOW64 标志错误？）: {:?}",
-                view.scope,
-                view.arch,
-                keys.err()
-            );
+            if let Err(e) = &keys {
+                let code = e.raw_os_error().unwrap_or(0);
+                assert!(
+                    matches!(code, 2 | 3),
+                    "{}/{} 视图 Uninstall 键打开失败（非 NotFound，疑 WOW64/权限标志错误 code={code}）: {e:?}",
+                    view.scope,
+                    view.arch
+                );
+            }
         }
     }
 
