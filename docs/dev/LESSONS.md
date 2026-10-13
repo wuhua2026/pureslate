@@ -6,6 +6,12 @@
 
 ## ① 踩坑记录
 
+### 真机冒烟测试断言"注册表键必须可打开"在 CI 干净配置单元上必挂：NotFound≠AccessDenied（2026-10-13，v0.1.6 发布）
+- 现象：R27-1 的回归测试 `all_four_views_open` 本机/提权全绿，GitHub Actions 上失败：`user/x64 视图 Uninstall 键必须可打开: Os code 2 NotFound`。
+- 根因：CI runner 的服务账号用户配置单元是干净的，`HKCU\Software\Microsoft\Windows\CurrentVersion\Uninstall` **键本身不存在**（code 2），不是权限拒绝（code 5）。断言把"四视图键都存在且可开"当成不变量，混淆了两类错误。
+- 修复：测试只在**非 NotFound/PathNotFound（code 2/3）**时失败——键不存在时生产枚举本就 `.ok()` 容错跳过（合法）；AccessDenied(code 5) 才是 KEY_READ/WOW64 标志错误（R27-1 事故本体），必须红。
+- 复利结论：①写"打开系统资源必须成功"类断言前先问**这个资源在最小化/干净环境是否必然存在**，注册表用户键、目录、环境变量都不是；②针对具体事故的回归测试要断言事故的**错误签名**（code 5），而不是断言一个更强的性质（全部可开）——后者会把环境差异误报成缺陷；③main CI 与 Release 工作流都要过，但 Release 不跑 test（只 build+size gate），所以出现了"Release 绿、main CI 红"并存——发布后必须回头确认 main CI，不能只看 Release。
+
 ### mock/真机双 IPC 通道的契约盲区：Tauri v2 结构体参数必须按参数名包一层（2026-10-13，真机反馈）
 - 现象（用户真机三连报）：①报告页 `scan_get_items missing required key params`；②操作日志 `log_query missing required key filter`；且这两处 typecheck/71 单测/build 全绿。
 - 根因：Tauri v2 命令反序列化按**函数参数名**取 invoke args 的 key（camelCase→snake_case）。Rust 端 `fn scan_get_items(state, params: ScanGetItemsParams)` 要求 JS 传 `invoke("scan_get_items", { params: {...} })`，前端却平铺成 `invoke("scan_get_items", { scanId, offset, limit })`。mock 模式走 `mockCommands.xxx(...)` 是**函数直调**，不经 Tauri 序列化，签名恰好匹配——所以 mock 全绿，真机 invoke 必炸。

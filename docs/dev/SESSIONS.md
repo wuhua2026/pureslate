@@ -5,6 +5,15 @@
 > 维护（AGENTS.md §9）：任务完成时 agent 自动追加/更新当前会话条目，随任务同一提交。格式：`## YYYY-MM-DD | 主题`。
 > 本初版由历史会话记忆回溯整理（截至 2026-09-29），细节以 git 历史与 TASKS.md 为准。
 
+## 2026-10-13 | v0.1.6 发布（R27 安全卸载+管家 UI+真机修复；Release 全绿，main CI 一次红已修）
+
+- **发布内容**：v0.1.5 提交（真机反馈批量修复，此前未发）起累积 9 个提交——R27-1/2/3 安全卸载全套（四视图枚举/编排/残留隔离清理去向可选）、管家式 UI 改版、8 处 Tauri v2 IPC 参数失配修复、体检待命态。
+- **流程**：版本三处同步 bump 0.1.4→0.1.6（Cargo.toml+tauri.conf.json+lock；package.json 历史恒 0.1.0 不参与 CI 校验，未动）；本地 `pnpm tauri build` 先过体积门禁（安装包 **2.75MB** <20MB）再写 release-notes/v0.1.6.md；push main → tag v0.1.6（annotated，确认 tag=conf 版本，v0.1.4 tag 事故教训）→ push（443 抖动重试 4 次+等 90s 后成功，无代理）。
+- **Release 结果**：workflow 7m22s success，GitHub Release v0.1.6 四资产齐全（setup.exe 2MB / portable.zip 3MB / rules pack / build-hashes.json），update-manifest 与规则包 [skip ci] 回推 main（766ce9b）。
+- **main CI 红→修**：首次推送后 PureSlate CI 的 `uninstall::tests::all_four_views_open` 失败——CI 干净 runner 的 HKCU Uninstall 键不存在（code2 NotFound），断言过强。改测错误签名（code2/3 合法跳过、code5 AccessDenied 才是 WOW64 标志回归），修复提交 ab53056，重跑 11m50s 全绿。Release 不跑 cargo test 故发布未受影响、tag 未移动（产物无差异）。教训入 LESSONS。
+- **下载**：https://github.com/wuhua2026/pureslate/releases/tag/v0.1.6 （未签名，SignPath 仍申请中）。
+- **下一步**：真机走查 v0.1.6（卸载 Inno/NSIS/MSI 三源残留命中率、隔离还原回 Program Files、直删 token 分支、多盘扫描、体检待命交互）。
+
 ## 2026-10-13 | R27-3 卸载残留隔离清理交付（[DESTRUCTIVE]；去向可选；白名单硬/软分层开精确口子）
 
 - **需求增量**：用户要求删除去向可选（直接删/进隔离区）。设计落点：每组二选一，隔离区默认（14 天可还原），direct=🔴 语义须专家模式+一次性令牌（复用 I-2 confirm token），不提供回收站档。
