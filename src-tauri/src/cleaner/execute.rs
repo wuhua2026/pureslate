@@ -28,6 +28,10 @@ pub struct CleanTarget {
     pub guard_processes: Vec<String>,
     /// 扫描记录的 mtime（epoch ms）；执行前一致性复核用（T-1）。
     pub mtime_ms: Option<i64>,
+    /// R27-3 卸载残留精确授权根：`path` 位于该根内时，§2.2 程序目录软根与
+    /// §2.4 用户核心目录的白名单拦截可豁免（硬保护/XML 白名单仍不可豁免）。
+    /// 仅 `uninstall_residue_clean` 由后端快照签发，前端无法伪造（None=普通清理）。
+    pub authorized_root: Option<PathBuf>,
 }
 
 /// 把扫描项按 id 解析为清理目标，守卫与类目信息来自规则表。
@@ -57,6 +61,7 @@ pub fn resolve_targets(
             size_bytes: item.size_bytes,
             guard_processes: cat.guard_processes.clone(),
             mtime_ms: item.mtime,
+            authorized_root: None,
         });
     }
     Ok(out)
@@ -362,6 +367,7 @@ mod tests {
                 .and_then(|m| m.modified().ok())
                 .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
                 .map(|d| d.as_millis() as i64),
+            authorized_root: None,
         }
     }
 

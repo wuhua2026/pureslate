@@ -28,6 +28,11 @@ pub struct AppState {
     pub pending_confirm: Mutex<Option<String>>,
     /// R27-2：进行中的卸载事务（txId → 取消令牌）。完成后移除。
     pub uninstalls: Mutex<HashMap<String, Arc<CancelToken>>>,
+    /// R27-3：最近一次成功卸载的上下文（removed/reboot_pending 后写入；
+    /// 残留扫描只消费该上下文，不做无上下文孤儿扫描）。
+    pub last_uninstall: Mutex<Option<crate::uninstall::residue::ResidueContext>>,
+    /// R27-3：最近一次残留扫描快照（clean 时校验候选根必须出自该快照，一次性）。
+    pub residue_snapshot: Mutex<Option<crate::uninstall::residue::ResidueSnapshot>>,
 }
 
 impl AppState {
@@ -42,6 +47,8 @@ impl AppState {
             recovery_report: Mutex::new(None),
             pending_confirm: Mutex::new(None),
             uninstalls: Mutex::new(HashMap::new()),
+            last_uninstall: Mutex::new(None),
+            residue_snapshot: Mutex::new(None),
         }
     }
 }

@@ -21,6 +21,16 @@
 
 1. 系统目录：`%SystemRoot%`（C:\Windows）及其子目录（`C:\Windows\Temp` 等显式声明的例外由规则集白名单子句放行）；
 2. 程序目录：`%ProgramFiles%`、`%ProgramFiles(x86)%`、`%ProgramData%\Microsoft`；
+   - **R27-3 精确残留豁免条款（白名单分层）**：常量白名单根分两层——
+     **硬根**（§2.1 SystemRoot、§2.3 引导/卷信息、§2.6 隔离区与自身设施、whitelist.xml 声明根）**永不豁免**；
+     **§2.2 程序目录软根**仅在以下全部条件成立时，对"卸载残留清理"放行到 preflight 后续闸：
+     ①存在最近一次 `removed`/`reboot_pending` 卸载事务的后端上下文（`state.last_uninstall`），候选由后端在该上下文内枚举（不接受前端传入路径）；
+     ②候选 id 必须出自后端留存的**最近一次残留扫描快照**（`state.residue_snapshot`，clean 时一次性取走，过期/重扫/新卸载即失效）；
+     ③文件路径必须段级位于该候选组的**精确授权根**（root_path）之内；
+     ④硬保护、逐级 reparse、size+mtime（TOCTOU）复核一道不绕过；候选根过严格安全闸（非卷根/非系统关键段/末段非共享通用名/Users 浅层拒绝/含 junction 子树整组放弃）；
+     ⑤直接删除去向额外要求专家模式 + 一次性确认令牌（与 🔴 同语义），默认去向恒为隔离区；
+     ⑥进程守卫：候选内 .exe 任一在运行 → 整组跳过，不做半清。
+     隔离区**还原**到软根仅放行 `category=residue.uninstall` 的 manifest 行（文件本就从该处授权移入；硬根仍拦、冲突不覆盖、sha256/root 内/reparse 校验保留）。
 3. 引导与系统卷信息：`C:\Boot`、`C:\EFI`、`C:\Recovery`、`System Volume Information`、`$Recycle.Bin`（回收站本体走专用 API，不做路径级删除）；
 4. 用户核心数据目录（默认 🔴 且不建议清理）：`Documents`、`Desktop`、`Pictures`、`Videos`、`Music` 的**非缓存子路径**（例外：这些目录下被规则显式标记为缓存的路径，如 `Pictures\Thumbnails`）。
    **v0.1.4 语义分层（H1 修复）**：§2.4 五目录从通用白名单根拆出（`is_user_core_data`）——对 **quarantine 去向**（🟡/🔴 隔离区：可还原 + 用户逐项确认）的扫描与清理**放行**（dup/cache 等类目必须进入这些目录才能提供产品价值）；对 **direct/recycle 去向**（🟢 直清）仍整树拦截（preflight 强制，用户文档绝不进直清候选）；系统目录等其余白名单根对所有类目全拦不变；还原（restore）目标检查同步不含 §2.4（恢复用户数据不属删除）。

@@ -31,6 +31,9 @@ import type {
 } from "../types/ipc";
 import { InstalledAppStub, QuarantineListStub, StartupListStub, buildMockScanResult } from "./data";
 
+/** R27-3 mock 状态：最近一次被卸载的程序（供残留扫描造样本）。 */
+let lastRemovedApp: { name: string; installLocation: string } | null = null;
+
 export const mockCommands = {
   app_meta: (): Promise<AppMeta> =>
     Promise.resolve({ version: "0.1.4", rulesVersion: "0", channel: "github", isElevated: false }),
@@ -125,11 +128,70 @@ export const mockCommands = {
   uninstall_run: (appId: string): Promise<string> => {
     const idx = InstalledAppStub.findIndex((a) => a.id === appId);
     if (idx < 0) return Promise.reject(new Error("该程序已不在可卸载列表中（可能已卸载）"));
+    lastRemovedApp = {
+      name: InstalledAppStub[idx].name,
+      installLocation: InstalledAppStub[idx].installLocation ?? "",
+    };
     InstalledAppStub.splice(idx, 1);
     return Promise.resolve(`uninstall-mock-${Date.now()}`);
   },
 
   uninstall_cancel: (_txId: string): Promise<boolean> => Promise.resolve(true),
+
+  // R27-3：mock 残留扫描（基于最近一次 mock 卸载的程序造三源样本）。
+  uninstall_residue_scan: (): Promise<import("../types/ipc").ResidueCandidate[]> => {
+    if (!lastRemovedApp) {
+      return Promise.reject(new Error("请先完成一次卸载，再扫描其残留"));
+    }
+    const { name, installLocation } = lastRemovedApp;
+    const loc = installLocation || `C:\\Program Files\\${name}`;
+    const item = (
+      id: string,
+      path: string,
+      size: number,
+    ): import("../types/ipc").ScanItem => ({
+      id,
+      categoryId: "residue.uninstall",
+      label: path.split("\\").pop() ?? path,
+      path,
+      sizeBytes: size,
+      grade: "yellow",
+      disposition: "quarantine",
+      reason: "卸载后残留（mock）",
+    });
+    return Promise.resolve([
+      {
+        id: "mock-res-install",
+        kind: "install_dir",
+        appName: name,
+        rootPath: loc,
+        reason: `官方卸载器已运行且卸载条目已消失，但登记的安装目录仍存在（2 个文件）`,
+        sizeBytes: 4096 + 2048,
+        fileCount: 2,
+        items: [
+          item("mock-res-f1", `${loc}\\app.dll`, 4096),
+          item("mock-res-f2", `${loc}\\lang\\zh.txt`, 2048),
+        ],
+      },
+      {
+        id: "mock-res-appdata",
+        kind: "app_data",
+        appName: name,
+        rootPath: `C:\\Users\\tester\\AppData\\Roaming\\${name}`,
+        reason: `AppData\\Roaming 下仍存在与「${name}」名称一致的配置目录（1 个文件）`,
+        sizeBytes: 512,
+        fileCount: 1,
+        items: [item("mock-res-f3", `C:\\Users\\tester\\AppData\\Roaming\\${name}\\prefs.ini`, 512)],
+      },
+    ]);
+  },
+
+  uninstall_residue_clean: (
+    params: import("../types/ipc").ResidueCleanParams,
+  ): Promise<string> => {
+    if (params.selections.length === 0) return Promise.reject(new Error("未选择任何残留项"));
+    return Promise.resolve(`residue-mock-${Date.now()}`);
+  },
 
   startup_toggle: (params: { id: string; enabled: boolean }): Promise<boolean> => {
     // mock 有状态翻转（dev 走查用）：直接改 stub 条目，同会话内 list 可见变化。

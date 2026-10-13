@@ -129,6 +129,7 @@ fn direct_target(path: &Path) -> CleanTarget {
         size_bytes: fs::metadata(path).map(|m| m.len()).unwrap_or(0),
         guard_processes: Vec::new(),
         mtime_ms: Some(modified_ms(path)),
+        authorized_root: None,
     }
 }
 

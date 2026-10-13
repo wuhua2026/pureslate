@@ -677,6 +677,29 @@ pub async fn uninstall_run(
         }
         match result {
             Ok(out) => {
+                // R27-3：成功/待重启时留存卸载上下文，供"卸载后残留扫描"消费
+                //（残留枚举必须有卸载事务上下文，不做无上下文孤儿扫描）。
+                if matches!(
+                    out.kind,
+                    crate::uninstall::OutcomeKind::Removed
+                        | crate::uninstall::OutcomeKind::RebootPending
+                ) {
+                    if let Some(state) = app_handle.try_state::<AppState>() {
+                        if let Ok(mut g) = state.last_uninstall.lock() {
+                            *g = Some(crate::uninstall::residue::ResidueContext {
+                                app_id: out.app_id.clone(),
+                                name: out.name.clone(),
+                                publisher: out.publisher.clone(),
+                                install_location: out.install_location.clone(),
+                                uninstalled_at: now_ms(),
+                            });
+                        }
+                        // 新一轮卸载使旧残留快照失效。
+                        if let Ok(mut g) = state.residue_snapshot.lock() {
+                            *g = None;
+                        }
+                    }
+                }
                 let _ = app_handle.emit(
                     crate::contract::events::UNINSTALL_DONE,
                     crate::contract::UninstallDoneEvent {
@@ -696,6 +719,7 @@ pub async fn uninstall_run(
                         install_location_still_present: out.install_location_still_present,
                         reboot_pending: out.reboot_pending,
                         detail: out.detail,
+                        install_location: out.install_location,
                     },
                 );
             }
@@ -713,6 +737,7 @@ pub async fn uninstall_run(
                         install_location_still_present: None,
                         reboot_pending: false,
                         detail: e,
+                        install_location: None,
                     },
                 );
             }
@@ -734,6 +759,159 @@ pub fn uninstall_cancel(state: State<'_, AppState>, tx_id: String) -> bool {
     } else {
         false
     }
+}
+
+/// R27-3：扫描最近一次卸载的残留（安装目录/开始菜单/AppData 三源，只读）。
+/// 无卸载上下文（未完成过卸载）→ Err。结果存 state 快照供 clean 校验。
+#[tauri::command]
+pub async fn uninstall_residue_scan(
+    app: tauri::AppHandle,
+) -> Result<Vec<crate::uninstall::residue::ResidueCandidate>, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let Some(state) = app.try_state::<AppState>() else {
+            return Err("状态不可用".into());
+        };
+        let ctx = {
+            let Ok(g) = state.last_uninstall.lock() else {
+                return Err("状态锁不可用".into());
+            };
+            g.clone()
+                .ok_or_else(|| "请先完成一次卸载，再扫描其残留".to_string())?
+        };
+        let candidates = crate::uninstall::residue::scan_residue(&ctx)?;
+        if let Ok(mut g) = state.residue_snapshot.lock() {
+            *g = Some(crate::uninstall::residue::ResidueSnapshot {
+                context: ctx,
+                candidates: candidates.clone(),
+                scanned_at: now_ms(),
+            });
+        }
+        Ok(candidates)
+    })
+    .await
+    .map_err(|e| format!("残留扫描任务失败: {e}"))?
+}
+
+/// R27-3：[DESTRUCTIVE] 执行残留清理。去向 quarantine（默认可还原）/ direct
+///（永久删除；含任一项即须专家模式一次性令牌）。复用 cleaner 事务（journal/
+/// 审计/隔离区/取消），进度/完成复用 clean_progress/clean_done 事件。
+#[tauri::command]
+pub async fn uninstall_residue_clean(
+    app: tauri::AppHandle,
+    state: State<'_, AppState>,
+    params: ResidueCleanParams,
+) -> Result<String, String> {
+    if state.recovery_pending.load(AtomicOrdering::SeqCst) {
+        return Err("崩溃恢复进行中，请稍后重试".into());
+    }
+    if params.selections.is_empty() {
+        return Err("未选择任何残留项".into());
+    }
+    // ① direct（永久删除，🔴）→ 必须消费专家令牌；全 quarantine 不需要。
+    let has_direct = params
+        .selections
+        .iter()
+        .any(|s| s.disposition == Disposition::Direct);
+    if has_direct && !verify_pending_confirm(&state, params.confirm_token.as_deref().unwrap_or(""))
+    {
+        return Err("选择了永久删除：需要专家模式下的有效二次确认令牌".into());
+    }
+
+    // ② 取后端快照并把选择解析为目标（候选必须出自快照，防前端伪造路径）。
+    let snapshot = {
+        let Ok(mut g) = state.residue_snapshot.lock() else {
+            return Err("状态锁不可用".into());
+        };
+        g.take()
+            .ok_or_else(|| "残留扫描结果已失效，请重新扫描".to_string())?
+    };
+    let selections: Vec<crate::uninstall::residue::ResidueSelection> = params
+        .selections
+        .iter()
+        .map(|s| crate::uninstall::residue::ResidueSelection {
+            candidate_id: s.candidate_id.clone(),
+            disposition: s.disposition,
+        })
+        .collect();
+    let prepared = crate::uninstall::residue::prepare_targets(&snapshot, &selections)?;
+    if prepared.targets.is_empty() && prepared.roots.is_empty() {
+        // 全被守卫跳过：把快照放回供用户退出程序后重试。
+        if let Ok(mut g) = state.residue_snapshot.lock() {
+            *g = Some(snapshot);
+        }
+        return Err("所选残留目录中的程序仍在运行，请先退出后再清理".into());
+    }
+
+    // ③ 事务登记（取消令牌进 clean 登记表，前端复用 clean_cancel）。
+    let t = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_nanos())
+        .unwrap_or(0);
+    let tx_id = format!("residue-{t:020x}");
+    let cancel = CancelToken::new();
+    clean_cancel_registry().insert(tx_id.clone(), cancel.clone());
+    let retention = clean_retention(&state);
+
+    let app2 = app.clone();
+    let tx2 = tx_id.clone();
+    let roots = prepared.roots.clone();
+    let skipped_items = prepared.skipped_items;
+    let targets = prepared.targets;
+
+    tauri::async_runtime::spawn_blocking(move || {
+        let mut last_emit = Instant::now();
+        let throttle = Duration::from_millis(200);
+        let total_bytes: u64 = targets.iter().map(|t| t.size_bytes).sum();
+        let app_emit = app2.clone();
+        let tx_emit = tx2.clone();
+        let mut progress = move |path: String,
+                                 disp: Disposition,
+                                 st0: CleanProgressState,
+                                 done: u64,
+                                 _total: u64| {
+            let emit_now =
+                total_bytes == 0 || done >= total_bytes || last_emit.elapsed() >= throttle;
+            if !emit_now {
+                return;
+            }
+            last_emit = Instant::now();
+            let _ = app_emit.emit(
+                events::CLEAN_PROGRESS,
+                CleanProgressEvent {
+                    tx_id: tx_emit.clone(),
+                    item_path: path,
+                    disposition: disp,
+                    done_bytes: done,
+                    total_bytes,
+                    state: st0,
+                },
+            );
+        };
+
+        // 空目录候选（targets 为空）时跳过 execute（无 journal 目标可写）。
+        let report = if targets.is_empty() {
+            crate::cleaner::CleanReport::default()
+        } else {
+            crate::cleaner::execute::execute(&tx2, &targets, &cancel, retention, &mut progress)
+        };
+
+        // ④ 空目录收尾（RemoveDirectoryW 仅删空目录，非空静默失败）。
+        crate::uninstall::residue::prune_empty_dirs(&roots);
+
+        clean_cancel_registry().remove(&tx2);
+        let _ = app2.emit(
+            events::CLEAN_DONE,
+            CleanDoneEvent {
+                tx_id: tx2,
+                total: report.total,
+                ok: report.ok,
+                fail: report.fail,
+                skip: report.skip + skipped_items,
+            },
+        );
+    });
+
+    Ok(tx_id)
 }
 
 /// 启动项启停（禁用=备份后移除，不删源程序；启用=按备份还原）。

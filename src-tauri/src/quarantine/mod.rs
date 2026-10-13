@@ -88,6 +88,11 @@ unsafe extern "system" {
 /// 兼容 `\\?\C:\...` 扩展长度前缀（P4-02 长路径边界）：在整串中定位首个盘符段。
 /// 无盘符路径（如相对路径）回退到系统盘 `C:`。
 pub fn quarantine_root_of(path: &Path) -> PathBuf {
+    // 测试注入钩子（与 storage::set_data_root_override 同模式）：生产永不设置；
+    // 设置后忽略卷判定，全部移入该沙箱根（集成测试避免写真实盘根）。
+    if let Some(root) = quarantine_root_override() {
+        return root;
+    }
     let s = path.to_string_lossy();
     let bytes = s.as_bytes();
     let mut drive: Option<String> = None;
@@ -103,6 +108,25 @@ pub fn quarantine_root_of(path: &Path) -> PathBuf {
     let root = format!("{}\\", drive.unwrap_or_else(|| "C:".into()));
     PathBuf::from(root).join(QUARANTINE_DIR)
 }
+
+/// 测试隔离区根覆盖（仅集成测试注入；None = 生产按卷根计算）。
+pub fn set_quarantine_root_override(root: Option<PathBuf>) {
+    let cell = QUARANTINE_ROOT_OVERRIDE.get_or_init(|| std::sync::Mutex::new(None));
+    if let Ok(mut g) = cell.lock() {
+        *g = root;
+    }
+}
+
+fn quarantine_root_override() -> Option<PathBuf> {
+    QUARANTINE_ROOT_OVERRIDE
+        .get_or_init(|| std::sync::Mutex::new(None))
+        .lock()
+        .ok()
+        .and_then(|g| g.clone())
+}
+
+static QUARANTINE_ROOT_OVERRIDE: std::sync::OnceLock<std::sync::Mutex<Option<PathBuf>>> =
+    std::sync::OnceLock::new();
 
 /// 确保隔离区根目录存在，并设置 hidden+system 属性（Windows）。
 /// **T-3 reparse 校验（P4-02 安全审计）**：根路径本身命中 junction/symlink 即拒绝——

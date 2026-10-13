@@ -15,16 +15,39 @@ use std::path::{Path, PathBuf};
 
 use super::execute::CleanTarget;
 use crate::contract::Disposition;
-use crate::safety::whitelist::{is_user_core_data, is_whitelisted};
+use crate::safety::whitelist::{
+    is_hard_protected, is_soft_program_root, is_user_core_data, is_within,
+};
 
 /// 复核一个待清理目标。`Ok(())` 放行；`Err(reason)` 拒绝（原因入 journal/审计）。
 pub fn verify(t: &CleanTarget) -> Result<(), String> {
     let p = &t.path;
 
-    // 1) 白名单最终复核（H1 · v0.1.4 语义分层：白名单根全类目拦；§2.4 用户核心
-    //    目录对 quarantine 去向放行——隔离区可还原 + 逐项确认，与扫描期一致；
-    //    direct/recycle 仍整树拦——用户文档绝不进直清/回收站候选）。
-    if is_whitelisted(p) || (t.disposition != Disposition::Quarantine && is_user_core_data(p)) {
+    // 1) 白名单最终复核（分层语义）：
+    //    a) 硬保护（系统/引导卷目录、SystemRoot、卷根关键文件、隔离区哨兵、自身设施、
+    //       XML 附加白名单）——**任何授权都不可豁免**，永远拒绝；
+    //    b) §2.2 程序目录软根（ProgramFiles*/ProgramData\Microsoft）——普通清理
+    //       一律拦截；R27-3 后端签发的精确残留授权根可在根内豁免（SAFETY §2.2 条款）；
+    //    c) §2.4 用户核心目录——direct/recycle 整树拦；quarantine 按 H1 放行；
+    //       R27-3 精确授权根内任何去向放行（残留可能位于 Documents 下的异常安装位，
+    //       已由枚举器高置信 + 用户逐项确认兜底，硬保护 a) 仍优先）。
+    if is_hard_protected(p) {
+        return Err(format!(
+            "执行前复核：目标命中硬保护白名单（系统/引导/隔离区/规则声明），已拒绝 ({})",
+            p.to_string_lossy()
+        ));
+    }
+    let in_authorized_root = t
+        .authorized_root
+        .as_ref()
+        .is_some_and(|root| is_within(p, root));
+    if is_soft_program_root(p) && !in_authorized_root {
+        return Err(format!(
+            "执行前复核：目标位于程序目录白名单且无残留授权，已拒绝 ({})",
+            p.to_string_lossy()
+        ));
+    }
+    if t.disposition != Disposition::Quarantine && is_user_core_data(p) && !in_authorized_root {
         return Err(format!(
             "执行前复核：目标命中安全白名单，已拒绝 ({})",
             p.to_string_lossy()
@@ -99,6 +122,7 @@ mod tests {
             size_bytes: size,
             guard_processes: Vec::new(),
             mtime_ms: mtime,
+            authorized_root: None,
         }
     }
 
@@ -165,6 +189,75 @@ mod tests {
             assert!(r.is_err(), "白名单路径必须在执行期被复核拦截");
             assert!(r.unwrap_err().contains("白名单"));
         }
+    }
+
+    /// R27-3 授权分层：硬根授权也不豁免；程序目录软根凭精确授权放行到下一闸。
+    #[test]
+    fn r273_authorization_layers() {
+        // ① 硬根（SystemRoot\notepad.exe）：即便带授权根也必须被拦。
+        if let Ok(win) = std::env::var("SystemRoot") {
+            let f = Path::new(&win).join("notepad.exe");
+            if let Ok(meta) = std::fs::metadata(&f) {
+                let mut t = target(&f, meta.len(), Some(modified_ms(&meta)));
+                t.authorized_root = Some(PathBuf::from(&win));
+                let r = verify(&t);
+                assert!(r.is_err(), "硬保护不得被残留授权豁免");
+                assert!(r.unwrap_err().contains("硬保护"));
+            }
+        }
+        // ② 程序目录软根：无授权 → 程序目录白名单拦截；授权根精确覆盖 →
+        //    越过白名单闸（走到元数据/reparse 等后续检查，错误文案不再含白名单）。
+        for var in ["ProgramFiles", "ProgramFiles(x86)"] {
+            let Ok(pf) = std::env::var(var) else { continue };
+            // 动态找一个真实存在的文件作为路径样本（不修改/删除它）。
+            let Some(sample) = find_any_file(Path::new(&pf), 3) else {
+                continue;
+            };
+            let Ok(meta) = std::fs::metadata(&sample) else {
+                continue;
+            };
+            let mut t = target(&sample, meta.len(), Some(modified_ms(&meta)));
+            let no_auth = verify(&t);
+            assert!(
+                no_auth
+                    .as_ref()
+                    .is_err_and(|e| e.contains("程序目录白名单")),
+                "{var} 下无授权应被软根拦截: {sample:?} => {no_auth:?}"
+            );
+            // 授权根 = 文件所在产品目录（其某个祖先，软根之下一层及更深均可）。
+            let product_root = sample
+                .parent()
+                .map(Path::to_path_buf)
+                .unwrap_or_else(|| PathBuf::from(&pf));
+            t.authorized_root = Some(product_root);
+            // size/mtime 均真实一致 → 应整体 Ok（reparse 也必须无；有 reparse 的罕见
+            // 样本会报 junction 错，同样证明已越过白名单闸）。
+            match verify(&t) {
+                Ok(()) => {}
+                Err(e) => assert!(!e.contains("白名单"), "精确授权后不得再被白名单拦截: {e}"),
+            }
+            // 授权根不覆盖（伪造为无关目录）→ 仍拦。
+            t.authorized_root = Some(PathBuf::from("Z:\\__nonexistent_root__"));
+            assert!(verify(&t)
+                .as_ref()
+                .is_err_and(|e| e.contains("程序目录白名单")));
+            break; // 一个真实软根验证足够
+        }
+    }
+
+    /// 在 root 下至多 max_depth 层找第一个普通文件（避开 reparse）。
+    fn find_any_file(root: &Path, max_depth: usize) -> Option<PathBuf> {
+        for entry in walkdir::WalkDir::new(root)
+            .max_depth(max_depth)
+            .follow_links(false)
+            .into_iter()
+            .flatten()
+        {
+            if entry.file_type().is_file() && !entry.file_type().is_symlink() {
+                return Some(entry.into_path());
+            }
+        }
+        None
     }
 
     #[test]

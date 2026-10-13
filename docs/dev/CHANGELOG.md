@@ -118,3 +118,14 @@
 - **前端**：/apps 三态执行流（确认面板明示三条边界 → 调起/等待进度（停止等待不强杀）→ 六结果语气结果态）；卸载按钮按 `canUninstall` 启用；mock 有状态（执行后 stub 移除）+ 阶段事件模拟；appsModel 新增 canUninstall/uninstallResultMeta 纯函数 2 组单测。
 - **边界**：本任务零自删（无 DeleteFile/MoveFile/注册表写）；破坏主体是第三方卸载器，UI 如实告知其删除不进 journal/隔离区；不申请 SeDebugPrivilege、不默认强杀、不碰 UWP；残留隔离清理属 R27-3。评审文档 `docs/review/R27-2.md`。
 - **验证**：cargo fmt/clippy -D warnings/test 全绿（178 lib+24 集成；uninstall 模块 24 例：命令行拆分 7 例/进程树闭包 3 例/待重启匹配 2 例/分类全矩阵/枚举 11 例含 Quiet 回归与真机冒烟）；pnpm typecheck/vitest(64)/build 全绿。
+
+### R27-3 安全卸载辅助：卸载残留隔离清理（SPEC §6.7，[DESTRUCTIVE]，契约加性）
+
+- **契约加性（双端同步 + 记此日志）**：新增命令 `uninstall_residue_scan() → ResidueCandidate[]`（无参数；消费后端最近卸载上下文）与 `uninstall_residue_clean(ResidueCleanParams) → txId:string`（复用 clean_progress/clean_done/clean_cancel）；新增类型 `ResidueCandidate{id,kind(install_dir/start_menu/app_data),appName,rootPath,reason,sizeBytes,fileCount,items:ScanItem[]}`、`ResidueSelectionParams{candidateId,disposition}`、`ResidueCleanParams{selections,confirmToken?}`；`UninstallDoneEvent` 加性补 `installLocation?`（不破坏既有字段）。ipc.ts↔contract.rs↔api/mocks 同步。
+- **残留枚举（只读，`uninstall/residue.rs`）**：仅在 `state.last_uninstall`（R27-2 removed/reboot_pending 写入）上下文内扫描三源——①注册表 InstallLocation 安装目录（外部值走严格安全闸）；②开始菜单 Programs×2 的产品程序组/厂商\产品两层/散落 .lnk（深度 2，组内必须确有产品名快捷方式才收，绝不整收厂商组）；③AppData Local/Roaming/LocalLow 精确产品目录（厂商目录只收名下匹配产品的子目录）。名称归一纯函数（去版本/架构括号、.lnk/.exe 后缀、法人后缀）+ **只精确匹配不做模糊包含**；通用产品名/共享目录段双拒绝名单；reparse 子树整组放弃；单组 2 万文件/10GiB 上限防爆。
+- **去向用户可选**：每组二选一，隔离区（默认 🟡/quarantine，14 天可还原）/ 直接删除（🔴 direct 永久，含任一项须专家模式一次性令牌）；不提供回收站档；同批可混用。清理复用 cleaner::execute 全套（journal 两阶段/审计 op=clean category=residue.uninstall/preflight TOCTOU/隔离区同盘 rename/取消/失败不中断）；文件移走后 `RemoveDirectoryW` 自底向上只删**空**目录（含空目录候选；非空必然失败不递归）。
+- **白名单分层（SAFETY §2.2 R27-3 条款，架构性变更）**：常量根拆**硬根**（SystemRoot/自身设施 + 既有引导卷/卷关键文件/隔离哨兵/XML 声明根，永不豁免）与**程序目录软根**（ProgramFiles*/ProgramData\Microsoft，仅可被后端快照签发的精确 authorized_root 在 preflight 豁免）；`is_whitelisted` 对外行为不变，新增 `is_hard_protected`/`is_soft_program_root`/`is_within` 与 pub(crate) `normalize_segments`；CleanTarget 加性字段 `authorized_root:Option<PathBuf>`（普通清理恒 None）；restore 仅放行 residue.uninstall manifest 还原回软根（硬根/sha256/root 内/reparse/冲突不覆盖全部保留）。
+- **状态与信任链**：AppState 新增 `last_uninstall`/`residue_snapshot`；clean 候选 id 必须出自快照（前端无法伪造路径/扩大授权根），快照一次性消费、重扫/新卸载即失效；守卫跳过的组快照放回并返回错误。
+- **前端**：Apps 页结果态新增"扫描卸载残留"→ 残留四态（扫描中/清单逐项勾选+理由+根路径+每组去向单选/进度/结果）；direct 选择复用 ConfirmTokenModal（专家令牌）；residueModel 纯函数 7 例；mock 三源有状态样本。
+- **边界**：不做无上下文全局孤儿扫描；不碰 UWP/驱动/服务；本批不新增任何独立删除路径（直删走既有 DeleteFileW 通道且受 preflight+token 双闸）；测试钩子 `quarantine::set_quarantine_root_override`（仅测试构建注入，生产无调用）。评审 `docs/review/R27-3.md`。
+- **验证**：cargo fmt/clippy --all-targets -D warnings 全绿；uninstall 模块 40 例全绿（residue.rs 16 例：名称归一/发布者/精确匹配/双闸安全/三源枚举/junction 放弃/快照信任/空目录收尾；preflight 新增授权分层 1 例；其余为 R27-1/2 既有 24 例，全库 195 lib）+27 集成（新增 residue_pipeline 3 例：quarantine 移入→manifest→空目录收尾→还原重建目录链 roundtrip、direct 永久删除+审计、空目录候选）；pnpm typecheck/vitest(71)/build 全绿。

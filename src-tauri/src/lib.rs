@@ -107,6 +107,8 @@ pub fn run() {
             ipc::commands::uninstall_list,
             ipc::commands::uninstall_run,
             ipc::commands::uninstall_cancel,
+            ipc::commands::uninstall_residue_scan,
+            ipc::commands::uninstall_residue_clean,
             ipc::commands::startup_toggle,
             ipc::commands::log_query,
             ipc::commands::log_export,

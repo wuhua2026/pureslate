@@ -100,6 +100,20 @@ export const uninstall_cancel = (txId: string) =>
     ? mockCommands.uninstall_cancel(txId)
     : invokeApp<boolean>("uninstall_cancel", { txId });
 
+/** R27-3：扫描最近一次卸载的残留（只读三源枚举）。 */
+export const uninstall_residue_scan = () =>
+  useMock()
+    ? mockCommands.uninstall_residue_scan()
+    : invokeApp<import("../types/ipc").ResidueCandidate[]>("uninstall_residue_scan");
+
+/** R27-3：执行残留清理（去向 quarantine/direct；direct 需专家令牌）。 */
+export const uninstall_residue_clean = (
+  params: import("../types/ipc").ResidueCleanParams,
+) =>
+  useMock()
+    ? mockCommands.uninstall_residue_clean(params)
+    : invokeApp<string>("uninstall_residue_clean", { params });
+
 export const startup_toggle = (params: { id: string; enabled: boolean }) =>
   useMock()
     ? mockCommands.startup_toggle(params)

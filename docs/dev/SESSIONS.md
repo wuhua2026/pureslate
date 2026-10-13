@@ -5,6 +5,15 @@
 > 维护（AGENTS.md §9）：任务完成时 agent 自动追加/更新当前会话条目，随任务同一提交。格式：`## YYYY-MM-DD | 主题`。
 > 本初版由历史会话记忆回溯整理（截至 2026-09-29），细节以 git 历史与 TASKS.md 为准。
 
+## 2026-10-13 | R27-3 卸载残留隔离清理交付（[DESTRUCTIVE]；去向可选；白名单硬/软分层开精确口子）
+
+- **需求增量**：用户要求删除去向可选（直接删/进隔离区）。设计落点：每组二选一，隔离区默认（14 天可还原），direct=🔴 语义须专家模式+一次性令牌（复用 I-2 confirm token），不提供回收站档。
+- **核心矛盾与解法**：残留安装目录在 SAFETY §2.2 程序目录白名单内（"永不入候选"）。没有模糊放行，而是白名单常量根拆**硬根**（SystemRoot/引导卷/卷关键文件/隔离哨兵/自身设施/XML 声明，永不豁免）与**软根**（ProgramFiles*/ProgramData\Microsoft，仅可被后端快照签发的精确 authorized_root 在 preflight 豁免）；restore 同口径只对 category=residue.uninstall 开口。六重前提写入 SAFETY §2.2 条款。
+- **做了什么**：`uninstall/residue.rs`（~1470 行）纯函数名称归一（精确匹配无模糊）+ 双安全闸（注册表外部值严格/枚举器自构根防御）+ 三源枚举（安装目录/开始菜单×2 程序组厂商两层/AppData×3，厂商目录绝不整收）+ reparse 子树整组放弃 + 2万文件10GiB 防爆；prepare_targets 快照信任（前端无法伪造路径）+组级 guard；RemoveDirectoryW 只删空目录收尾（新增唯一 OS 删除原语，非空必然失败）；state 加 last_uninstall/residue_snapshot（一次性消费）；契约加性 scan/clean 两命令复用 clean 事件；Apps.vue 残留四态+去向单选+token；residue_pipeline.rs 3 个端到端（含隔离→目录删净→还原重建目录链 roundtrip）；为集成测试给 quarantine_root_of 加生产无调用的注入钩子。
+- **关键结论**：①给"永不删除"的白名单开口，评审重心是证明开口的**不可滥用性**——信任锚必须在后端（上下文+快照+精确根），前端只传 id；②目录残留与既有"只收文件"隔离区的衔接：文件走完既有事务，目录删除独立为 RemoveDirectoryW 空目录语义（Win32 替你保证不递归），还原端 create_dir_all 天然重建目录链；③误报防护靠"只精确匹配 + 双拒绝名单 + 高置信结构（厂商组必须内含产品链接）"，宁漏勿错，默认隔离区是最终安全网；④残留启发式（厂商法人后缀/开始菜单两层）真机命中率未知，明确挂人类真机校准，不假装自动化能覆盖。
+- **验证**：cargo fmt/clippy --all-targets -D warnings 全绿；195 lib（uninstall 40 例）+27 集成（+3）；pnpm typecheck/vitest(71)/build 全绿。评审 docs/review/R27-3.md。
+- **下一步**：真机走查 Inno/NSIS/MSI 卸载后三源命中率与误报、隔离区还原回 Program Files、direct token 拒绝；通过后 R27 批次随 v0.1.6 发布。
+
 ## 2026-10-13 | R27-2 卸载执行编排交付（[DESTRUCTIVE] 评审关卡；零自删的"破坏外移"任务）
 
 - **做了什么**：`uninstall/runner.rs` 新文件——纯函数层（`split_exe_args` 命令行拆分/`expand_descendants` PPID 树闭包/`pending_covers` 待重启匹配/`classify`）+ FFI 薄层（CreateProcessW SW_SHOWNORMAL 拉起交互卸载器，740→ShellExecuteExW runas 标准 UAC 兜底；Toolhelp 进程树等待 250ms 轮询，深度 16+seen 跨轮持久+环防护，WAIT_ROUNDS=480≈120s 上限；PendingFileRenameOperations REG_MULTI_SZ 只读解析与归一化前缀匹配）；mod.rs `run_app_uninstall` 编排（重扫定位→审计 start→拉起→等树→三层判据→审计终态）；契约双端 `uninstall_run`/`uninstall_cancel`+progress/done 事件四端镜像；state 单实例事务表；Apps.vue 三态（确认面板三条边界明示/进度+停止等待不强杀/六结果语气）；mock 有状态+同构事件流；appsModel canUninstall/uninstallResultMeta；评审文档 docs/review/R27-2.md。

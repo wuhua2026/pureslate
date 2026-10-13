@@ -1,5 +1,6 @@
 //! 安全卸载辅助（R27 · SPEC §6.7）。
 
+pub mod residue;
 pub mod runner;
 
 use sha2::{Digest, Sha256};
@@ -240,6 +241,8 @@ pub fn list_apps() -> Vec<InstalledApp> {
 pub struct RunOutcome {
     pub app_id: String,
     pub name: String,
+    /// R27-3：发布者（残留快照名称匹配需要）。
+    pub publisher: Option<String>,
     pub kind: OutcomeKind,
     /// 卸载器主进程退出码（非 0 仅作警告；成功判据以事后重扫为准）。
     pub exit_code: Option<u32>,
@@ -247,6 +250,8 @@ pub struct RunOutcome {
     pub key_still_present: bool,
     /// 安装目录事后是否仍在（None=注册表里没有 InstallLocation）。
     pub install_location_still_present: Option<bool>,
+    /// R27-3：登记的安装目录原值（供残留扫描；None=未登记）。
+    pub install_location: Option<String>,
     /// 目标路径已进 PendingFileRenameOperations（重启后完成）。
     pub reboot_pending: bool,
     /// 最终展示文案。
@@ -295,10 +300,12 @@ pub fn run_app_uninstall<F: FnMut(&str)>(
         let out = RunOutcome {
             app_id: app.id.clone(),
             name: app.name.clone(),
+            publisher: app.publisher.clone(),
             kind: OutcomeKind::Cancelled,
             exit_code,
             key_still_present: true,
             install_location_still_present: None,
+            install_location: app.install_location.clone(),
             reboot_pending: false,
             detail: "已停止等待；官方卸载器可能仍在运行，请在其窗口内完成或取消".into(),
         };
@@ -364,10 +371,12 @@ pub fn run_app_uninstall<F: FnMut(&str)>(
     Ok(RunOutcome {
         app_id: app.id,
         name: app.name,
+        publisher: app.publisher,
         kind,
         exit_code,
         key_still_present,
         install_location_still_present,
+        install_location: app.install_location,
         reboot_pending,
         detail,
     })

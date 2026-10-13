@@ -79,11 +79,17 @@ pub fn restore_one(root: &Path, entry: &ManifestEntry) -> RestoreOutcome {
         Err(e) => return RestoreOutcome::Failed(format!("读取隔离文件失败: {e}")),
     }
     let orig = PathBuf::from(&entry.original_path);
-    // T-2 ③：还原目标不得落白名单禁区。
-    // H1（v0.1.4）语义说明：is_whitelisted 已不含 §2.4 用户核心目录（H1 拆出）——
-    // 还原到 Documents 等是**恢复用户数据**而非删除，本就应放行；系统目录等
-    // 白名单根仍拦截（防伪造 manifest 写特权目录）。
-    if crate::safety::whitelist::is_whitelisted(&orig) {
+    // T-2 ③：还原目标不得落白名单禁区。R27-3 分层（SAFETY §2.2 条款）：
+    // - 硬保护（系统/引导/SystemRoot/隔离哨兵/XML 声明根）：任何类目一律拒绝；
+    // - §2.2 程序目录软根：仅 residue.uninstall 类目的 manifest 可豁免（文件本就
+    //   从那里被精确授权移入）；冲突不覆盖语义（下方 orig.exists()→conflict）仍在，
+    //   且 sha256/root 内/reparse 校验全部保留——不构成对既有文件的覆盖写。
+    // H1 说明：is_soft 之外的 §2.4 用户核心目录本不在 is_whitelisted 内
+    // （还原是恢复用户数据，非删除），无需开口。
+    let hard = crate::safety::whitelist::is_hard_protected(&orig);
+    let soft_blocked = crate::safety::whitelist::is_soft_program_root(&orig)
+        && entry.category_id != crate::cleaner::RESIDUE_CATEGORY_ID;
+    if hard || soft_blocked {
         return RestoreOutcome::Failed(format!(
             "还原目标位于安全白名单禁区，拒绝: {}",
             orig.to_string_lossy()

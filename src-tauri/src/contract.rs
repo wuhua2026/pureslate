@@ -261,6 +261,28 @@ pub struct UninstallDoneEvent {
     pub install_location_still_present: Option<bool>,
     pub reboot_pending: bool,
     pub detail: String,
+    /// R27-3 加性：登记的安装目录（供结果页"扫描残留"展示与后端快照同源核对）。
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub install_location: Option<String>,
+}
+
+// ---- R27-3 卸载残留（SPEC §6.7） ----
+/// `uninstall_residue_clean` 的单项选择（候选组 id + 用户选择的去向）。
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ResidueSelectionParams {
+    pub candidate_id: String,
+    /// 仅接受 "quarantine"（默认，可还原）/ "direct"（永久删除，需专家 token）。
+    pub disposition: Disposition,
+}
+
+/// `uninstall_residue_clean` 入参；含任一 direct 选择时必须消费一次性专家令牌。
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ResidueCleanParams {
+    pub selections: Vec<ResidueSelectionParams>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub confirm_token: Option<String>,
 }
 
 // ---- 更新 ----

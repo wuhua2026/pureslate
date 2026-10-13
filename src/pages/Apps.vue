@@ -1,14 +1,19 @@
 <script setup lang="ts">
 /**
  * 软件卸载页（R27 · SPEC §6.7）。
- * R27-1：只读列表；R27-2：卸载执行三态（确认 → 进度 → 结果）。
- * 边界：破坏性删除主体是第三方官方卸载器（其删除不进本应用 journal/隔离区），
- * 本页只做拉起/等待/事后核对；取消仅停止等待，不强杀进程。
- * 残留隔离清理在 R27-3 接入既有管线。
+ * R27-1：只读列表；R27-2：卸载执行三态（确认 → 进度 → 结果）；
+ * R27-3：卸载后残留扫描与清理（隔离区默认可还原 / 直接删除需专家令牌）。
+ * 边界：第三方官方卸载器是删除主体；残留删除复用 cleaner 事务（journal/审计/隔离区）。
  */
-import { computed, onBeforeUnmount, onMounted, ref } from "vue";
+import { computed, onBeforeUnmount, onMounted, reactive, ref } from "vue";
 import { commands, events, isMockMode } from "../api";
-import type { InstalledApp, UninstallDoneEvent } from "../types/ipc";
+import type {
+  CleanDoneEvent,
+  InstalledApp,
+  ResidueCandidate,
+  UninstallDoneEvent,
+} from "../types/ipc";
+import ConfirmTokenModal from "../components/ConfirmTokenModal.vue";
 import {
   canUninstall,
   filterApps,
@@ -18,8 +23,19 @@ import {
   summarizeApps,
   uninstallResultMeta,
 } from "./appsModel";
+import {
+  buildSelections,
+  initialRowState,
+  kindLabel,
+  rootTail,
+  summarize,
+  toggleAll,
+  type DispositionChoice,
+  type ResidueRowState,
+} from "./residueModel";
 
 type View = "list" | "confirm" | "running" | "done";
+type ResidueView = "none" | "loading" | "list" | "running" | "result";
 
 const apps = ref<InstalledApp[]>([]);
 const loading = ref(true);
@@ -32,12 +48,31 @@ const txId = ref("");
 const message = ref("");
 const done = ref<UninstallDoneEvent | null>(null);
 
+// ---- R27-3 残留 ----
+const residueView = ref<ResidueView>("none");
+const candidates = ref<ResidueCandidate[]>([]);
+const rowState = reactive(new Map<string, ResidueRowState>());
+const residueError = ref("");
+const tokenModalOpen = ref(false);
+const cleanProgressMsg = ref("");
+const cleanDone = ref<CleanDoneEvent | null>(null);
+const cleanTxId = ref("");
+
 const visible = computed(() => filterApps(apps.value, query.value));
 const summary = computed(() => summarizeApps(apps.value));
 const resultMeta = computed(() =>
   done.value ? uninstallResultMeta(done.value.result) : null,
 );
-const busy = computed(() => view.value === "confirm" || view.value === "running");
+const residueSummary = computed(() => summarize(candidates.value, rowState));
+const allChecked = computed(
+  () => candidates.value.length > 0 && residueSummary.value.selected === candidates.value.length,
+);
+/** 卸载成功/待重启后才允许扫描残留（其他结论不提供入口）。 */
+const canScanResidue = computed(
+  () =>
+    done.value !== null &&
+    (done.value.result === "removed" || done.value.result === "reboot_pending"),
+);
 
 let unlistenFns: Array<() => void> = [];
 const mockTimers: number[] = [];
@@ -60,7 +95,7 @@ onBeforeUnmount(() => {
   teardownRun();
 });
 
-// ---- 确认态 ----
+// ---- 卸载确认/执行（R27-2） ----
 function askUninstall(app: InstalledApp): void {
   target.value = app;
   done.value = null;
@@ -69,13 +104,13 @@ function askUninstall(app: InstalledApp): void {
 
 function backToList(): void {
   view.value = "list";
+  residueView.value = "none";
   target.value = null;
   done.value = null;
   txId.value = "";
   message.value = "";
 }
 
-// ---- 执行态 ----
 async function confirmRun(): Promise<void> {
   const app = target.value;
   if (!app) return;
@@ -91,7 +126,6 @@ async function confirmRun(): Promise<void> {
   }
 }
 
-/** 真实模式：订阅事件（竞态窗口采纳首帧 txId）→ uninstall_run。 */
 async function runReal(app: InstalledApp): Promise<void> {
   unlistenFns.push(
     await events.onUninstallProgress((p) => {
@@ -122,7 +156,6 @@ async function runReal(app: InstalledApp): Promise<void> {
   }
 }
 
-/** mock 模式：定时器模拟官方卸载器阶段（事件流形态与真实内核一致）。 */
 async function runMock(app: InstalledApp): Promise<void> {
   let id: string;
   try {
@@ -146,27 +179,25 @@ async function runMock(app: InstalledApp): Promise<void> {
     [1900, "正在核对卸载结果…"],
   ];
   for (const [delay, msg] of phases) {
-    const t = window.setTimeout(() => {
-      message.value = msg;
-    }, delay);
-    mockTimers.push(t);
+    mockTimers.push(window.setTimeout(() => (message.value = msg), delay));
   }
-  const t = window.setTimeout(() => {
-    apps.value = apps.value.filter((a) => a.id !== app.id);
-    finishDone({
-      txId: id,
-      appId: app.id,
-      name: app.name,
-      result: "removed",
-      keyStillPresent: false,
-      rebootPending: false,
-      detail: "程序已卸载（mock 模拟）",
-    });
-  }, 2400);
-  mockTimers.push(t);
+  mockTimers.push(
+    window.setTimeout(() => {
+      apps.value = apps.value.filter((a) => a.id !== app.id);
+      finishDone({
+        txId: id,
+        appId: app.id,
+        name: app.name,
+        result: "removed",
+        keyStillPresent: false,
+        rebootPending: false,
+        detail: "程序已卸载（mock 模拟）",
+        installLocation: app.installLocation,
+      });
+    }, 2400),
+  );
 }
 
-/** 停止等待：仅通知内核取消等待，不强杀卸载器（SPEC §6.7）。 */
 async function cancelWait(): Promise<void> {
   if (txId.value) await commands.uninstall_cancel(txId.value);
   if (isMockMode()) {
@@ -181,14 +212,12 @@ async function cancelWait(): Promise<void> {
       detail: "已停止等待；官方卸载器可能仍在运行，请在其窗口内完成或取消",
     });
   }
-  // 真实模式：done(cancelled) 事件由内核推送，这里不本地造结论。
 }
 
 function finishDone(e: UninstallDoneEvent): void {
   done.value = e;
   view.value = "done";
   teardownRun();
-  // removed/reboot_pending 后内核侧列表已变；真实模式后台刷新一次列表供返回时展示。
   if (!isMockMode() && (e.result === "removed" || e.result === "reboot_pending")) {
     void commands.uninstall_list().then((list) => {
       apps.value = list;
@@ -199,6 +228,137 @@ function finishDone(e: UninstallDoneEvent): void {
 function teardownRun(): void {
   for (const t of mockTimers.splice(0)) window.clearTimeout(t);
   for (const fn of unlistenFns.splice(0)) fn();
+}
+
+// ---- R27-3 残留扫描 ----
+async function scanResidue(): Promise<void> {
+  residueView.value = "loading";
+  residueError.value = "";
+  candidates.value = [];
+  rowState.clear();
+  try {
+    candidates.value = await commands.uninstall_residue_scan();
+    const init = initialRowState(candidates.value);
+    init.forEach((v, k) => rowState.set(k, v));
+    residueView.value = "list";
+  } catch (e) {
+    residueError.value = String(e);
+    residueView.value = "list";
+  }
+}
+
+function setChecked(id: string, checked: boolean): void {
+  const cur = rowState.get(id);
+  if (cur) rowState.set(id, { ...cur, checked });
+}
+
+function setDisposition(id: string, disposition: DispositionChoice): void {
+  const cur = rowState.get(id);
+  if (cur) rowState.set(id, { ...cur, disposition });
+}
+
+function onToggleAll(e: Event): void {
+  const checked = (e.target as HTMLInputElement).checked;
+  const next = toggleAll(rowState, candidates.value, checked);
+  rowState.clear();
+  next.forEach((v, k) => rowState.set(k, v));
+}
+
+// ---- R27-3 残留清理 ----
+function askClean(): void {
+  if (residueSummary.value.selected === 0) return;
+  if (residueSummary.value.needsToken) {
+    tokenModalOpen.value = true; // 🔴 永久删除：专家模式一次性令牌
+  } else {
+    void runClean(undefined);
+  }
+}
+
+async function onTokenConfirm(token: string): Promise<void> {
+  tokenModalOpen.value = false;
+  await runClean(token);
+}
+
+async function runClean(confirmToken: string | undefined): Promise<void> {
+  residueView.value = "running";
+  cleanDone.value = null;
+  cleanProgressMsg.value = "正在准备残留清理…";
+  cleanTxId.value = "";
+  const params = {
+    selections: buildSelections(rowState),
+    ...(confirmToken ? { confirmToken } : {}),
+  };
+
+  if (isMockMode()) {
+    await runCleanMock(params);
+    return;
+  }
+
+  unlistenFns.push(
+    await events.onCleanProgress((p) => {
+      if (!cleanTxId.value) cleanTxId.value = p.txId;
+      if (p.txId !== cleanTxId.value) return;
+      cleanProgressMsg.value = p.itemPath;
+    }),
+  );
+  unlistenFns.push(
+    await events.onCleanDone((r) => {
+      if (!cleanTxId.value) cleanTxId.value = r.txId;
+      if (r.txId !== cleanTxId.value) return;
+      cleanDone.value = r;
+      residueView.value = "result";
+      teardownRun();
+    }),
+  );
+  try {
+    cleanTxId.value = await commands.uninstall_residue_clean(params);
+  } catch (e) {
+    residueError.value = String(e);
+    residueView.value = "list";
+    teardownRun();
+  }
+}
+
+async function runCleanMock(params: {
+  selections: ReturnType<typeof buildSelections>;
+}): Promise<void> {
+  cleanTxId.value = "residue-mock";
+  const total = params.selections.length;
+  params.selections.forEach((_s, i) => {
+    mockTimers.push(
+      window.setTimeout(() => {
+        cleanProgressMsg.value = `正在清理残留（${i + 1}/${total}）…`;
+      }, 300 + i * 400),
+    );
+  });
+  mockTimers.push(
+    window.setTimeout(
+      () => {
+        cleanDone.value = {
+          txId: cleanTxId.value,
+          total,
+          ok: total,
+          fail: 0,
+          skip: 0,
+        };
+        residueView.value = "result";
+      },
+      400 + total * 400,
+    ),
+  );
+}
+
+async function cancelClean(): Promise<void> {
+  if (cleanTxId.value && !isMockMode()) {
+    await commands.clean_cancel(cleanTxId.value);
+  }
+  for (const t of mockTimers.splice(0)) window.clearTimeout(t);
+  residueView.value = "list";
+}
+
+/** 清理后重新扫描（看还剩什么）。 */
+async function rescanAfterClean(): Promise<void> {
+  await scanResidue();
 }
 </script>
 
@@ -216,7 +376,126 @@ function teardownRun(): void {
     <div v-if="loading" class="state">加载中…</div>
     <div v-else-if="error" class="state err">加载失败：{{ error }}</div>
 
-    <!-- 确认面板 -->
+    <!-- R27-3 残留视图（覆盖列表/卸载面板） -->
+    <template v-else-if="residueView !== 'none'">
+      <div class="res-head">
+        <button class="btn ghost small" @click="residueView = 'none'">← 返回卸载结果</button>
+        <h2>卸载残留清理{{ done ? `：${done.name}` : "" }}</h2>
+        <p class="muted small">
+          仅扫描<strong>本次卸载</strong>的残留（安装目录 / 开始菜单 / AppData），不做全盘孤儿扫描；
+          每项均给出判定理由，请逐项核对。
+        </p>
+      </div>
+
+      <div v-if="residueView === 'loading'" class="state">
+        <div class="spin"></div>正在扫描残留…
+      </div>
+
+      <template v-else-if="residueView === 'list'">
+        <div v-if="residueError" class="state err">{{ residueError }}</div>
+        <div v-else-if="candidates.length === 0" class="state">
+          未发现残留——官方卸载器清理得很干净。
+          <div class="res-actions">
+            <button class="btn primary" @click="backToList">完成</button>
+          </div>
+        </div>
+
+        <template v-else>
+          <div class="res-toolbar">
+            <label class="checkall">
+              <input type="checkbox" :checked="allChecked" @change="onToggleAll" />
+              全选
+            </label>
+            <span class="muted small">
+              已选 {{ residueSummary.selected }}/{{ residueSummary.total }} 项 ·
+              隔离 {{ residueSummary.quarantineCount }} · 直删
+              {{ residueSummary.directCount }}
+            </span>
+          </div>
+
+          <div
+            v-for="c in candidates"
+            :key="c.id"
+            class="res-card"
+            :class="{ off: !rowState.get(c.id)?.checked }"
+          >
+            <div class="res-card-head">
+              <label class="res-check">
+                <input
+                  type="checkbox"
+                  :checked="rowState.get(c.id)?.checked ?? false"
+                  @change="(e) => setChecked(c.id, (e.target as HTMLInputElement).checked)"
+                />
+                <span class="badge kind">{{ kindLabel(c.kind) }}</span>
+                <strong :title="c.rootPath">{{ rootTail(c.rootPath) }}</strong>
+              </label>
+              <span class="res-meta">{{ c.fileCount }} 个文件 · {{ formatSize(c.sizeBytes) }}</span>
+            </div>
+            <p class="res-reason">判定理由：{{ c.reason }}</p>
+            <p class="res-path muted small" :title="c.rootPath">{{ c.rootPath }}</p>
+            <div class="res-choice">
+              <label :class="{ active: rowState.get(c.id)?.disposition === 'quarantine' }">
+                <input
+                  type="radio"
+                  :name="`disp-${c.id}`"
+                  value="quarantine"
+                  :checked="rowState.get(c.id)?.disposition === 'quarantine'"
+                  @change="setDisposition(c.id, 'quarantine')"
+                />
+                移入隔离区（14 天可还原，推荐）
+              </label>
+              <label :class="{ active: rowState.get(c.id)?.disposition === 'direct' }">
+                <input
+                  type="radio"
+                  :name="`disp-${c.id}`"
+                  value="direct"
+                  :checked="rowState.get(c.id)?.disposition === 'direct'"
+                  @change="setDisposition(c.id, 'direct')"
+                />
+                <span class="direct-text">直接删除（永久不可还原）</span>
+              </label>
+            </div>
+          </div>
+
+          <div class="res-actions">
+            <button class="btn ghost" @click="residueView = 'none'">取消</button>
+            <button class="btn primary" :disabled="residueSummary.selected === 0" @click="askClean">
+              清理所选（{{ residueSummary.selected }}）
+            </button>
+          </div>
+          <p v-if="residueSummary.needsToken" class="muted small token-hint">
+            含"直接删除"项：执行时需要专家模式下的一次性确认令牌。
+          </p>
+        </template>
+      </template>
+
+      <!-- 清理进度 -->
+      <div v-else-if="residueView === 'running'" class="panel">
+        <div class="spin"></div>
+        <p class="phase">正在清理残留…</p>
+        <p class="muted small path-ellipsis" :title="cleanProgressMsg">{{ cleanProgressMsg }}</p>
+        <div class="actions">
+          <button class="btn ghost" @click="cancelClean">取消</button>
+        </div>
+      </div>
+
+      <!-- 清理结果 -->
+      <div v-else-if="residueView === 'result' && cleanDone" class="panel">
+        <h2 :class="['result-title', cleanDone.fail > 0 ? 'warn' : 'ok']">
+          {{ cleanDone.fail > 0 ? "部分完成" : "清理完成" }}
+        </h2>
+        <p class="detail">
+          共 {{ cleanDone.total }} 项：成功 {{ cleanDone.ok }} · 失败 {{ cleanDone.fail }} ·
+          跳过 {{ cleanDone.skip }}。移入隔离区的内容可在"隔离区"页面 14 天内还原。
+        </p>
+        <div class="actions">
+          <button class="btn ghost" @click="rescanAfterClean">再扫一次</button>
+          <button class="btn primary" @click="backToList">返回列表</button>
+        </div>
+      </div>
+    </template>
+
+    <!-- 卸载确认面板 -->
     <div v-else-if="view === 'confirm' && target" class="panel">
       <h2>确认卸载</h2>
       <div class="target">
@@ -232,15 +511,15 @@ function teardownRun(): void {
         <li>本应用只负责拉起、等待与结果核对，<strong>不会强制结束任何进程</strong>。</li>
       </ul>
       <div class="actions">
-        <button class="btn ghost" :disabled="busy" @click="backToList">取消</button>
+        <button class="btn ghost" @click="backToList">取消</button>
         <button class="btn danger" @click="confirmRun">我已了解，调起官方卸载器</button>
       </div>
     </div>
 
-    <!-- 进度面板 -->
+    <!-- 卸载进度面板 -->
     <div v-else-if="view === 'running'" class="panel">
       <h2>正在卸载{{ target ? `：${target.name}` : "" }}</h2>
-      <div class="spin" aria-hidden="true"></div>
+      <div class="spin"></div>
       <p class="phase">{{ message || "准备中…" }}</p>
       <p class="muted small">
         请在官方卸载器窗口中完成操作；停止等待不会关闭卸载器，也不会强制结束其进程。
@@ -250,7 +529,7 @@ function teardownRun(): void {
       </div>
     </div>
 
-    <!-- 结果面板 -->
+    <!-- 卸载结果面板 -->
     <div v-else-if="view === 'done' && done && resultMeta" class="panel">
       <h2 :class="['result-title', resultMeta.tone]">{{ resultMeta.title }}</h2>
       <p class="detail">{{ done.detail }}</p>
@@ -262,11 +541,14 @@ function teardownRun(): void {
       </ul>
       <p v-if="done.result === 'reboot_pending'" class="muted small">重启电脑后卸载才会最终完成。</p>
       <div class="actions">
-        <button class="btn primary" @click="backToList">返回列表</button>
+        <button v-if="canScanResidue" class="btn primary" @click="scanResidue">
+          扫描卸载残留
+        </button>
+        <button class="btn ghost" @click="backToList">返回列表</button>
       </div>
     </div>
 
-    <!-- 列表 -->
+    <!-- 程序列表 -->
     <template v-else>
       <div class="toolbar">
         <input v-model="query" class="search" type="search" placeholder="搜索程序名/发布者/版本…" />
@@ -317,6 +599,8 @@ function teardownRun(): void {
         安全说明：本应用不替代系统"应用和功能"；不会强杀进程，不处理 UWP 应用与系统组件。
       </p>
     </template>
+
+    <ConfirmTokenModal v-model="tokenModalOpen" :has-red="true" @confirm="onTokenConfirm" />
   </section>
 </template>
 
@@ -339,6 +623,10 @@ function teardownRun(): void {
   padding: 32px 0;
   text-align: center;
   color: var(--text-2, #5a6472);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
 }
 .state.err {
   color: var(--grade-red, #c4382e);
@@ -431,6 +719,10 @@ function teardownRun(): void {
   cursor: not-allowed;
   opacity: 0.55;
 }
+.btn.small {
+  padding: 3px 10px;
+  font-size: 0.76rem;
+}
 .btn.ghost {
   background: var(--surface, #fff);
 }
@@ -450,7 +742,7 @@ function teardownRun(): void {
   color: var(--text-2, #5a6472);
 }
 
-/* 执行三态面板 */
+/* 面板（确认/进度/结果） */
 .panel {
   background: var(--surface, #fff);
   border: 1px solid var(--border, #e4e7ec);
@@ -483,10 +775,14 @@ function teardownRun(): void {
   line-height: 1.7;
   color: var(--text, #1f2430);
 }
-.actions {
+.actions,
+.res-actions {
   display: flex;
   justify-content: flex-end;
   gap: 10px;
+}
+.res-actions {
+  margin-top: 16px;
 }
 .spin {
   width: 30px;
@@ -495,7 +791,7 @@ function teardownRun(): void {
   border-top-color: #1a56db;
   border-radius: 50%;
   animation: ps-spin 0.8s linear infinite;
-  margin: 6px 0 12px;
+  margin: 6px auto 12px;
 }
 @keyframes ps-spin {
   to {
@@ -505,6 +801,7 @@ function teardownRun(): void {
 .phase {
   margin: 0 0 8px;
   font-size: 0.92rem;
+  text-align: center;
 }
 .detail {
   margin: 0 0 12px;
@@ -542,5 +839,109 @@ function teardownRun(): void {
 }
 .result-title.err {
   color: #c4382e;
+}
+
+/* R27-3 残留 */
+.res-head {
+  margin-bottom: 14px;
+}
+.res-head h2 {
+  margin: 8px 0 4px;
+  font-size: 1.1rem;
+}
+.res-head .small {
+  margin: 0;
+}
+.res-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  margin-bottom: 12px;
+  font-size: 0.82rem;
+}
+.checkall {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-weight: 600;
+}
+.res-card {
+  background: var(--surface, #fff);
+  border: 1px solid var(--border, #e4e7ec);
+  border-radius: 10px;
+  padding: 12px 14px;
+  margin-bottom: 10px;
+}
+.res-card.off {
+  opacity: 0.55;
+}
+.res-card-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 10px;
+}
+.res-check {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+.res-check strong {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.res-meta {
+  font-size: 0.76rem;
+  color: var(--text-2, #5a6472);
+  white-space: nowrap;
+}
+.badge.kind {
+  margin-left: 0;
+  background: #eef2ff;
+  color: #1a56db;
+  padding: 1px 8px;
+}
+.res-reason {
+  margin: 8px 0 2px;
+  font-size: 0.83rem;
+}
+.res-path {
+  margin: 0 0 8px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.res-choice {
+  display: flex;
+  gap: 18px;
+  font-size: 0.82rem;
+  padding-top: 6px;
+  border-top: 1px dashed var(--border, #e4e7ec);
+}
+.res-choice label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  cursor: pointer;
+}
+.res-choice label.active {
+  font-weight: 600;
+}
+.direct-text {
+  color: #c4382e;
+}
+.token-hint {
+  margin-top: 8px;
+  text-align: right;
+}
+.path-ellipsis {
+  text-align: center;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 560px;
+  margin: 0 auto;
 }
 </style>

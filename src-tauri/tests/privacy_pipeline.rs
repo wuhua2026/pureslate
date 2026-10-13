@@ -229,6 +229,7 @@ fn guard_running_blocks_whole_privacy_category() {
             size_bytes: 11,
             guard_processes: vec![own_exe],
             mtime_ms: None,
+            authorized_root: None,
         },
         CleanTarget {
             path: h2.clone(),
@@ -238,6 +239,7 @@ fn guard_running_blocks_whole_privacy_category() {
             size_bytes: 3,
             guard_processes: vec!["msedge.exe".into()],
             mtime_ms: None,
+            authorized_root: None,
         },
     ];
 

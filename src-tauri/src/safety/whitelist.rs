@@ -15,10 +15,16 @@ use quick_xml::Reader;
 
 use crate::contract::Disposition;
 
-/// 白名单根路径集合（常量部分）。由系统相关环境变量在首次使用时展开一次并缓存。
-fn const_roots() -> &'static Vec<PathBuf> {
+/// 硬根（永不豁免）：§2.1 SystemRoot；§2.6 自身设施 %LOCALAPPDATA%\PureSlate。
+fn hard_roots() -> &'static Vec<PathBuf> {
     static INSTANCE: OnceLock<Vec<PathBuf>> = OnceLock::new();
-    INSTANCE.get_or_init(collect_roots)
+    INSTANCE.get_or_init(collect_hard_roots)
+}
+
+/// §2.2 程序目录软根（R27-3 残留授权可精确豁免，其余路径全拦）。
+fn soft_roots() -> &'static Vec<PathBuf> {
+    static INSTANCE: OnceLock<Vec<PathBuf>> = OnceLock::new();
+    INSTANCE.get_or_init(collect_soft_roots)
 }
 
 fn env(name: &str) -> Option<PathBuf> {
@@ -28,13 +34,26 @@ fn env(name: &str) -> Option<PathBuf> {
         .map(PathBuf::from)
 }
 
-/// 收集路径级白名单根。
-fn collect_roots() -> Vec<PathBuf> {
+/// 收集硬根（系统目录 + 自身设施）。
+fn collect_hard_roots() -> Vec<PathBuf> {
     let mut v: Vec<PathBuf> = Vec::new();
     // §2.1 系统目录（C:\Windows）及其子目录。
     if let Some(root) = env("SystemRoot") {
         v.push(root);
     }
+    // §2.6 自身设施：%LOCALAPPDATA%\PureSlate（journal/日志/隔离区相关）。
+    if let Some(la) = env("LOCALAPPDATA") {
+        v.push(la.join("PureSlate"));
+    }
+    v
+}
+
+/// 收集 §2.2 程序目录软根（R27-3 残留授权可精确豁免）。
+/// §2.4 用户核心数据目录**不入常量根**（H1 · v0.1.4）：它们对 quarantine
+/// 去向放行（见 `is_excluded_from_scan`/`is_user_core_data`），对
+/// direct/recycle 去向仍整树拦截（preflight）。
+fn collect_soft_roots() -> Vec<PathBuf> {
+    let mut v: Vec<PathBuf> = Vec::new();
     // §2.2 程序目录。
     if let Some(pf) = env("ProgramFiles") {
         v.push(pf);
@@ -45,15 +64,6 @@ fn collect_roots() -> Vec<PathBuf> {
     if let Some(pd) = env("ProgramData") {
         v.push(pd.join("Microsoft"));
     }
-    // §2.6 自身设施：%LOCALAPPDATA%\PureSlate（journal/日志/隔离区相关）。
-    if let Some(la) = env("LOCALAPPDATA") {
-        v.push(la.join("PureSlate"));
-    }
-    // §2.4 用户核心数据目录**不再入通用白名单根**（H1 · v0.1.4）：
-    // 它们对 quarantine 去向的扫描/清理放行（见 `is_excluded_from_scan` /
-    // `is_user_core_data`），对 direct/recycle 去向仍整树拦截（preflight）。
-    // 原实现把五目录混入通用根，导致 dup 维度 4/5 的 target 被自家白名单
-    // 整树剪除（只读扫描被"禁删"语义误伤）。
     v
 }
 
@@ -280,13 +290,54 @@ fn path_has_short_component(p: &Path) -> bool {
     })
 }
 
-/// 单形态白名单判定（盘根特例 + 常量根 + XML 附加根）。
+/// 单形态白名单判定（硬保护 + §2.2 软根）。
 fn whitelisted_once(path: &Path) -> bool {
-    // 候选路径与白名单根两侧共用段级归一（T-4，P4-04）：`/`→`\` + 小写 +
-    // `\\?\` 剥离 + `..`/`.` 段文本化解析 + 逐段去尾随点/空格——任何一侧的
-    // 书写形式差异都不再造成保护缺口（此前仅分隔符+小写归一，2026-09-29 曾
-    // 因正斜杠失配整体绕过；同族形态见安全审计 T-4）。
     let p_segs = normalize_segments(path);
+    if hard_protected_segs(&p_segs) {
+        return true;
+    }
+    any_root_matches(&p_segs, soft_roots())
+}
+
+/// 硬保护判定（含 8.3 短名双形态）。**任何残留授权都不可豁免本层**
+/// （SAFETY §2.2 R27-3 条款）：系统/引导卷目录、卷根关键文件、隔离区哨兵、
+/// SystemRoot、自身设施、XML 附加白名单。
+pub fn is_hard_protected(path: &Path) -> bool {
+    if path_has_short_component(path) {
+        if let Some(long) = expand_short_name(path) {
+            return hard_protected_segs(&normalize_segments(path))
+                || hard_protected_segs(&normalize_segments(&long));
+        }
+    }
+    hard_protected_segs(&normalize_segments(path))
+}
+
+/// §2.2 程序目录软根命中（ProgramFiles*/ProgramData\Microsoft；段级匹配）。
+/// R27-3 残留授权可在精确根内豁免本层；其余所有路径按白名单拦截。
+pub fn is_soft_program_root(path: &Path) -> bool {
+    if path_has_short_component(path) {
+        if let Some(long) = expand_short_name(path) {
+            return is_soft_program_root_segs(&normalize_segments(path))
+                || is_soft_program_root_segs(&normalize_segments(&long));
+        }
+    }
+    is_soft_program_root_segs(&normalize_segments(path))
+}
+
+fn is_soft_program_root_segs(p_segs: &[String]) -> bool {
+    any_root_matches(p_segs, soft_roots())
+}
+
+/// 路径是否位于授权根之内（段级前缀，归一与白名单同源）。
+/// 供 R27-3 preflight 校验"文件确在后端签发的精确残留候选根内"。
+pub fn is_within(path: &Path, root: &Path) -> bool {
+    let p = normalize_segments(path);
+    let r = normalize_segments(root);
+    prefix_matches(&p, &r)
+}
+
+/// 段级硬保护判定（盘根特例 + 卷根关键文件 + 隔离哨兵 + 硬常量根 + XML 附加根）。
+fn hard_protected_segs(p_segs: &[String]) -> bool {
     let p_lower = p_segs.join("\\");
 
     // §2.3 盘根下的系统/引导卷信息目录（必须最优先判断，早于 roots 前缀）。
@@ -341,11 +392,11 @@ fn whitelisted_once(path: &Path) -> bool {
         }
     }
 
-    // 其余白名单根：常量根 + XML 附加根，段级前缀匹配（避免 `C:\a` 误配 `C:\ab`）。
-    if any_root_matches(&p_segs, const_roots()) {
+    // 硬常量根（SystemRoot/自身设施）+ XML 附加根——授权亦不可豁免。
+    if any_root_matches(p_segs, hard_roots()) {
         return true;
     }
-    any_root_matches(&p_segs, &xml_roots())
+    any_root_matches(p_segs, &xml_roots())
 }
 
 /// 段级前缀匹配任一白名单根（根侧同样走共用归一，T-4）。
@@ -372,7 +423,7 @@ fn drive_letter(p_lower: &str) -> Option<String> {
 /// 逐段剥 Windows 创建时会被 Win32 吃掉的尾随点/空格（`guard.keep.` 与
 /// `guard.keep` 在 NTFS 语义上是同一个名字）。
 /// 保护方向单调：归一只会让两侧**更容易对上**（更保守），不会扩大扫除面。
-fn normalize_segments(p: &Path) -> Vec<String> {
+pub(crate) fn normalize_segments(p: &Path) -> Vec<String> {
     let s = p.to_string_lossy();
     let s = s.strip_prefix(r"\\?\").unwrap_or(&s);
     let s = s.replace('/', "\\");

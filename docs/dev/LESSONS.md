@@ -6,6 +6,20 @@
 
 ## ① 踩坑记录
 
+### 给"永不删除"白名单开口：分层（硬/软）+ 后端信任锚，而不是加 if 放行（2026-10-13，R27-3）
+- 矛盾：R27-3 要清的安装目录残留恰在 SAFETY §2.2"程序目录永不入候选"内。第一版安全闸把 appdata/users/programdata 等段全塞进一个拒绝名单，结果枚举器**自构**的合法 AppData 候选（Users\u\AppData\Local\Vendor\App）也被自己挡死——外部值（注册表 InstallLocation）与内部构造路径需要的不是同一把尺。
+- 修复：拆双闸——`install_root_safety`（注册表外部值：绝对路径/硬保护/绝对段名单/末段共享名/Users 浅层/ProgramData 浅层）与 `asserted_root_safety`（枚举器自构根：只查硬保护+reparse+末段通用名）；白名单本体同步拆**硬根/软根**，软根仅在后端快照签发的精确 authorized_root 内放行。
+- 复利结论：①安全策略里"这个路径从哪来"比"这个路径长什么样"更重要——外部输入走严格闸，内部可信构造走防御闸，别共用一个函数；②给绝对禁令开口，评审要的是**不可滥用性证明**：信任锚（上下文/快照/精确根）必须全在后端、前端只传 id、快照一次性消费，开口才有边界；③Win32 能替你保证的语义优先复用——删目录用 `RemoveDirectoryW`（非空必失败）就不需要自己实现"判断空再递归删"，少写一段危险代码。
+
+### 产品名归一剥后缀：一轮循环不够，后缀顺序任意时必须交替剥到不动点（2026-10-13，R27-3）
+- 现象：`CoolTool (64-bit) 2.0` 归一失败——先循环剥括号时尾部是版本号挡着，括号判定不命中就 break，再剥版本段后已经没机会回头剥括号。
+- 修复：合并为单个大循环，每轮先试尾部括号（架构/版本）、再试尾部裸版本段，任一成功 continue、都不动才退出（不动点）。`App (64-bit) 2.0` 与 `App 2.0 (x64)` 都收敛。
+- 复利结论：多个"剥尾部 token"清洗规则组合时规则之间会互相遮蔽——写成"每轮尝试所有规则直到不动点"，不要假定输入里规则的出现顺序；测试必须覆盖两种排列。
+
+### 隔离区按真实卷根落盘使端到端测试写真实盘根：需要生产无调用的测试注入钩子（2026-10-13，R27-3）
+- 现象：cleaner 执行 quarantine 时按 `quarantine_root_of(path)` 算 `<卷根>\.pureslate-quarantine`，沙箱测试里会真在 C:\ 建隐藏系统目录；与既有 data_root override 不对称。
+- 修复：quarantine 模块加 `OnceLock<Mutex<Option<PathBuf>>>` 覆盖钩子 `set_quarantine_root_override`（与 storage::set_data_root_override 同模式），生产代码零调用，集成测试注入沙箱根；clippy dead-code 对 static 很敏感，辅助 static 必须被实际引用（先留了个未用 LOCK 被 -D warnings 打回）。
+
 ### 代码与注释/SPEC 直接矛盾而单测全绿：QuietUninstallString 误取在 R27-2 评审前自查才现形（2026-10-13，R27-2）
 - 现象：R27-1 提交的 `parse_app` 写的是 `string_value("QuietUninstallString").or_else(取 UninstallString)`，紧挨着的注释却写"Quiet 优先？——不：R27 编排交互卸载器"。SPEC §6.7 明确只取交互串（用户必须看到官方 UI）。R27-1 的 9 个单测全绿——没有一个用例同时构造 Quiet+Uninstall 两个值。
 - 后果：凡同时登记 QuietUninstallString 的程序（NSIS/Inno/厂商安装器很常见），会被**静默卸载串**拉起，用户看不到官方卸载窗口——直接击穿"编排者不是替代者"的信任范式。

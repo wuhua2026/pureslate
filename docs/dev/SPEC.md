@@ -254,9 +254,9 @@ journal 协议见 SAFETY §3。🟢 direct：`RemoveFile`（Windows API，绕过
 - **定位：官方卸载器的编排者，不是替代者**。破坏性删除的主体是程序自带卸载器（第三方进程，其删除不进本应用 journal/隔离区，必须在 UI 如实告知用户）；PureSlate 只做只读枚举、拉起、等待、事后判定，并把卸载**残留**纳入既有安全清理管线。
 - **枚举（只读）**：HKLM/HKCU 各 64/32 位视图的 `SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall`（x64 进程显式带 KEY_WOW64_64KEY/32KEY）；过滤 `SystemComponent≠0` 与 `ParentKeyName` 非空（补丁/更新子项）；同 `DisplayName+Publisher+Version` 跨视图去重，优先级 HKLM64 > HKLM32 > HKCU64 > HKCU32；MSI 条目（`WindowsInstaller=1` 或子键名为 `{GUID}`）卸载命令构造为 `msiexec /X{GUID}`；命令行含 8.3 短路径（`~`）时 `GetLongPathNameW` 还原。**UWP（Remove-AppxPackage）不在范围内**。
 - **执行（后续批次）**：`CreateProcessW` 拉起官方 UninstallString（SW_SHOWNORMAL，交互卸载器走自己的 UI）；**不申请 SeDebugPrivilege、默认不强杀**（占用冲突沿用 guard"提示退出"语义，强杀只能是专家模式+保护名单+用户显式确认）；进程树等待加递归深度上限 16 + 已访问 PID 集合去重；**不读单一退出码判成功**——事后重扫 Uninstall 键/安装目录是否消失，并检测 `PendingFileRenameOperations` 将相关项标"待重启完成"而非失败。
-- **残留**：卸载后对安装目录、开始菜单快捷方式、AppData 三目录的候选项产出为 ScanItem，默认 🟡/quarantine，复用 preflight + journal + 隔离区 + 审计（14 天可还原）；删除前 UI 明示完整清单与"判定为残留的理由"，逐项确认，不做无回滚直删。
-- **审计**：新增 op=`uninstall`（拉起/等待结论/待重启）；残留删除仍走既有 clean/quarantine op，覆盖率口径不变。
-- **契约**：`uninstall_list() → InstalledApp[]`（本批落地）；`uninstall_run(id)` / `uninstall_cancel(txId)` 与 `uninstall_progress`/`uninstall_done` 事件在执行批次加性扩展。
+- **残留**：卸载后对安装目录、开始菜单快捷方式、AppData 三目录的候选项产出为 ScanItem，**仅在一次卸载刚完成的后端上下文内**枚举（不做无上下文的全局孤儿扫描）；默认 🟡/quarantine，复用 preflight + journal + 隔离区 + 审计（14 天可还原）。**去向由用户逐项选择**：移入隔离区（默认、可还原）或直接删除（永久、🔴 语义，含任一项即须专家模式 + 二次确认 token）；删除前 UI 明示完整清单与"判定为残留的理由"，逐项确认。为精确卸载残留开白名单口子有严格前提：白名单常量根分**硬根**（SystemRoot/引导卷/卷信息/隔离哨兵/自身设施/XML 声明根，永不豁免）与 **§2.2 程序目录软根**（ProgramFiles*/ProgramData\Microsoft，仅可被后端快照签发的**精确候选授权根**豁免——候选 id 必须出自最近残留扫描快照、路径必须在授权根内、硬保护/reparse/TOCTOU 复核不绕过；见 SAFETY §2.2 R27-3 条款）。空目录（0 文件）候选经 `RemoveDirectoryW` 只删空目录收尾（非空必然失败，不递归删内容）。
+- **审计**：新增 op=`uninstall`（拉起/等待结论/待重启）；残留删除仍走既有 clean/quarantine op（category=`residue.uninstall`），覆盖率口径不变。
+- **契约**：`uninstall_list() → InstalledApp[]`、`uninstall_run(id)` / `uninstall_cancel(txId)` 与 `uninstall_progress`/`uninstall_done` 事件（执行批次）；R27-3 加性新增 `uninstall_residue_scan() → ResidueCandidate[]` 与 `uninstall_residue_clean(ResidueCleanParams) → txId`（复用 clean_progress/clean_done/clean_cancel）。
 
 ## 7. UI 规范
 

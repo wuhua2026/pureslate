@@ -166,6 +166,39 @@ export interface UninstallDoneEvent {
   installLocationStillPresent?: boolean;
   rebootPending: boolean;
   detail: string;
+  /** R27-3 加性：登记的安装目录（与残留扫描快照同源）。 */
+  installLocation?: string;
+}
+
+// ---- R27-3 卸载残留（SPEC §6.7） ----
+/** 残留候选来源。 */
+export type ResidueKind = "install_dir" | "start_menu" | "app_data";
+
+/** 卸载残留候选组（授权根 = rootPath；items 为文件级条目）。 */
+export interface ResidueCandidate {
+  id: string;
+  kind: ResidueKind;
+  appName: string;
+  /** 授权根：目录或单个快捷方式文件。 */
+  rootPath: string;
+  /** 判定理由（UI 必须原样明示）。 */
+  reason: string;
+  sizeBytes: number;
+  fileCount: number;
+  items: ScanItem[];
+}
+
+/** 残留清理单项选择（candidateId + 用户选择的去向）。 */
+export interface ResidueSelectionParams {
+  candidateId: string;
+  /** 仅接受 "quarantine"（默认，可还原）/ "direct"（永久删除，需专家 token）。 */
+  disposition: Disposition;
+}
+
+/** `uninstall_residue_clean` 入参；含任一 direct 时必须带专家令牌。 */
+export interface ResidueCleanParams {
+  selections: ResidueSelectionParams[];
+  confirmToken?: string;
 }
 
 // ---- 更新 ----
