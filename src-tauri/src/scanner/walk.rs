@@ -58,9 +58,13 @@ pub fn walk_target(
     // H3（v0.1.4）：类目级剪枝下界改取最小 min_size（最宽松），精确校验在命中后
     // per-include 进行（constraint_allows）。
     let _min_size_prune = compiled.min_size_bytes();
-    let walker = walkdir::WalkDir::new(target_start)
-        .follow_links(false)
-        .into_iter();
+    // R28-3：类目级遍历深度封顶（各 include 最大值；任一不限则不限）。
+    // per-include 的精确裁尾由 matcher.match_include 做同一口径的段数校验。
+    let mut walker_builder = walkdir::WalkDir::new(target_start).follow_links(false);
+    if let Some(depth) = compiled.traversal_max_depth() {
+        walker_builder = walker_builder.max_depth(depth);
+    }
+    let walker = walker_builder.into_iter();
 
     let mut done = 0u64;
     let mut bytes = 0u64;
@@ -452,6 +456,53 @@ mod tests {
         assert!(
             !paths.iter().any(|p| p.contains("evil-name")),
             "异常账号名必须零命中"
+        );
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn max_depth_prunes_traversal_end_to_end() {
+        // R28-3：max-depth=2 → 深层文件根本不被遍历（不只是不匹配）。
+        let dir = std::env::temp_dir().join(format!(
+            "pureslate-walk-depth-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(dir.join("a\\b")).unwrap();
+        std::fs::write(dir.join("f0"), b"0").unwrap(); // 1 段
+        std::fs::write(dir.join("a\\f1"), b"1").unwrap(); // 2 段
+        std::fs::write(dir.join("a\\b\\f2"), b"2").unwrap(); // 3 段
+
+        let cat = Category {
+            id: "temp.depth".into(),
+            label: "t".into(),
+            risk: Risk::Green,
+            disposition: RuleDisposition::Direct,
+            description: None,
+            targets: vec![Target::simple(
+                TargetType::Path,
+                dir.to_string_lossy().into_owned(),
+            )],
+            includes: vec![GlobRule {
+                max_depth: Some(2),
+                ..GlobRule::new("**/*")
+            }],
+            excludes: vec![],
+            guard_processes: Vec::new(),
+        };
+        let cc = CompiledCategory::compile(&cat);
+        assert_eq!(cc.traversal_max_depth(), Some(2));
+        let cancel = CancelToken::new();
+        let items = walk_target(&dir, &cc, Grade::Green, Disposition::Direct, &cancel, None);
+        let names: Vec<String> = items.iter().map(|i| i.label.clone()).collect();
+        assert!(names.iter().any(|n| n == "f0"));
+        assert!(names.iter().any(|n| n == "f1"));
+        assert!(
+            !names.iter().any(|n| n == "f2"),
+            "depth 3 的 f2 不得被遍历/命中"
         );
         std::fs::remove_dir_all(&dir).ok();
     }

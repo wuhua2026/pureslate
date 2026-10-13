@@ -402,6 +402,7 @@ fn parse_target(e: &quick_xml::events::BytesStart<'_>) -> Result<Target, String>
 }
 
 /// glob 元素属性解析。R28-2：segment-regex/segment-index 必须成对、index 可解析。
+/// R28-3：max-depth（≥1）；recursive="false" 归一为 max-depth=1，与 >1 显式值矛盾则报错。
 fn parse_glob_attrs(e: &quick_xml::events::BytesStart<'_>) -> Result<GlobRule, String> {
     let mut pattern = None;
     let mut recursive = true;
@@ -409,6 +410,7 @@ fn parse_glob_attrs(e: &quick_xml::events::BytesStart<'_>) -> Result<GlobRule, S
     let mut min_size_mb = 0u64;
     let mut segment_regex = None;
     let mut segment_index: Option<u32> = None;
+    let mut max_depth_attr: Option<u16> = None;
     for a in e.attributes().flatten() {
         let key = String::from_utf8_lossy(a.key.as_ref()).into_owned();
         let val = a.unescape_value().unwrap_or_default().into_owned();
@@ -424,6 +426,12 @@ fn parse_glob_attrs(e: &quick_xml::events::BytesStart<'_>) -> Result<GlobRule, S
                         .map_err(|_| format!("segment-index `{val}` 不是合法 u32"))?,
                 );
             }
+            "max-depth" => {
+                max_depth_attr = Some(
+                    val.parse()
+                        .map_err(|_| format!("max-depth `{val}` 不是合法 u16"))?,
+                );
+            }
             _ => {}
         }
     }
@@ -436,6 +444,20 @@ fn parse_glob_attrs(e: &quick_xml::events::BytesStart<'_>) -> Result<GlobRule, S
         }
         _ => {}
     }
+    if let Some(0) = max_depth_attr {
+        return Err("max-depth 必须 ≥1（根直属文件=1；缺省该属性才表示不限）".into());
+    }
+    // recursive=false ⇔ 深度 1；显式矛盾的配置按非法 category 处理（宁缺勿错）。
+    let max_depth = match (max_depth_attr, recursive) {
+        (Some(n), false) if n > 1 => {
+            return Err(format!(
+                "recursive=false 与 max-depth={n} 矛盾（false 等价深度 1）"
+            ))
+        }
+        (Some(n), _) => Some(n),
+        (None, false) => Some(1),
+        (None, true) => None,
+    };
     Ok(GlobRule {
         pattern: pattern.unwrap_or_default(),
         recursive,
@@ -443,6 +465,7 @@ fn parse_glob_attrs(e: &quick_xml::events::BytesStart<'_>) -> Result<GlobRule, S
         min_size_mb,
         segment_index,
         segment_regex,
+        max_depth,
     })
 }
 
@@ -986,5 +1009,78 @@ mod tests {
             parse_one_category(xml).is_empty(),
             "坏正则必须 fail-closed 丢规则"
         );
+    }
+
+    // ---- R28-3 max-depth ----
+
+    fn parse_one_include(xml_include: &str) -> GlobRule {
+        let frag = format!(
+            r#"<category id="c" label="l" risk="green" disposition="direct"><target type="path" value="C:\tmp"/>{xml_include}</category>"#
+        );
+        parse_one_category(&frag)[0].includes[0].clone()
+    }
+
+    #[test]
+    fn recursive_false_normalizes_to_depth_one() {
+        let g = parse_one_include(r#"<include pattern="*.lnk" recursive="false"/>"#);
+        assert_eq!(g.max_depth, Some(1), "recursive=false 归一为深度 1");
+        let g = parse_one_include(r#"<include pattern="a\*" recursive="false" max-depth="1"/>"#);
+        assert_eq!(g.max_depth, Some(1), "false + depth=1 自洽");
+    }
+
+    #[test]
+    fn explicit_max_depth_parses() {
+        let g = parse_one_include(r#"<include pattern="a\**" max-depth="5"/>"#);
+        assert_eq!(g.max_depth, Some(5));
+        let g = parse_one_include(r#"<include pattern="*"/>"#);
+        assert_eq!(g.max_depth, None, "缺省不限");
+    }
+
+    #[test]
+    fn conflicting_or_bad_depth_drops_category() {
+        let cases = [
+            r#"<include pattern="a\**" recursive="false" max-depth="3"/>"#,
+            r#"<include pattern="a\**" max-depth="0"/>"#,
+            r#"<include pattern="a\**" max-depth="x"/>"#,
+        ];
+        for inc in cases {
+            let frag = format!(
+                r#"<category id="bad" label="l" risk="green" disposition="direct"><target type="path" value="C:\tmp"/>{inc}</category>
+  <category id="good" label="ok" risk="green" disposition="direct"><target type="path" value="C:\tmp"/><include pattern="*"/></category>"#
+            );
+            let cats = parse_one_category(&frag);
+            assert_eq!(cats.len(), 1, "深度配置非法应只丢 bad：{inc}");
+            assert_eq!(cats[0].id, "good");
+        }
+    }
+
+    #[test]
+    fn shipped_rules_load_with_expected_depth() {
+        // 既有规则包快照：5 个 XML 全部加载成功；
+        // privacy.recent-docs 的 recursive=false 已归一为深度 1（行为零变化核对）。
+        let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("resources")
+            .join("rules");
+        let mut loader = RuleLoader::new();
+        let table = loader.load_dir(&dir).expect("加载随包规则包");
+        assert!(table.by_id.len() >= 5, "应加载全部自研规则类目");
+        let (_, recent) = table
+            .by_id
+            .get("privacy.recent-docs")
+            .expect("最近文档类目存在");
+        assert_eq!(recent.includes.len(), 1);
+        assert_eq!(
+            recent.includes[0].max_depth,
+            Some(1),
+            "*.lnk 非递归规则必须归一为深度 1"
+        );
+        // 历史规则包的其它类目深度保持不限（未被意外收紧）。
+        for id in ["privacy.edge-history", "privacy.chrome-history"] {
+            let (_, cat) = table.by_id.get(id).unwrap();
+            assert!(
+                cat.includes.iter().all(|g| g.max_depth.is_none()),
+                "{id} 不应被隐式赋深度"
+            );
+        }
     }
 }

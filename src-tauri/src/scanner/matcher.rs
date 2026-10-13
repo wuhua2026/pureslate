@@ -18,8 +18,18 @@ pub struct CompiledCategory {
     include_constraints: Vec<(u32, u64)>, // (max_age_days, min_size_mb)
     /// include 的段收紧（R28-2），与 include_constraints 平行对齐；None=无段约束。
     include_segments: Vec<Option<(u32, Regex)>>,
+    /// include 的深度封顶（R28-3），与 include_constraints 平行对齐；None=不限。
+    include_depths: Vec<Option<u16>>,
     /// exclude 的段收紧，与 exclude GlobSet 入集顺序平行对齐。
     exclude_segments: Vec<Option<(u32, Regex)>>,
+    /// exclude 的深度封顶，与 exclude 入集顺序平行对齐。
+    exclude_depths: Vec<Option<u16>>,
+}
+
+/// 单条规则编译后的附属守卫（段收紧 + 深度）。
+struct CompiledGuard {
+    segment: Option<(u32, Regex)>,
+    depth: Option<u16>,
 }
 
 impl CompiledCategory {
@@ -30,19 +40,23 @@ impl CompiledCategory {
         let mut exc = globset::GlobSetBuilder::new();
         let mut constraints = Vec::new();
         let mut include_segments = Vec::new();
+        let mut include_depths = Vec::new();
         let mut exclude_segments = Vec::new();
+        let mut exclude_depths = Vec::new();
         for g in &cat.includes {
-            let Some(segment) = append(&mut inc, g) else {
+            let Some(guard) = append(&mut inc, g) else {
                 continue;
             };
             constraints.push((g.max_age_days, g.min_size_mb));
-            include_segments.push(segment);
+            include_segments.push(guard.segment);
+            include_depths.push(guard.depth);
         }
         for g in &cat.excludes {
-            let Some(segment) = append(&mut exc, g) else {
+            let Some(guard) = append(&mut exc, g) else {
                 continue;
             };
-            exclude_segments.push(segment);
+            exclude_segments.push(guard.segment);
+            exclude_depths.push(guard.depth);
         }
         Self {
             category_id: cat.id.clone(),
@@ -50,8 +64,24 @@ impl CompiledCategory {
             exclude: exc.build().unwrap_or_default(),
             include_constraints: constraints,
             include_segments,
+            include_depths,
             exclude_segments,
+            exclude_depths,
         }
+    }
+
+    /// R28-3：walk 遍历深度上限（相对 target 根，根直属文件=1）。
+    /// 任一 include 不限深度则整体不限（None）；否则取最宽者（最大值），
+    /// per-include 的精确裁尾在 `match_include` 内进行。
+    pub fn traversal_max_depth(&self) -> Option<usize> {
+        self.include_depths
+            .iter()
+            .map(|d| d.map(|n| n as usize))
+            .try_fold(1usize, |acc, d| match d {
+                None => Err(()),
+                Some(n) => Ok(acc.max(n)),
+            })
+            .ok()
     }
 
     /// 供 walk 层读取剪枝下界——取各 include 的**最小** min_size（最宽松者）。
@@ -80,21 +110,32 @@ impl CompiledCategory {
         base_root: &std::path::Path,
     ) -> Option<IncludeConstraint> {
         let rel = relative_to(path, base_root);
-        // exclude 同样支持段收紧：glob 与其段约束都满足才算排除。
+        // exclude 同样支持段收紧与深度封顶：glob+段+深度都满足才算排除。
         let excluded = self.exclude.matches(&rel).into_iter().any(|i| {
             self.exclude_segments
                 .get(i)
                 .is_some_and(|s| segment_allows(&rel, s))
+                && self
+                    .exclude_depths
+                    .get(i)
+                    .copied()
+                    .is_some_and(|d| depth_allows(&rel, d))
         });
         if excluded {
             return None;
         }
-        // 多个 include 可能同时 glob 命中；取第一个段约束也通过的（约束与入集索引对齐）。
+        // 多个 include 可能同时 glob 命中；取第一个段约束与深度都通过的（各数组与入集索引对齐）。
         for idx in self.include.matches(&rel) {
             let Some(segment) = self.include_segments.get(idx) else {
                 continue;
             };
             if !segment_allows(&rel, segment) {
+                continue;
+            }
+            let Some(depth) = self.include_depths.get(idx).copied() else {
+                continue;
+            };
+            if !depth_allows(&rel, depth) {
                 continue;
             }
             let (age_days, min_mb) = self.include_constraints.get(idx)?;
@@ -150,10 +191,10 @@ pub fn constraint_allows(
     true
 }
 
-/// 追加一个 glob 规则到 builder；成功入集返回其段约束（None=无段约束）。
+/// 追加一个 glob 规则到 builder；成功入集返回其守卫（段收紧+深度）。
 /// glob 或段正则编译失败 → 不入集返回 None（调用方约束数组与其对齐，
 /// 修复了此前坏 glob 静默跳过导致约束索引错位的潜在问题）。
-fn append(b: &mut globset::GlobSetBuilder, g: &GlobRule) -> Option<Option<(u32, Regex)>> {
+fn append(b: &mut globset::GlobSetBuilder, g: &GlobRule) -> Option<CompiledGuard> {
     let glob = Glob::new(&g.pattern).ok()?;
     let segment = match (g.segment_regex.as_ref(), g.segment_index) {
         (Some(src), Some(idx)) => match compile_segment_regex(src) {
@@ -166,7 +207,10 @@ fn append(b: &mut globset::GlobSetBuilder, g: &GlobRule) -> Option<Option<(u32, 
         _ => None,
     };
     b.add(glob);
-    Some(segment)
+    Some(CompiledGuard {
+        segment,
+        depth: g.max_depth,
+    })
 }
 
 /// R28-2：段收紧判定。段不存在（index 越界）= 不命中（fail-closed）。
@@ -177,6 +221,14 @@ fn segment_allows(rel: &str, segment: &Option<(u32, Regex)>) -> bool {
             .split('/')
             .nth(*idx as usize)
             .is_some_and(|seg| re.is_match(seg)),
+    }
+}
+
+/// R28-3：深度判定。rel 的路径段数（文件直属根=1）不得超过 depth。
+fn depth_allows(rel: &str, depth: Option<u16>) -> bool {
+    match depth {
+        None => true,
+        Some(d) => rel.split('/').count() <= d as usize,
     }
 }
 
@@ -404,5 +456,68 @@ mod tests {
             ),
             "账号段命中排除正则 → 排除生效"
         );
+    }
+
+    // ---- R28-3 max-depth ----
+
+    #[test]
+    fn max_depth_trims_include_match() {
+        let c = Category {
+            includes: vec![GlobRule {
+                max_depth: Some(2),
+                ..GlobRule::new("deep/**")
+            }],
+            ..cat()
+        };
+        let cc = CompiledCategory::compile(&c);
+        let root = std::path::Path::new(r"C:\t");
+        assert!(
+            cc.matches_any(std::path::Path::new(r"C:\t\deep\f1"), root),
+            "2 段（=depth 2）应命中"
+        );
+        assert!(
+            !cc.matches_any(std::path::Path::new(r"C:\t\deep\a\f2"), root),
+            "3 段（>depth 2）不命中"
+        );
+        assert_eq!(cc.traversal_max_depth(), Some(2));
+    }
+
+    #[test]
+    fn traversal_depth_none_when_any_include_unbounded() {
+        let c = Category {
+            includes: vec![
+                GlobRule {
+                    max_depth: Some(2),
+                    ..GlobRule::new("deep/**")
+                },
+                GlobRule::new("other/**"),
+            ],
+            ..cat()
+        };
+        let cc = CompiledCategory::compile(&c);
+        assert_eq!(
+            cc.traversal_max_depth(),
+            None,
+            "存在不限深度的 include → 不剪"
+        );
+    }
+
+    #[test]
+    fn traversal_depth_takes_max_when_all_bounded() {
+        let c = Category {
+            includes: vec![
+                GlobRule {
+                    max_depth: Some(1),
+                    ..GlobRule::new("a/*")
+                },
+                GlobRule {
+                    max_depth: Some(3),
+                    ..GlobRule::new("b/**")
+                },
+            ],
+            ..cat()
+        };
+        let cc = CompiledCategory::compile(&c);
+        assert_eq!(cc.traversal_max_depth(), Some(3), "遍历深度取最宽者");
     }
 }

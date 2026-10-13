@@ -121,6 +121,8 @@ pub struct GlobRule {
     pub segment_index: Option<u32>,
     /// R28-2：段正则源串（自动首尾锚定）；编译失败的规则在加载期被丢弃（fail-closed）。
     pub segment_regex: Option<String>,
+    /// R28-3：相对 target 根允许命中的最大路径段数（根直属文件=1，缺省不限）。
+    pub max_depth: Option<u16>,
 }
 
 impl GlobRule {
@@ -133,6 +135,7 @@ impl GlobRule {
             min_size_mb: 0,
             segment_index: None,
             segment_regex: None,
+            max_depth: None,
         }
     }
 }
