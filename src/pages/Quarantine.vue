@@ -250,7 +250,7 @@ onUnmounted(() => {
   border-bottom: none;
 }
 .list tbody tr.checked {
-  background: rgba(59, 130, 246, 0.06);
+  background: rgba(37, 99, 235, 0.07);
 }
 .sel {
   width: 32px;

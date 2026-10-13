@@ -607,7 +607,7 @@ async function rescanAfterClean(): Promise<void> {
 <style scoped>
 .page {
   padding: 20px 24px;
-  max-width: 1000px;
+  max-width: 1080px;
   margin: 0 auto;
 }
 .head h1 {
@@ -695,8 +695,8 @@ async function rescanAfterClean(): Promise<void> {
   vertical-align: middle;
 }
 .badge.msi {
-  background: #eef2ff;
-  color: #1a56db;
+  background: var(--accent-soft);
+  color: var(--accent);
 }
 .badge.arch {
   background: #f0f3f7;
@@ -727,8 +727,8 @@ async function rescanAfterClean(): Promise<void> {
   background: var(--surface, #fff);
 }
 .btn.primary {
-  background: #1a56db;
-  border-color: #1a56db;
+  background: var(--accent);
+  border-color: var(--accent);
   color: #fff;
 }
 .btn.danger {
@@ -788,7 +788,7 @@ async function rescanAfterClean(): Promise<void> {
   width: 30px;
   height: 30px;
   border: 3px solid #e4e7ec;
-  border-top-color: #1a56db;
+  border-top-color: var(--accent);
   border-radius: 50%;
   animation: ps-spin 0.8s linear infinite;
   margin: 6px auto 12px;
@@ -821,8 +821,8 @@ async function rescanAfterClean(): Promise<void> {
   font-size: 0.75rem;
 }
 .tag.info {
-  background: #eef2ff;
-  color: #1a56db;
+  background: var(--accent-soft);
+  color: var(--accent);
 }
 .tag.warn {
   background: #fdf3e7;
@@ -832,7 +832,7 @@ async function rescanAfterClean(): Promise<void> {
   color: #15803d;
 }
 .result-title.info {
-  color: #1a56db;
+  color: var(--accent);
 }
 .result-title.warn {
   color: #9a5b00;
@@ -899,8 +899,8 @@ async function rescanAfterClean(): Promise<void> {
 }
 .badge.kind {
   margin-left: 0;
-  background: #eef2ff;
-  color: #1a56db;
+  background: var(--accent-soft);
+  color: var(--accent);
   padding: 1px 8px;
 }
 .res-reason {

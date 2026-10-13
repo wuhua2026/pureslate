@@ -178,7 +178,7 @@ function cleanSelected(): void {
   border-bottom: none;
 }
 .items li.checked {
-  background: rgba(59, 130, 246, 0.06);
+  background: rgba(37, 99, 235, 0.07);
 }
 .row {
   display: flex;

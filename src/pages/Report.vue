@@ -438,7 +438,7 @@ function onTokenConfirm(token: string) {
 }
 .plan.active {
   border-color: var(--accent);
-  background: rgba(59, 130, 246, 0.06);
+  background: rgba(37, 99, 235, 0.07);
 }
 .plan-name {
   font-weight: 600;

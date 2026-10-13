@@ -4,6 +4,7 @@ import { crash_recovery, disk_usage } from "../api/commands";
 import { DiskUsageStub, type DiskUsageEntry } from "../mocks/data";
 import { recoveryNotice } from "./crashModel";
 import type { DiskUsageInfo } from "../types/ipc";
+import AppIcon from "../components/AppIcon.vue";
 
 // GB/TB 易读格式化：>=1024GB 显示 TB，否则 GB。
 function formatBytes(bytes: number): string {
@@ -43,29 +44,105 @@ onMounted(async () => {
     disks.value = DiskUsageStub;
   }
 });
+
+// 功能宫格（图标色为自定浅色块 + 深字色，纯本地配色无外部资源）。
+const tiles: Array<{
+  to: string;
+  title: string;
+  desc: string;
+  icon:
+    | "scan"
+    | "report"
+    | "files"
+    | "startup"
+    | "privacy"
+    | "apps"
+    | "quarantine"
+    | "log";
+  c: string;
+  bg: string;
+  deep?: boolean;
+}> = [
+  { to: "/scan", title: "一键体检", desc: "临时 · 缓存 · 隐私 · 启动项", icon: "scan", c: "#2563eb", bg: "#eaf1ff" },
+  { to: "/report", title: "扫描报告", desc: "查看分级结果并清理", icon: "report", c: "#4f46e5", bg: "#ecebff" },
+  { to: "/files", title: "大文件", desc: "定位占用空间的大文件", icon: "files", c: "#0891b2", bg: "#e0f4fa" },
+  { to: "/startup", title: "启动项", desc: "管理开机自启程序", icon: "startup", c: "#16a34a", bg: "#e4f7ec" },
+  { to: "/privacy", title: "隐私清理", desc: "浏览痕迹与最近记录", icon: "privacy", c: "#7c3aed", bg: "#f0e8ff" },
+  { to: "/apps", title: "软件卸载", desc: "调起官方卸载器并清残留", icon: "apps", c: "#ea580c", bg: "#ffeddc" },
+  { to: "/quarantine", title: "隔离区", desc: "14 天内可一键还原", icon: "quarantine", c: "#475569", bg: "#e9eef4" },
+  { to: "/log", title: "操作日志", desc: "每一步操作可审计", icon: "log", c: "#64748b", bg: "#eef2f7" },
+];
+
+const promises = [
+  { t: "只读扫描", d: "确认前不删除任何文件" },
+  { t: "安全分级", d: "绿/黄/红三级去向" },
+  { t: "全程可还原", d: "默认隔离区保留 14 天" },
+];
 </script>
 
 <template>
   <main class="home">
-    <header class="hero">
-      <h1>PureSlate</h1>
-      <p class="tag">本地磁盘清理 · 只读扫描 · 安全分级 · 全程可还原</p>
+    <!-- 欢迎条 -->
+    <header class="welcome">
+      <h1>电脑清理</h1>
+      <p>本地清理 · 零广告 · 零遥测，每一步都由你确认</p>
     </header>
 
     <!-- R24 启动恢复横幅 -->
-    <section v-if="recoveryBanner" class="card recovery-card">
+    <section v-if="recoveryBanner" class="recovery-banner">
+      <span class="recovery-dot"></span>
       <p class="recovery-text">{{ recoveryBanner }}</p>
-      <router-link to="/quarantine" class="recovery-link">前往隔离区查看 →</router-link>
+      <router-link to="/quarantine" class="recovery-link">查看隔离区 →</router-link>
     </section>
 
-    <!-- 磁盘占用条 -->
-    <section class="card">
-      <h2 class="card-title">磁盘占用</h2>
-      <ul class="disk-list" v-if="disks.length">
-        <li v-for="d in disks" :key="d.letter" class="disk-row">
-          <div class="disk-head">
-            <span class="disk-name">{{ d.letter }}盘 · {{ d.label }}</span>
-            <span class="disk-nums">{{ formatBytes(d.totalBytes - d.freeBytes) }} 已用 / {{ formatBytes(d.freeBytes) }} 可用</span>
+    <!-- 体检主卡 -->
+    <section class="hero-card">
+      <div class="hero-left">
+        <!-- 状态圆环：未扫描=中性待检态（不伪造健康分数） -->
+        <div class="ring" aria-label="待体检">
+          <div class="ring-inner">
+            <span class="ring-title">待体检</span>
+            <span class="ring-sub">未扫描</span>
+          </div>
+        </div>
+        <div class="hero-text">
+          <h2>一键体检</h2>
+          <p class="hero-desc">
+            扫描临时文件、缓存、隐私痕迹与启动项，<strong>只读分析、不删任何文件</strong>；
+            结果按绿/黄/红分级，等你逐项确认后再清理。
+          </p>
+          <ul class="promise-row">
+            <li v-for="p in promises" :key="p.t">
+              <span class="promise-t">{{ p.t }}</span>
+              <span class="promise-d">{{ p.d }}</span>
+            </li>
+          </ul>
+        </div>
+      </div>
+      <div class="hero-actions">
+        <router-link to="/scan" class="btn-main" @click="goScan(false)">
+          <AppIcon name="scan" :size="19" />
+          开始体检
+        </router-link>
+        <router-link to="/scan" class="btn-ghost" @click="goScan(true)">深度体检</router-link>
+        <span class="deep-hint">深度含大文件/重复文件，大容量盘较慢</span>
+      </div>
+    </section>
+
+    <!-- 磁盘占用 -->
+    <section class="block">
+      <div class="block-head">
+        <h3>磁盘占用</h3>
+      </div>
+      <div v-if="disks.length" class="disk-grid">
+        <div v-for="d in disks" :key="d.letter" class="disk-card">
+          <div class="disk-top">
+            <span class="drive-badge" :class="{ warn: usagePercent(d) >= 85 }">{{ d.letter }}</span>
+            <div class="disk-meta">
+              <span class="disk-label">{{ d.label }}</span>
+              <span class="disk-nums">{{ formatBytes(d.freeBytes) }} 可用 / {{ formatBytes(d.totalBytes) }}</span>
+            </div>
+            <span class="disk-pct" :class="{ warn: usagePercent(d) >= 85 }">{{ usagePercent(d) }}%</span>
           </div>
           <div class="disk-bar">
             <div
@@ -74,48 +151,26 @@ onMounted(async () => {
               :class="{ warn: usagePercent(d) >= 85 }"
             ></div>
           </div>
-        </li>
-      </ul>
+        </div>
+      </div>
       <p v-else class="empty">暂无磁盘数据</p>
     </section>
 
-    <!-- 一键体检 -->
-    <section class="card">
-      <div class="cta-row">
-        <div>
-          <h2 class="card-title">一键体检</h2>
-          <p class="cta-desc">快速体检扫描临时/缓存/隐私/启动项（约几秒到几分钟），不删除任何文件，等你确认后再执行。需要定位大文件与重复文件时可选深度体检（大容量盘较慢）。</p>
-        </div>
-        <div class="cta-btns">
-          <router-link to="/scan" class="btn-deep" @click="goScan(true)">深度体检</router-link>
-          <router-link to="/scan" class="btn-primary" @click="goScan(false)">开始体检 →</router-link>
-        </div>
+    <!-- 功能宫格 -->
+    <section class="block">
+      <div class="block-head">
+        <h3>清理工具</h3>
       </div>
-    </section>
-
-    <!-- 快速建议区 -->
-    <section class="card">
-      <h2 class="card-title">快速建议</h2>
-      <div class="suggest-grid">
-        <router-link to="/scan" class="sugg">
-          <span class="sugg-dot" style="background: var(--grade-green)"></span>
-          <span class="sugg-label">临时文件</span>
-          <span class="sugg-desc">缓存与临时残留，可安全清理</span>
-        </router-link>
-        <router-link to="/files" class="sugg">
-          <span class="sugg-dot" style="background: var(--grade-green)"></span>
-          <span class="sugg-label">大文件</span>
-          <span class="sugg-desc">大体积文件定位，确认后再回收站</span>
-        </router-link>
-        <router-link to="/report" class="sugg">
-          <span class="sugg-dot" style="background: var(--grade-yellow)"></span>
-          <span class="sugg-label">重复文件</span>
-          <span class="sugg-desc">内容相同副本，保留最早一份</span>
-        </router-link>
-        <router-link to="/startup" class="sugg">
-          <span class="sugg-dot" style="background: var(--grade-yellow)"></span>
-          <span class="sugg-label">启动项</span>
-          <span class="sugg-desc">管理开机自启，按需禁用</span>
+      <div class="tile-grid">
+        <router-link v-for="t in tiles" :key="t.to" :to="t.to" class="tile" @click="t.deep && goScan(true)">
+          <span class="tile-icon" :style="{ background: t.bg, color: t.c }">
+            <AppIcon :name="t.icon" :size="22" />
+          </span>
+          <span class="tile-body">
+            <span class="tile-title">{{ t.title }}</span>
+            <span class="tile-desc">{{ t.desc }}</span>
+          </span>
+          <span class="tile-arrow" aria-hidden="true">›</span>
         </router-link>
       </div>
     </section>
@@ -126,161 +181,397 @@ onMounted(async () => {
 .home {
   display: flex;
   flex-direction: column;
-  gap: 1.25rem;
+  gap: 20px;
+  max-width: 1080px;
+  margin: 0 auto;
 }
 
-.hero h1 {
-  margin: 0 0 0.25rem;
-  font-size: 2rem;
-  color: var(--accent);
+/* 欢迎条 */
+.welcome h1 {
+  margin: 0 0 4px;
+  font-size: 1.45rem;
+  font-weight: 700;
 }
-.tag {
+.welcome p {
   margin: 0;
+  font-size: 0.86rem;
   color: var(--text-2);
 }
 
-.card {
-  background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: 10px;
-  padding: 1.25rem 1.5rem;
+/* 恢复横幅 */
+.recovery-banner {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  background: #fdf6e9;
+  border: 1px solid #f2ddb4;
+  border-radius: var(--r-card);
+  padding: 10px 16px;
 }
-.card-title {
-  margin: 0 0 0.75rem;
-  font-size: 1.1rem;
-  color: var(--text);
+.recovery-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--grade-yellow);
+  flex-shrink: 0;
+}
+.recovery-text {
+  margin: 0;
+  font-size: 0.84rem;
+  line-height: 1.55;
+  flex: 1;
+}
+.recovery-link {
+  font-size: 0.82rem;
+  color: var(--accent);
+  white-space: nowrap;
+  font-weight: 600;
 }
 
-/* 磁盘占用条 */
-.disk-list {
+/* ===== 体检主卡 ===== */
+.hero-card {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 28px;
+  background: linear-gradient(120deg, #ffffff 0%, #f4f8ff 100%);
+  border: 1px solid var(--border);
+  border-radius: var(--r-card);
+  box-shadow: var(--shadow-card);
+  padding: 26px 30px;
+}
+.hero-left {
+  display: flex;
+  align-items: center;
+  gap: 24px;
+  min-width: 0;
+}
+
+/* 状态圆环（纯 CSS conic-gradient；初始态轨道灰） */
+.ring {
+  width: 118px;
+  height: 118px;
+  border-radius: 50%;
+  background: conic-gradient(var(--border-strong) 0deg, var(--border) 0deg);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  position: relative;
+}
+.ring::before {
+  content: "";
+  position: absolute;
+  inset: 9px;
+  border-radius: 50%;
+  background: var(--surface);
+  box-shadow: inset 0 0 0 1px var(--border);
+}
+.ring-inner {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+}
+.ring-title {
+  font-size: 1rem;
+  font-weight: 700;
+  color: var(--text);
+}
+.ring-sub {
+  font-size: 0.7rem;
+  color: var(--text-3);
+}
+
+.hero-text {
+  min-width: 0;
+}
+.hero-text h2 {
+  margin: 0 0 8px;
+  font-size: 1.22rem;
+}
+.hero-desc {
+  margin: 0 0 14px;
+  font-size: 0.86rem;
+  line-height: 1.7;
+  color: var(--text-2);
+  max-width: 34rem;
+}
+.promise-row {
   list-style: none;
   margin: 0;
   padding: 0;
   display: flex;
-  flex-direction: column;
-  gap: 1rem;
+  gap: 22px;
+  flex-wrap: wrap;
 }
-.disk-head {
+.promise-row li {
   display: flex;
-  justify-content: space-between;
-  font-size: 0.95rem;
-  margin-bottom: 0.35rem;
+  flex-direction: column;
+  gap: 2px;
+  padding-left: 13px;
+  position: relative;
 }
-.disk-name {
+.promise-row li::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 5px;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--accent);
+}
+.promise-t {
+  font-size: 0.82rem;
+  font-weight: 700;
+}
+.promise-d {
+  font-size: 0.72rem;
+  color: var(--text-3);
+}
+
+.hero-actions {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 9px;
+  flex-shrink: 0;
+  width: 168px;
+}
+.btn-main {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  background: var(--accent);
+  color: #fff;
+  padding: 12px 18px;
+  border-radius: var(--r-btn);
+  font-weight: 700;
+  font-size: 0.95rem;
+  box-shadow: 0 6px 16px rgba(37, 99, 235, 0.28);
+  transition:
+    background 0.14s ease,
+    transform 0.1s ease;
+}
+.btn-main:hover {
+  background: var(--accent-hover);
+}
+.btn-main:active {
+  transform: translateY(1px);
+}
+.btn-ghost {
+  text-align: center;
+  padding: 9px 18px;
+  border-radius: var(--r-btn);
+  border: 1px solid var(--border-strong);
+  color: var(--text);
+  font-size: 0.86rem;
   font-weight: 600;
+  background: var(--surface);
+  transition:
+    border-color 0.14s ease,
+    color 0.14s ease;
+}
+.btn-ghost:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+.deep-hint {
+  font-size: 0.68rem;
+  color: var(--text-3);
+  text-align: center;
+  line-height: 1.4;
+}
+
+/* ===== 区块 ===== */
+.block-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 12px;
+}
+.block-head h3 {
+  margin: 0;
+  font-size: 1rem;
+  font-weight: 700;
+}
+.block-head h3::before {
+  content: "";
+  display: inline-block;
+  width: 4px;
+  height: 15px;
+  border-radius: 2px;
+  background: var(--accent);
+  margin-right: 9px;
+  vertical-align: -2px;
+}
+
+/* 磁盘小卡 */
+.disk-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  gap: 12px;
+}
+.disk-card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--r-card);
+  box-shadow: var(--shadow-card);
+  padding: 15px 16px 13px;
+}
+.disk-top {
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  margin-bottom: 11px;
+}
+.drive-badge {
+  width: 36px;
+  height: 36px;
+  border-radius: 9px;
+  background: var(--accent-soft);
+  color: var(--accent);
+  font-weight: 700;
+  font-size: 0.88rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+.drive-badge.warn {
+  background: #fdf0d8;
+  color: var(--grade-yellow);
+}
+.disk-meta {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+  flex: 1;
+}
+.disk-label {
+  font-size: 0.86rem;
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 .disk-nums {
-  color: var(--text-2);
+  font-size: 0.72rem;
+  color: var(--text-3);
+}
+.disk-pct {
+  font-size: 0.92rem;
+  font-weight: 700;
+  color: var(--accent);
+}
+.disk-pct.warn {
+  color: var(--grade-yellow);
 }
 .disk-bar {
-  height: 12px;
-  border-radius: 6px;
-  background: var(--bg);
+  height: 7px;
+  border-radius: 4px;
+  background: var(--surface-2);
   border: 1px solid var(--border);
   overflow: hidden;
 }
 .disk-bar-fill {
   height: 100%;
-  background: var(--accent);
-  border-radius: 6px;
-  transition: width 0.3s ease;
+  border-radius: 4px;
+  background: linear-gradient(90deg, #4f83f2, var(--accent));
+  transition: width 0.4s ease;
 }
 .disk-bar-fill.warn {
-  background: var(--grade-yellow);
-}
-.empty {
-  color: var(--text-2);
+  background: linear-gradient(90deg, #f0b13c, var(--grade-yellow));
 }
 
-/* 一键体检 */
-.cta-row {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 1rem;
-}
-.cta-desc {
-  margin: 0;
-  color: var(--text-2);
-  max-width: 40rem;
-}
-.btn-primary {
-  flex-shrink: 0;
-  background: var(--accent);
-  color: #fff;
-  padding: 0.7rem 1.5rem;
-  border-radius: 8px;
-  font-weight: 600;
-  transition: filter 0.15s ease;
-}
-.btn-primary:hover {
-  filter: brightness(1.05);
-}
-.cta-btns {
-  display: flex;
-  align-items: center;
-  gap: 0.75rem;
-  flex-shrink: 0;
-}
-.btn-deep {
-  padding: 0.7rem 1.1rem;
-  border-radius: 8px;
-  border: 1px solid var(--border);
-  color: var(--text-2);
-  font-size: 0.85rem;
-  white-space: nowrap;
-}
-.btn-deep:hover {
-  border-color: var(--accent);
-  color: var(--accent);
-}
-
-/* 快速建议 */
-.suggest-grid {
+/* 功能宫格 */
+.tile-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(210px, 1fr));
-  gap: 0.75rem;
+  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+  gap: 12px;
 }
-.sugg {
+.tile {
+  display: flex;
+  align-items: center;
+  gap: 13px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--r-card);
+  box-shadow: var(--shadow-card);
+  padding: 15px 16px;
+  transition:
+    transform 0.12s ease,
+    box-shadow 0.14s ease,
+    border-color 0.14s ease;
+}
+.tile:hover {
+  transform: translateY(-2px);
+  box-shadow: var(--shadow-pop);
+  border-color: var(--accent-soft-2);
+}
+.tile-icon {
+  width: 44px;
+  height: 44px;
+  border-radius: 12px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+.tile-body {
   display: flex;
   flex-direction: column;
-  gap: 0.25rem;
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  padding: 0.85rem 1rem;
-  transition: border-color 0.15s ease, background 0.15s ease;
+  gap: 3px;
+  min-width: 0;
+  flex: 1;
 }
-.sugg:hover {
-  border-color: var(--accent);
-  background: var(--bg);
+.tile-title {
+  font-size: 0.92rem;
+  font-weight: 700;
 }
-.sugg-dot {
-  width: 10px;
-  height: 10px;
-  border-radius: 50%;
+.tile-desc {
+  font-size: 0.74rem;
+  color: var(--text-3);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
-.sugg-label {
-  font-weight: 600;
+.tile-arrow {
+  color: #c2cbd8;
+  font-size: 1.3rem;
+  line-height: 1;
+  transition: transform 0.14s ease, color 0.14s ease;
 }
-.sugg-desc {
-  font-size: 0.8rem;
-  color: var(--text-2);
-  line-height: 1.5;
+.tile:hover .tile-arrow {
+  color: var(--accent);
+  transform: translateX(2px);
 }
 
-/* R24 启动恢复横幅 */
-.recovery-card {
-  border-color: var(--grade-yellow);
-  background: #fdf8ee;
+.empty {
+  color: var(--text-2);
+  font-size: 0.86rem;
+  padding: 18px 0;
 }
-.recovery-text {
-  margin: 0 0 6px;
-  color: var(--text);
-  font-size: 0.88rem;
-  line-height: 1.6;
-}
-.recovery-link {
-  font-size: 0.82rem;
-  color: var(--accent);
+
+/* 窄窗口：主卡改为纵向 */
+@media (max-width: 820px) {
+  .hero-card {
+    flex-direction: column;
+    align-items: stretch;
+  }
+  .hero-actions {
+    width: 100%;
+  }
+  .hero-left {
+    flex-direction: column;
+    text-align: center;
+  }
+  .promise-row {
+    justify-content: center;
+  }
 }
 </style>
