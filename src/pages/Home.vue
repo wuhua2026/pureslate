@@ -5,18 +5,7 @@ import { DiskUsageStub, type DiskUsageEntry } from "../mocks/data";
 import { recoveryNotice } from "./crashModel";
 import type { DiskUsageInfo } from "../types/ipc";
 import AppIcon from "../components/AppIcon.vue";
-
-// GB/TB 易读格式化：>=1024GB 显示 TB，否则 GB。
-function formatBytes(bytes: number): string {
-  const gb = bytes / (1024 * 1024 * 1024);
-  if (gb >= 1024) return `${(gb / 1024).toFixed(1)} TB`;
-  return `${gb.toFixed(0)} GB`;
-}
-
-function usagePercent(d: DiskUsageEntry | DiskUsageInfo): number {
-  if (d.totalBytes <= 0) return 0;
-  return Math.min(100, Math.round(((d.totalBytes - d.freeBytes) / d.totalBytes) * 100));
-}
+import DiskUsageCard from "../components/DiskUsageCard.vue";
 
 // v0.1.2：磁盘占用接真实数据（disk_usage 命令枚举固定盘）；失败回退 mock stub。
 const disks = ref<DiskUsageEntry[] | DiskUsageInfo[]>(DiskUsageStub);
@@ -90,14 +79,14 @@ const promises = [
     </header>
 
     <!-- R24 启动恢复横幅 -->
-    <section v-if="recoveryBanner" class="recovery-banner">
+    <section v-if="recoveryBanner" class="recovery-banner anim-rise d1">
       <span class="recovery-dot"></span>
       <p class="recovery-text">{{ recoveryBanner }}</p>
       <router-link to="/quarantine" class="recovery-link">查看隔离区 →</router-link>
     </section>
 
     <!-- 体检主卡 -->
-    <section class="hero-card">
+    <section class="hero-card anim-rise d1">
       <div class="hero-left">
         <!-- 状态圆环：未扫描=中性待检态（不伪造健康分数） -->
         <div class="ring" aria-label="待体检">
@@ -131,43 +120,28 @@ const promises = [
     </section>
 
     <!-- 磁盘占用 -->
-    <section class="block">
+    <section class="block anim-rise d2">
       <div class="block-head">
         <h3>磁盘占用</h3>
       </div>
       <div v-if="disks.length" class="disk-grid">
-        <div v-for="d in disks" :key="d.letter" class="disk-card">
-          <div class="disk-top">
-            <span class="drive-badge" :class="{ warn: usagePercent(d) >= 85 }">{{ d.letter }}</span>
-            <div class="disk-meta">
-              <span class="disk-label">{{ d.label }}</span>
-              <span class="disk-nums">{{ formatBytes(d.freeBytes) }} 可用 / {{ formatBytes(d.totalBytes) }}</span>
-            </div>
-            <span class="disk-pct" :class="{ warn: usagePercent(d) >= 85 }">{{ usagePercent(d) }}%</span>
-          </div>
-          <div class="disk-bar">
-            <div
-              class="disk-bar-fill"
-              :style="{ width: usagePercent(d) + '%' }"
-              :class="{ warn: usagePercent(d) >= 85 }"
-            ></div>
-          </div>
-        </div>
+        <DiskUsageCard v-for="d in disks" :key="d.letter" :disk="d" />
       </div>
       <p v-else class="empty">暂无磁盘数据</p>
     </section>
 
     <!-- 功能宫格 -->
-    <section class="block">
+    <section class="block anim-rise d3">
       <div class="block-head">
         <h3>清理工具</h3>
       </div>
       <div class="tile-grid">
         <router-link
-          v-for="t in tiles"
+          v-for="(t, i) in tiles"
           :key="t.to"
           :to="{ path: t.to, query: t.auto ? { auto: '1' } : {} }"
-          class="tile"
+          class="tile tile-in"
+          :style="{ animationDelay: Math.min(i, 6) * 40 + 120 + 'ms' }"
           @click="t.deep && goScan(true)"
         >
           <span class="tile-icon" :style="{ background: t.bg, color: t.c }">
@@ -266,6 +240,28 @@ const promises = [
   flex-shrink: 0;
   position: relative;
 }
+/* R29：待体检态的极弱呼吸（只动 opacity，不伪造健康进度）*/
+.ring::after {
+  content: "";
+  position: absolute;
+  inset: -4px;
+  border-radius: 50%;
+  border: 2px solid var(--accent-soft-2);
+  opacity: 0;
+  animation: ring-breath 2.8s var(--ease-inout) infinite;
+  pointer-events: none;
+}
+@keyframes ring-breath {
+  0%,
+  100% {
+    opacity: 0;
+    transform: scale(0.96);
+  }
+  50% {
+    opacity: 0.7;
+    transform: scale(1.02);
+  }
+}
 .ring::before {
   content: "";
   position: absolute;
@@ -360,8 +356,8 @@ const promises = [
   font-size: 0.95rem;
   box-shadow: 0 6px 16px rgba(37, 99, 235, 0.28);
   transition:
-    background 0.14s ease,
-    transform 0.1s ease;
+    background var(--dur-fast) var(--ease-inout),
+    transform var(--dur-fast) var(--ease-inout);
 }
 .btn-main:hover {
   background: var(--accent-hover);
@@ -379,8 +375,8 @@ const promises = [
   font-weight: 600;
   background: var(--surface);
   transition:
-    border-color 0.14s ease,
-    color 0.14s ease;
+    border-color var(--dur-fast) var(--ease-inout),
+    color var(--dur-fast) var(--ease-inout);
 }
 .btn-ghost:hover {
   border-color: var(--accent);
@@ -416,83 +412,11 @@ const promises = [
   vertical-align: -2px;
 }
 
-/* 磁盘小卡 */
+/* 磁盘网格布局（卡片本体在 components/DiskUsageCard.vue）*/
 .disk-grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
   gap: 12px;
-}
-.disk-card {
-  background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: var(--r-card);
-  box-shadow: var(--shadow-card);
-  padding: 15px 16px 13px;
-}
-.disk-top {
-  display: flex;
-  align-items: center;
-  gap: 11px;
-  margin-bottom: 11px;
-}
-.drive-badge {
-  width: 36px;
-  height: 36px;
-  border-radius: 9px;
-  background: var(--accent-soft);
-  color: var(--accent);
-  font-weight: 700;
-  font-size: 0.88rem;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  flex-shrink: 0;
-}
-.drive-badge.warn {
-  background: #fdf0d8;
-  color: var(--grade-yellow);
-}
-.disk-meta {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  min-width: 0;
-  flex: 1;
-}
-.disk-label {
-  font-size: 0.86rem;
-  font-weight: 600;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.disk-nums {
-  font-size: 0.72rem;
-  color: var(--text-3);
-}
-.disk-pct {
-  font-size: 0.92rem;
-  font-weight: 700;
-  color: var(--accent);
-}
-.disk-pct.warn {
-  color: var(--grade-yellow);
-}
-.disk-bar {
-  height: 7px;
-  border-radius: 4px;
-  background: var(--surface-2);
-  border: 1px solid var(--border);
-  overflow: hidden;
-}
-.disk-bar-fill {
-  height: 100%;
-  border-radius: 4px;
-  background: linear-gradient(90deg, #4f83f2, var(--accent));
-  transition: width 0.4s ease;
-}
-.disk-bar-fill.warn {
-  background: linear-gradient(90deg, #f0b13c, var(--grade-yellow));
 }
 
 /* 功能宫格 */
@@ -511,14 +435,22 @@ const promises = [
   box-shadow: var(--shadow-card);
   padding: 15px 16px;
   transition:
-    transform 0.12s ease,
-    box-shadow 0.14s ease,
-    border-color 0.14s ease;
+    transform var(--dur-fast) var(--ease-inout),
+    box-shadow var(--dur-fast) var(--ease-inout),
+    border-color var(--dur-fast) var(--ease-inout);
 }
 .tile:hover {
   transform: translateY(-2px);
   box-shadow: var(--shadow-pop);
   border-color: var(--accent-soft-2);
+}
+.tile:active {
+  transform: translateY(0) scale(0.99);
+}
+/* R29：宫格卡片首屏入场（级差 ≤6，受控 stagger）*/
+.tile-in {
+  opacity: 0;
+  animation: ps-rise var(--dur-slow) var(--ease-out) forwards;
 }
 .tile-icon {
   width: 44px;
@@ -551,7 +483,9 @@ const promises = [
   color: #c2cbd8;
   font-size: 1.3rem;
   line-height: 1;
-  transition: transform 0.14s ease, color 0.14s ease;
+  transition:
+    transform var(--dur-fast) var(--ease-inout),
+    color var(--dur-fast) var(--ease-inout);
 }
 .tile:hover .tile-arrow {
   color: var(--accent);
