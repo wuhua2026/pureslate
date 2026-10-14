@@ -5,6 +5,13 @@
 > 维护（AGENTS.md §9）：任务完成时 agent 自动追加/更新当前会话条目，随任务同一提交。格式：`## YYYY-MM-DD | 主题`。
 > 本初版由历史会话记忆回溯整理（截至 2026-09-29），细节以 git 历史与 TASKS.md 为准。
 
+## 2026-10-14 | R29 视图层动效试点：基建+Home/Scan/Report 三屏（方案 A，待真机验收）
+
+- **做了什么**：用户要求界面现代化+动效。评审否决组件库/GSAP/Lottie，定方案 A（浅色蓝白不变，token 化动效），SPEC §7 新增 motion token（140/220/340ms、ease-out/inout）与 6 条动效规范（只动 transform/opacity、stagger ≤8 级、数字补间走统一 composable、reduced-motion 总闸、安全语义优先、零重依赖）。实现：App.vue 路由 out-in 过渡+`.anim-rise` 工具类+全局减少动画归零（含 delay）；新 `composables/useCountUp.ts`（rAF ease-out 立方，续间/直跳/卸载取消帧）。Home：DiskUsageCard 抽出（scaleX 进度生长+百分比 count-up）、圆环呼吸、宫格 stagger/按压；Scan：路径 keyed out-in 轮换、阶段图标 pop、进度条 scaleX+流光、tabular-nums；Report：总览/已选字节 count-up、前 8 行 stagger、🔴 灰禁 opacity 过渡、A/B 勾号 pop。
+- **关键结论**：①CSS 动画 fill forwards 的终态 opacity 会压过类声明的 opacity——Report 红行 0.55 与 rise 终态打架，用元素变量 `--row-final` 作 keyframe 终态解决（同类问题以后优先变量终态而非 forwards 常量）；②进度类动画一律 scaleX+origin-left，不碰 width（自己定的规范第一时间自查到两处违规并改正）；③reduced-motion 总闸必须同时清 duration **和 delay**，否则 stagger 元素在延迟期仍隐形；④高频实时字节数不补间，只 tabular-nums；数字补间只给落定汇总。
+- **验证**：pnpm typecheck/71 vitest（模型零改动零回归）/build 全绿；index gzip 42.55→45.04 KB（+2.5KB），零新 npm 依赖。
+- **下一步（硬门禁）**：人类 `pnpm tauri dev` 真机看三屏调性（重点：路由淡入节奏、扫描路径连刷不堆积、报告数字滚动、Windows 设置开"减少动画"后全静止）；确认后再开后续 13 页铺开任务。当前 R29 提交未推。
+
 ## 2026-10-13 | R28 规则引擎 schema 增强三任务交付（reg-value/段正则/max-depth；净室只做能力不含数据）
 
 - **背景与边界**：研读一份**仓库外第三方规则材料**（不入库，AGENTS 红线 5）后评审"扩大缓存类目覆盖率"需求，结论：公开主线只落地**通用引擎能力**，任何具体软件清理数据不随本批次进入仓库；规则包二期的实际规则将来一律基于本机实测自研（R27-1 同款净室流程：行为事实可参考、参数/品牌词不碰）。SPEC/TASKS 先评审后写码。

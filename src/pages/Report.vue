@@ -7,6 +7,7 @@ import { commands } from "../api";
 import { useScanStore } from "../stores/scan";
 import { useCleanStore } from "../stores/clean";
 import { buildReportOverview, type ReportCategory, type ReportPlan } from "./reportModel";
+import { useCountUp } from "../composables/useCountUp";
 
 // P1-08 真数据联调：报告直接读全局扫描会话（mock 开关在 store 层切换）。
 const store = useScanStore();
@@ -57,6 +58,11 @@ const cleanItems = computed(() => {
 
 const selectedBytes = computed(() => cleanItems.value.reduce((s, i) => s + i.sizeBytes, 0));
 const hasRed = computed(() => cleanItems.value.some((i) => i.grade === "red"));
+
+// R29：落定总量/已选量数字补间（汇总值，非高频实时数据）。
+const animatedImmediate = useCountUp(() => overview.value.immediateBytes, { durationMs: 650 });
+const animatedQuarantine = useCountUp(() => overview.value.quarantineBytes, { durationMs: 650 });
+const animatedSelected = useCountUp(selectedBytes, { durationMs: 220 });
 
 const redExpanded = ref(false);
 
@@ -116,17 +122,17 @@ function onTokenConfirm(token: string) {
       </div>
       <!-- 总览 -->
       <section class="overview">
-        <div class="metric">
+        <div class="metric anim-rise d1">
           <span class="metric-label">可立即释放</span>
-          <span class="metric-val g">{{ formatBytes(overview.immediateBytes) }}</span>
+          <span class="metric-val g">{{ formatBytes(animatedImmediate) }}</span>
           <span class="metric-note">🟢 直清 / 回收站</span>
         </div>
-        <div class="metric">
+        <div class="metric anim-rise d2">
           <span class="metric-label">进隔离区（可还原）</span>
-          <span class="metric-val y">{{ formatBytes(overview.quarantineBytes) }}</span>
+          <span class="metric-val y">{{ formatBytes(animatedQuarantine) }}</span>
           <span class="metric-note">🟡/🔴 14 天可还原</span>
         </div>
-        <div class="metric">
+        <div class="metric anim-rise d3">
           <span class="metric-label">风险分布</span>
           <span class="metric-val risk">
             <span class="g-r">🟢×{{ overview.riskItems.green }}</span>
@@ -138,14 +144,18 @@ function onTokenConfirm(token: string) {
       </section>
 
       <!-- 逐项类目（可解释 + 去向预告） -->
-      <section class="card">
+      <section class="card anim-rise d2">
         <h2 class="card-title">清理项（可了解每项为什么删）</h2>
         <ul class="cat-list">
           <li
-            v-for="cat in overview.categories"
+            v-for="(cat, idx) in overview.categories"
             :key="cat.categoryId"
             class="cat-row"
-            :class="{ red: cat.grade === 'red' && !redExpanded }"
+            :class="[
+              { red: cat.grade === 'red' && !redExpanded },
+              idx < 8 ? 'row-in' : '',
+            ]"
+            :style="idx < 8 ? { animationDelay: 120 + idx * 35 + 'ms' } : {}"
           >
             <span v-if="cat.grade !== 'red'" class="check">{{ isIncluded(cat) ? "☑" : "☐" }}</span>
             <span v-else class="check lock">🔒</span>
@@ -178,7 +188,7 @@ function onTokenConfirm(token: string) {
       </p>
 
       <!-- A/B 方案对比：给选项不给结论 -->
-      <section class="card">
+      <section class="card anim-rise d3">
         <h2 class="card-title">清理方案（给选项不给结论）</h2>
         <div class="plans">
           <button
@@ -204,7 +214,7 @@ function onTokenConfirm(token: string) {
 
       <footer class="foot">
         <p class="foot-note">
-          你将释放 <strong>{{ formatBytes(selectedBytes) }}</strong>
+          你将释放 <strong>{{ formatBytes(animatedSelected) }}</strong>
           （🟢 立即释放 · 🟡/🔴 进隔离区）
           <span v-if="hasRed && !expertMode" class="red-warn">· 含 🔴 危险项，需先开启专家模式</span>
         </p>
@@ -289,6 +299,7 @@ function onTokenConfirm(token: string) {
 .metric-val {
   font-size: 1.4rem;
   font-weight: 700;
+  font-variant-numeric: tabular-nums;
 }
 .metric-val.g {
   color: var(--grade-green);
@@ -341,6 +352,27 @@ function onTokenConfirm(token: string) {
   padding: 0.55rem 0.6rem;
   border: 1px solid var(--border);
   border-radius: 8px;
+  /* R29：灰禁展开/收起只淡 opacity，不改变布局；锁定语义仍由文案+图标承担 */
+  transition:
+    opacity var(--dur-base) var(--ease-inout),
+    border-color var(--dur-fast) var(--ease-inout),
+    background var(--dur-fast) var(--ease-inout);
+}
+/* R29：前 8 行首屏 stagger rise（之后的行不挂 delay，SPEC §7）。
+   终态 opacity 走元素变量 --row-final，使 🔴 灰禁行（0.55）动画结束后不被 forwards 覆盖。*/
+.row-in {
+  opacity: 0;
+  animation: row-rise var(--dur-base) var(--ease-out) forwards;
+}
+@keyframes row-rise {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: var(--row-final, 1);
+    transform: translateY(0);
+  }
 }
 .check {
   width: 1.3rem;
@@ -384,6 +416,7 @@ function onTokenConfirm(token: string) {
 }
 .cat-row.red {
   opacity: 0.55;
+  --row-final: 0.55;
 }
 .red-toggle {
   margin-top: 0.9rem;
@@ -425,6 +458,7 @@ function onTokenConfirm(token: string) {
   gap: 0.75rem;
 }
 .plan {
+  position: relative;
   text-align: left;
   background: var(--bg);
   border: 1px solid var(--border);
@@ -434,11 +468,40 @@ function onTokenConfirm(token: string) {
   flex-direction: column;
   gap: 0.3rem;
   cursor: pointer;
-  transition: border-color 0.15s ease, background 0.15s ease;
+  transition:
+    border-color var(--dur-fast) var(--ease-inout),
+    background var(--dur-fast) var(--ease-inout),
+    transform var(--dur-fast) var(--ease-inout);
+}
+.plan:active {
+  transform: scale(0.995);
 }
 .plan.active {
   border-color: var(--accent);
   background: rgba(37, 99, 235, 0.07);
+}
+/* R29：选中勾——伪元素 pop 出现（scale+opacity），不引图标库 */
+.plan.active::after {
+  content: "";
+  position: absolute;
+  top: 10px;
+  right: 12px;
+  width: 14px;
+  height: 8px;
+  border-left: 2px solid var(--accent);
+  border-bottom: 2px solid var(--accent);
+  transform: rotate(-45deg) scale(1);
+  animation: plan-check var(--dur-base) var(--ease-out);
+}
+@keyframes plan-check {
+  from {
+    opacity: 0;
+    transform: rotate(-45deg) scale(0.4) translateY(-2px);
+  }
+  to {
+    opacity: 1;
+    transform: rotate(-45deg) scale(1) translateY(0);
+  }
 }
 .plan-name {
   font-weight: 600;
@@ -474,6 +537,7 @@ function onTokenConfirm(token: string) {
 }
 .foot-note strong {
   color: var(--text);
+  font-variant-numeric: tabular-nums;
 }
 .btn-primary {
   background: var(--accent);
@@ -483,6 +547,16 @@ function onTokenConfirm(token: string) {
   border-radius: 8px;
   font-weight: 600;
   cursor: pointer;
+  transition:
+    transform var(--dur-fast) var(--ease-inout),
+    opacity var(--dur-fast) var(--ease-inout),
+    background var(--dur-fast) var(--ease-inout);
+}
+.btn-primary:hover {
+  background: var(--accent-hover, #1d4ed8);
+}
+.btn-primary:active {
+  transform: scale(0.98);
 }
 .btn-primary:disabled {
   opacity: 0.5;
