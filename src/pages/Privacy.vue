@@ -45,7 +45,7 @@ function cleanSelected(): void {
 </script>
 
 <template>
-  <section class="page">
+  <section class="page anim-rise d1">
     <header class="head">
       <h1>隐私资料</h1>
       <p class="sub">浏览器历史与最近文档记录——逐项勾选确认后移入隔离区，14 天内可还原，不直接删除</p>
@@ -59,7 +59,12 @@ function cleanSelected(): void {
     <p v-else-if="groups.length === 0" class="empty-list">本次扫描未发现隐私痕迹</p>
 
     <template v-else>
-      <article v-for="g in groups" :key="g.categoryId" class="group">
+      <article
+        v-for="(g, gi) in groups"
+        :key="g.categoryId"
+        class="group group-in"
+        :style="{ animationDelay: Math.min(gi, 3) * 50 + 80 + 'ms' }"
+      >
         <header class="group-head">
           <h2>{{ g.label }}<span class="count">{{ g.items.length }} 项</span></h2>
           <p class="reason">{{ g.reason }}</p>
@@ -127,6 +132,20 @@ function cleanSelected(): void {
   color: #fff;
   font-size: 0.9rem;
   cursor: pointer;
+  transition:
+    transform var(--dur-fast) var(--ease-inout),
+    background var(--dur-fast) var(--ease-inout);
+}
+.cta:hover {
+  background: var(--accent-hover, #1d4ed8);
+}
+.cta:active {
+  transform: scale(0.98);
+}
+/* R29：分组卡片入场（≤3 组受控 stagger）*/
+.group-in {
+  opacity: 0;
+  animation: ps-rise var(--dur-slow) var(--ease-out) forwards;
 }
 .empty-list {
   padding: 32px 0;
@@ -173,12 +192,19 @@ function cleanSelected(): void {
 }
 .items li {
   border-bottom: 1px solid var(--border, #e4e7ec);
+  transition: background var(--dur-fast) var(--ease-inout);
+}
+.items li:hover {
+  background: var(--surface-2, #f8fafc);
 }
 .items li:last-child {
   border-bottom: none;
 }
 .items li.checked {
   background: rgba(37, 99, 235, 0.07);
+}
+.items li.checked:hover {
+  background: rgba(37, 99, 235, 0.1);
 }
 .row {
   display: flex;
@@ -211,6 +237,7 @@ function cleanSelected(): void {
   font-weight: 600;
   text-align: right;
   min-width: 56px;
+  font-variant-numeric: tabular-nums;
 }
 .date {
   color: var(--text-2, #5a6472);
@@ -236,6 +263,13 @@ function cleanSelected(): void {
   box-shadow: 0 8px 24px rgba(15, 18, 25, 0.12);
   font-size: 0.85rem;
   color: var(--text, #1f2430);
+  animation: ps-actionbar-up var(--dur-slow) var(--ease-out) both;
+}
+@keyframes ps-actionbar-up {
+  from {
+    opacity: 0;
+    transform: translateX(-50%) translateY(10px);
+  }
 }
 .actionbar .note {
   color: var(--grade-green, #2e9e5b);
@@ -249,6 +283,16 @@ function cleanSelected(): void {
   font-size: 0.88rem;
   font-weight: 600;
   cursor: pointer;
+  transition:
+    transform var(--dur-fast) var(--ease-inout),
+    opacity var(--dur-fast) var(--ease-inout),
+    background var(--dur-fast) var(--ease-inout);
+}
+.btn:hover {
+  background: var(--accent-hover, #1d4ed8);
+}
+.btn:active {
+  transform: scale(0.98);
 }
 .btn:disabled {
   opacity: 0.45;

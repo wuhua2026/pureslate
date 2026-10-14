@@ -363,7 +363,7 @@ async function rescanAfterClean(): Promise<void> {
 </script>
 
 <template>
-  <section class="page">
+  <section class="page anim-rise d1">
     <header class="head">
       <h1>软件卸载</h1>
       <p class="sub">
@@ -645,6 +645,14 @@ async function rescanAfterClean(): Promise<void> {
   font-size: 0.9rem;
   background: var(--surface, #fff);
   color: var(--text, #1f2430);
+  transition:
+    border-color var(--dur-fast) var(--ease-inout),
+    box-shadow var(--dur-fast) var(--ease-inout);
+}
+.search:focus {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.12);
 }
 .count {
   font-size: 0.8rem;
@@ -671,6 +679,15 @@ async function rescanAfterClean(): Promise<void> {
   color: var(--text-2, #5a6472);
   font-weight: 600;
   font-size: 0.78rem;
+}
+.list td {
+  font-variant-numeric: tabular-nums;
+}
+.list tbody tr {
+  transition: background var(--dur-fast) var(--ease-inout);
+}
+.list tbody tr:hover {
+  background: var(--surface-2, #f8fafc);
 }
 .list tbody tr:last-child td {
   border-bottom: none;
@@ -714,6 +731,15 @@ async function rescanAfterClean(): Promise<void> {
   color: var(--text-2, #5a6472);
   font-size: 0.82rem;
   cursor: pointer;
+  transition:
+    transform var(--dur-fast) var(--ease-inout),
+    border-color var(--dur-fast) var(--ease-inout),
+    color var(--dur-fast) var(--ease-inout),
+    background var(--dur-fast) var(--ease-inout),
+    opacity var(--dur-fast) var(--ease-inout);
+}
+.btn:active {
+  transform: scale(0.97);
 }
 .btn:disabled {
   cursor: not-allowed;
@@ -748,6 +774,7 @@ async function rescanAfterClean(): Promise<void> {
   border: 1px solid var(--border, #e4e7ec);
   border-radius: 10px;
   padding: 22px 24px;
+  animation: ps-rise var(--dur-base) var(--ease-out) both;
 }
 .panel h2 {
   margin: 0 0 14px;
@@ -871,9 +898,20 @@ async function rescanAfterClean(): Promise<void> {
   border-radius: 10px;
   padding: 12px 14px;
   margin-bottom: 10px;
+  transition:
+    border-color var(--dur-fast) var(--ease-inout),
+    background var(--dur-fast) var(--ease-inout),
+    opacity var(--dur-fast) var(--ease-inout);
+}
+.res-card:hover {
+  border-color: var(--accent-soft-2, #dbe7ff);
+  background: var(--surface-2, #f8fafc);
 }
 .res-card.off {
   opacity: 0.55;
+}
+.res-card.off:hover {
+  background: var(--surface, #fff);
 }
 .res-card-head {
   display: flex;

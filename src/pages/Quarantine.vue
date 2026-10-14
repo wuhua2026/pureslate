@@ -102,7 +102,7 @@ onUnmounted(() => {
 </script>
 
 <template>
-  <section class="page">
+  <section class="page anim-rise d1">
     <header class="head">
       <h1>隔离区</h1>
       <!-- 语义首行（SAFETY §4.5）：已隔离 ≠ 已释放 -->
@@ -198,6 +198,7 @@ onUnmounted(() => {
   background: var(--surface, #fff);
   color: var(--grade-yellow, #d9971c);
   font-size: 0.85rem;
+  animation: ps-banner-in var(--dur-base) var(--ease-out);
 }
 .quota {
   display: flex;
@@ -210,6 +211,13 @@ onUnmounted(() => {
   background: var(--surface, #fff);
   color: var(--grade-red, #c4382e);
   font-size: 0.85rem;
+  animation: ps-banner-in var(--dur-base) var(--ease-out);
+}
+@keyframes ps-banner-in {
+  from {
+    opacity: 0;
+    transform: translateY(-4px);
+  }
 }
 .empty-list {
   padding: 32px 0;
@@ -246,11 +254,20 @@ onUnmounted(() => {
   color: var(--text-2, #5a6472);
   font-weight: 500;
 }
+.list tbody tr {
+  transition: background var(--dur-fast) var(--ease-inout);
+}
+.list tbody tr:hover {
+  background: var(--surface-2, #f8fafc);
+}
 .list tbody tr:last-child td {
   border-bottom: none;
 }
 .list tbody tr.checked {
   background: rgba(37, 99, 235, 0.07);
+}
+.list tbody tr.checked:hover {
+  background: rgba(37, 99, 235, 0.1);
 }
 .sel {
   width: 32px;
@@ -266,6 +283,7 @@ onUnmounted(() => {
 .num {
   text-align: right;
   white-space: nowrap;
+  font-variant-numeric: tabular-nums;
 }
 .days.danger {
   color: var(--grade-red, #c4382e);
@@ -285,6 +303,15 @@ onUnmounted(() => {
   color: var(--text, #1f2430);
   font-size: 0.85rem;
   cursor: pointer;
+  transition:
+    transform var(--dur-fast) var(--ease-inout),
+    border-color var(--dur-fast) var(--ease-inout),
+    color var(--dur-fast) var(--ease-inout),
+    background var(--dur-fast) var(--ease-inout),
+    opacity var(--dur-fast) var(--ease-inout);
+}
+.btn:active {
+  transform: scale(0.97);
 }
 .btn:disabled {
   opacity: 0.45;

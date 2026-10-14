@@ -348,6 +348,19 @@ input:focus-visible {
 .anim-rise.d5 { animation-delay: 210ms; }
 .anim-rise.d6 { animation-delay: 255ms; }
 
+/* 弹窗/遮罩入场（各页 mask/dialog 复用；只动 opacity/transform）*/
+@keyframes ps-mask-in {
+  from {
+    opacity: 0;
+  }
+}
+@keyframes ps-modal-pop {
+  from {
+    opacity: 0;
+    transform: translateY(8px) scale(0.97);
+  }
+}
+
 /* 系统「减少动态效果」：token 层统一归零，页面不各自判断 */
 @media (prefers-reduced-motion: reduce) {
   *,

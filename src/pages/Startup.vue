@@ -63,7 +63,7 @@ async function restore(item: StartupEntry): Promise<void> {
 </script>
 
 <template>
-  <section class="page">
+  <section class="page anim-rise d1">
     <header class="head">
       <h1>启动项</h1>
       <p class="sub">开机自动运行的程序与任务——禁用只做备份后移除，不删除程序本身，可随时恢复</p>
@@ -232,6 +232,12 @@ async function restore(item: StartupEntry): Promise<void> {
   color: var(--text-2, #5a6472);
   font-weight: 500;
 }
+.list tbody tr {
+  transition: background var(--dur-fast) var(--ease-inout);
+}
+.list tbody tr:hover {
+  background: var(--surface-2, #f8fafc);
+}
 .list tbody tr:last-child td {
   border-bottom: none;
 }
@@ -292,6 +298,15 @@ async function restore(item: StartupEntry): Promise<void> {
   color: var(--text, #1f2430);
   font-size: 0.82rem;
   cursor: pointer;
+  transition:
+    transform var(--dur-fast) var(--ease-inout),
+    border-color var(--dur-fast) var(--ease-inout),
+    color var(--dur-fast) var(--ease-inout),
+    background var(--dur-fast) var(--ease-inout),
+    opacity var(--dur-fast) var(--ease-inout);
+}
+.btn:active {
+  transform: scale(0.97);
 }
 .btn:disabled {
   opacity: 0.5;
@@ -300,6 +315,9 @@ async function restore(item: StartupEntry): Promise<void> {
 .btn.primary {
   border-color: var(--accent, #3b82f6);
   color: var(--accent, #3b82f6);
+}
+.btn.primary:hover {
+  background: var(--accent-soft, #eaf1ff);
 }
 .btn.danger {
   border-color: var(--grade-red, #c4382e);
@@ -314,6 +332,7 @@ async function restore(item: StartupEntry): Promise<void> {
   align-items: center;
   justify-content: center;
   z-index: 10;
+  animation: ps-mask-in var(--dur-base) var(--ease-out);
 }
 .confirm {
   width: min(480px, calc(100vw - 48px));
@@ -321,6 +340,7 @@ async function restore(item: StartupEntry): Promise<void> {
   border-radius: 12px;
   background: var(--surface, #fff);
   box-shadow: 0 12px 32px rgba(15, 18, 25, 0.2);
+  animation: ps-modal-pop var(--dur-base) var(--ease-out);
 }
 .confirm h3 {
   margin: 0 0 10px;

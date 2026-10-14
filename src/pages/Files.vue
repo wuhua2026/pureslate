@@ -16,7 +16,7 @@ const hasScan = computed(() => scan.result !== null);
 </script>
 
 <template>
-  <section class="page">
+  <section class="page anim-rise d1">
     <header class="head">
       <h1>大文件</h1>
       <p class="sub">≥500MB 的文件清单，按大小降序——仅信息展示，清理请到报告页勾选确认</p>
@@ -90,6 +90,15 @@ const hasScan = computed(() => scan.result !== null);
   color: #fff;
   font-size: 0.9rem;
   cursor: pointer;
+  transition:
+    transform var(--dur-fast) var(--ease-inout),
+    background var(--dur-fast) var(--ease-inout);
+}
+.cta:hover {
+  background: var(--accent-hover, #1d4ed8);
+}
+.cta:active {
+  transform: scale(0.98);
 }
 .empty-list {
   padding: 32px 0;
@@ -128,6 +137,12 @@ const hasScan = computed(() => scan.result !== null);
   color: var(--text-2, #5a6472);
   font-weight: 500;
 }
+.list tbody tr {
+  transition: background var(--dur-fast) var(--ease-inout);
+}
+.list tbody tr:hover {
+  background: var(--surface-2, #f8fafc);
+}
 .list tbody tr:last-child td {
   border-bottom: none;
 }
@@ -142,6 +157,7 @@ const hasScan = computed(() => scan.result !== null);
 .num {
   text-align: right;
   white-space: nowrap;
+  font-variant-numeric: tabular-nums;
 }
 .strong {
   font-weight: 600;
