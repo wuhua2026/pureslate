@@ -80,7 +80,11 @@ const setting = { to: "/settings", label: "设置", icon: "settings" } as const;
     </aside>
 
     <main class="content">
-      <router-view />
+      <router-view v-slot="{ Component }">
+        <Transition name="page" mode="out-in">
+          <component :is="Component" />
+        </Transition>
+      </router-view>
     </main>
   </div>
 </template>
@@ -112,6 +116,13 @@ const setting = { to: "/settings", label: "设置", icon: "settings" } as const;
   --r-nav: 10px;
   --shadow-card: 0 1px 2px rgba(16, 24, 40, 0.04), 0 4px 14px rgba(16, 24, 40, 0.05);
   --shadow-pop: 0 8px 28px rgba(16, 24, 40, 0.12);
+
+  /* R29 动效 token（SPEC §7：全应用唯一来源，禁止散写时长/缓动）*/
+  --dur-fast: 140ms;
+  --dur-base: 220ms;
+  --dur-slow: 340ms;
+  --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
+  --ease-inout: cubic-bezier(0.4, 0, 0.2, 1);
 
   --font: system-ui, "Microsoft YaHei UI", "Segoe UI", sans-serif;
 }
@@ -282,5 +293,80 @@ button:focus-visible,
 input:focus-visible {
   outline: 2px solid var(--accent);
   outline-offset: 2px;
+}
+
+/* ===== R29 动效（SPEC §7）===== */
+
+/* 数字类文本统一等宽数字，补间/高频刷新时不跳动 */
+.metric-val,
+.m-val,
+.disk-pct,
+.pct,
+.promise-t {
+  font-variant-numeric: tabular-nums;
+}
+
+/* 路由切换：fade + 8px 上移（只动 transform/opacity）*/
+.page-enter-active {
+  transition:
+    opacity var(--dur-base) var(--ease-out),
+    transform var(--dur-base) var(--ease-out);
+}
+.page-leave-active {
+  transition:
+    opacity var(--dur-fast) var(--ease-inout),
+    transform var(--dur-fast) var(--ease-inout);
+}
+.page-enter-from {
+  opacity: 0;
+  transform: translateY(8px);
+}
+.page-leave-to {
+  opacity: 0;
+  transform: translateY(-4px);
+}
+
+/* 首屏入场工具类：挂载时 rise，配合 d1..d6 做受控 stagger（≤6 级/页，SPEC §7）*/
+@keyframes ps-rise {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+.anim-rise {
+  opacity: 0;
+  animation: ps-rise var(--dur-slow) var(--ease-out) forwards;
+}
+.anim-rise.d1 { animation-delay: 30ms; }
+.anim-rise.d2 { animation-delay: 75ms; }
+.anim-rise.d3 { animation-delay: 120ms; }
+.anim-rise.d4 { animation-delay: 165ms; }
+.anim-rise.d5 { animation-delay: 210ms; }
+.anim-rise.d6 { animation-delay: 255ms; }
+
+/* 系统「减少动态效果」：token 层统一归零，页面不各自判断 */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-delay: 0ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    transition-delay: 0ms !important;
+    scroll-behavior: auto !important;
+  }
+  .anim-rise {
+    opacity: 1;
+  }
+  .page-enter-from,
+  .page-leave-to {
+    opacity: 1;
+    transform: none;
+  }
 }
 </style>

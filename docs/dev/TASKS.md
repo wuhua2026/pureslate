@@ -144,6 +144,22 @@
 
 ---
 
+## 附加批次 · R29 视图层动效现代化（三屏试点先行，SPEC §7 动效规范）
+
+> 定位：方案 A（浅色蓝白基调不变），在现有 token 上做动效语言统一与三屏试点；
+> 零动画重依赖（不引组件库/GSAP/Lottie）；动效只进视图层（.vue/composables），
+> stores/纯函数 models 零改动。**试点三屏（Home/Scan/Report）经人类真机确认调性后，
+> 其余 13 页才允许铺开（后续任务）。**安全语义（🔴 灰禁/取消/执行态）优先于观感。
+
+| ID | 任务 | 依赖 | 产出 / DoD | 验证 |
+|----|------|------|-----------|------|
+| R29-1 | ✅ 动效基建 | — | ✅ SPEC §7 增动效 token 与规范；App.vue：motion 变量（140/220/340ms+双缓动）、router-view out-in 过渡（fade+8px）、`.anim-rise`+d1..d6、全局 reduced-motion 归零（含 delay 清零）；`src/composables/useCountUp.ts`（rAF ease-out 立方、目标变化续间、reduced 直跳、卸载取消帧） | ✅ typecheck/71 vitest/build 绿；**真机走查待人类（路由淡入/减少动画总闸）** |
+| R29-2 | ✅ Home 试点 | R29-1 | ✅ hero/区块 stagger rise；抽出 [DiskUsageCard.vue](src/components/DiskUsageCard.vue)：挂载 scaleX 进度生长+百分比 count-up（700ms）；圆环极弱呼吸（opacity/scale，不伪造进度）；宫格 8 卡受控 stagger（≥7 同级差封顶）+按压缩放；散写时长全部换 token | ✅ typecheck/build 绿；真机确认待人类 |
+| R29-3 | ✅ Scan 试点 | R29-1 | ✅ 当前路径 keyed Transition（out-in/fast，路径窗口定高不顶布局）；阶段图标 key=phase pop（scale 0.6→1）；进度条改 scaleX+ease-out（不做 width 过渡）+流光伪元素（cancel/暂停态流光停）；待命/扫描/完成卡 rise；实时数字 tabular-nums；取消按钮按压缩放且始终可点 | ✅ typecheck/build 绿；真机确认待人类（连刷路径/取消即停） |
+| R29-4 | ✅ Report 试点（代码完成，待真机验收） | R29-2,R29-3 | ✅ 三总览指标+底部已选字节 count-up（650/220ms）；三卡 d1-d3 rise+前 8 类目行 stagger（行终态 opacity 走 --row-final 变量，避免覆盖 🔴 灰禁 0.55）；🔴 灰禁展开改 opacity 过渡（🔒/文案/不可选语义不变）；A/B 卡选中态+勾号 pop+按压缩放；主按钮 hover/active | ✅ typecheck/71 vitest（模型零回归）/build 绿（index gzip 42.55→45.04 KB，+2.5KB；零新 npm 依赖）。**硬门禁待办：人类 pnpm tauri dev 真机确认三屏调性 → 过了才开后续页面铺开任务；NSIS 体积复测随下次 build** |
+
+---
+
 ## 附：裁剪预案（校准点触发，人类决策）
 
 | 触发 | 动作 | 影响 |

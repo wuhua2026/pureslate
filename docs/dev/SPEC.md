@@ -284,6 +284,24 @@ journal 协议见 SAFETY §3。🟢 direct：`RemoveFile`（Windows API，绕过
 --border: #E4E7EC; --accent: #3B82F6; --font: system-ui, "Microsoft YaHei UI";
 ```
 
+动效 token（R29，全应用唯一来源，禁止散写时长/缓动）：
+
+```css
+--dur-fast: 140ms;      /* 悬停/按压等即时反馈 */
+--dur-base: 220ms;      /* 路由切换/折叠/状态切换 */
+--dur-slow: 340ms;      /* 首屏入场/数字补间上限 */
+--ease-out: cubic-bezier(0.16, 1, 0.3, 1);   /* 入场（减速）*/
+--ease-inout: cubic-bezier(0.4, 0, 0.2, 1); /* 状态双向切换 */
+```
+
+动效规范（R29）：
+- **只动 `transform` 与 `opacity`**（合成层属性），禁止动画 width/height/top/left；需要展开收起用 `grid-template-rows: 0fr→1fr` 或 opacity+transform，不触发布局；
+- 单元素动画时长 ≤ `--dur-slow`（340ms），清理工具的"快感"优先；stagger 仅用于首屏卡片（每页 ≤8 级、级差 45ms），**禁止给长列表每行挂 delay**；
+- 数字补间（容量/进度汇总）统一走 `composables/useCountUp.ts`（rAF + ease-out），高频更新的实时扫描字节数不补间、仅用 `font-variant-numeric: tabular-nums` 防跳动；
+- 必须服从系统「减少动态效果」：`@media (prefers-reduced-motion: reduce)` 下全局动画/过渡一律归零（token 层统一处理，页面不各自判断）；
+- **安全语义优先于观感**：🔴 灰禁/锁定、取消按钮、执行中状态的可见性与可点性不得被动画延迟、遮挡或弱化；完成勾号等反馈动画 ≤220ms；
+- 动效只允许存在于视图层（.vue/composables），stores 与纯函数 models 零动画依赖（测试体系不变）；不引入动画重依赖（不使用 GSAP/Lottie/组件库自带过渡体系）。
+
 硬性要求：🔴 除颜色外必须同时有图标+文案；无托盘/无开机推广/无红点角标；「已释放 vs 已隔离」语义区分（SAFETY §4.5）；线框参照 PRD 7.4 八屏（Home/报告/二次确认/日志/扫描中/执行中/完成/隔离区）。
 
 ## 8. 测试与度量
