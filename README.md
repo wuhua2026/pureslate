@@ -2,11 +2,11 @@
 
 **Windows 开源（MIT）PC 清理工具。** 只读扫描 → 安全分级（🟢🟡🔴）→ 人工确认 → 分级去向（🟢直清/回收站、🟡🔴隔离区 14 天可还原）→ 全程结构化审计日志。
 
-技术栈：Tauri 2（Rust 内核）+ Vue 3 + TypeScript(strict)，安装包 <1MB，零广告/零捆绑/默认零数据外传。
+技术栈：Tauri 2（Rust 内核）+ Vue 3 + TypeScript(strict)，安装包约 2.8MB，零广告/零捆绑/默认零数据外传。
 
 ## 下载安装
 
-从 [**GitHub Releases**](https://github.com/wuhua2026/pureslate/releases/latest) 下载 `PureSlate_x.y.z_x64-setup.exe`：
+最新版本：**[v0.2.0](https://github.com/wuhua2026/pureslate/releases/tag/v0.2.0)**（从 [**GitHub Releases**](https://github.com/wuhua2026/pureslate/releases/latest) 始终获取最新版），下载 `PureSlate_0.2.0_x64-setup.exe`：
 
 - 系统要求：Windows 10 / 11（x64）；
 - 安装包 sha256 见 Release 页附件与 `update-manifest.json`；
@@ -25,6 +25,7 @@
 | 应用缓存 | 规则驱动（含微信等，进程运行中自动整类阻止） | 🟡 隔离区 |
 | 隐私痕迹 | Edge/Chrome 浏览历史、最近文档 | 🟡 隔离区 |
 | 启动项 | 注册表 Run / 启动文件夹 / 登录触发计划任务；禁用 = 备份后移除，可恢复 | — |
+| 软件卸载 | 调起**官方卸载器**（不接管删除、不强杀进程），事后扫描安装目录/开始菜单/AppData 残留 | 🟡 隔离区 / 🔴 直删 |
 
 - 🔴 高风险项默认灰禁：需开启专家模式 + 逐字输入应用后端签发的一次性确认令牌；
 - **隔离区**：每卷根 `.pureslate-quarantine`（隐藏），14 天（可配 7–30 天）内一键还原，到期自动清除、前 3 天提醒、容量上限；

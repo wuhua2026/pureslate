@@ -129,3 +129,26 @@
 - **前端**：Apps 页结果态新增"扫描卸载残留"→ 残留四态（扫描中/清单逐项勾选+理由+根路径+每组去向单选/进度/结果）；direct 选择复用 ConfirmTokenModal（专家令牌）；residueModel 纯函数 7 例；mock 三源有状态样本。
 - **边界**：不做无上下文全局孤儿扫描；不碰 UWP/驱动/服务；本批不新增任何独立删除路径（直删走既有 DeleteFileW 通道且受 preflight+token 双闸）；测试钩子 `quarantine::set_quarantine_root_override`（仅测试构建注入，生产无调用）。评审 `docs/review/R27-3.md`。
 - **验证**：cargo fmt/clippy --all-targets -D warnings 全绿；uninstall 模块 40 例全绿（residue.rs 16 例：名称归一/发布者/精确匹配/双闸安全/三源枚举/junction 放弃/快照信任/空目录收尾；preflight 新增授权分层 1 例；其余为 R27-1/2 既有 24 例，全库 195 lib）+27 集成（新增 residue_pipeline 3 例：quarantine 移入→manifest→空目录收尾→还原重建目录链 roundtrip、direct 永久删除+审计、空目录候选）；pnpm typecheck/vitest(71)/build 全绿。
+
+### R28 规则引擎 schema 增强（SPEC §4.1/§6.1，规则 XML schema 加性；**IPC 契约零改动**）
+
+> 本批只增强规则**表达能力**，不含任何具体软件清理数据；随包规则包内容与安全分级不变。
+- **reg-value 动态目标（加性）**：`<target type="reg-value" hive key value view base>`（hive=HKLM/HKCU；view=native/wow64；base=path/parent），只读 `RegQueryValueExW`（KEY_READ=0x20019+WOW64 标志，REG_SZ/REG_EXPAND_SZ 后者经 `ExpandEnvironmentStringsW` 展开，复用 startup::winreg FFI，零新 winreg 调用方破坏）；键/值缺失、类型不符、解析后路径不存在 → 按"本机未安装"**软失败跳过 target**（不报错）；XML 属性非法 → 丢整个 category。裸根闸：含 reg-value 的类目 include 无分隔符时仅允许纯扩展名 `*.ext`、有分隔符须至少一个字面路径段（`**/*` 等全通配拒绝）。
+- **路径段收紧（加性）**：include/exclude 属性 `segment-regex`+`segment-index`（成对，缺一致/坏 index → 丢 category；段 0 起含文件名段，自动首尾锚定，越界=不命中）；段正则编译失败在加载期丢弃该条规则（**fail-closed，不退化为裸 glob**）。新增依赖 regex-lite 0.1.9（无 Unicode 表）。
+- **max-depth（加性）**：include 属性 `max-depth:u16`（根直属文件=1，缺省不限；0/非数字/与 recursive=false 矛盾 → 丢 category）；`recursive="false"` 显式归一为深度 1（此前仅靠 glob 形状隐式约束）；walkdir 类目级 `max_depth` 剪深 + matcher per-include 段数裁尾，MFT 引擎经同一 `match_include` 段数校验语义等价。
+- **loader 健壮性**：非法 target 只丢所属 category（不再炸整文件，PartialCategory.fatal）；编译失败的 glob/正则不进入 GlobSet，约束/守卫数组与入集索引严格对齐（修复此前坏 glob 静默跳过导致约束索引错位的隐患）。
+- **验证**：cargo fmt/clippy --all-targets -D warnings/test 全绿（220 lib +27 集成，R28 新增 25 例）；pnpm typecheck/vitest(71)/build 全绿；NSIS 安装包 2.80 MiB（较 v0.1.6 +50.7 KiB）；SPEC §4.1/§6.1 已同步；contract.rs/ipc.ts git diff 为空。
+
+### R29 视图层动效现代化（SPEC §7，纯前端；**IPC 契约零改动**）
+
+- **动效基建**：App.vue 增 motion token（`--dur-fast/base/slow`=140/220/340ms、ease-out/inout）、router-view out-in 过渡（fade+8px 位移）、`.anim-rise`+d1..d6 受控 stagger 工具类、全局 `prefers-reduced-motion` 总闸（duration+delay 双清零）；新增 `composables/useCountUp.ts`（rAF ease-out 立方、目标变化续间、reduced 直跳、卸载取消帧）。
+- **覆盖范围**：Home（磁盘卡 scaleX 生长+百分比 count-up、圆环呼吸、宫格 stagger/按压，抽出 DiskUsageCard.vue）、Scan（路径 keyed out-in 轮换、阶段图标 pop、进度 scaleX+流光、tabular-nums）、Report（总量/已选字节 count-up、前 8 行 stagger、🔴 灰禁 opacity 过渡、A/B 勾号 pop）；Files/Startup/Privacy/Apps/Quarantine/Log/Settings/Executing/Placeholder 全页铺开（行 hover、按钮按压缩放、面板 rise、Startup/ConfirmToken 弹窗遮罩淡入+pop、Executing 逐项 ✓ 弹现）。
+- **安全/性能约束**：只动 transform/opacity；高频实时数字不补间仅 tabular-nums；stagger 仅限首屏卡片/≤8 行/≤3 分组，长表格不做行入场；🔴 灰禁/锁定/取消按钮可见可点性不被弱化，GradeBadge 刻意零动效；stores/纯函数 models 零动画依赖（71 单测零回归）。
+- **依赖**：零新增 npm 依赖；index gzip 42.55→45.04 KB。
+
+### v0.2.0（发布）
+
+- 2026-10-14 发布：tag `v0.2.0`（annotated，指向版本 bump 提交；工作流 tag=tauri.conf.json 版本校验通过）；
+- Release run 全步骤绿（双次 NSIS 重建 + 体积门禁）；四资产：`PureSlate_0.2.0_x64-setup.exe`（**2.80 MiB**）、`PureSlate-0.2.0-portable.zip`（3.77 MiB）、`pureslate-rules-0.2.0.json`、`build-hashes.json`；
+- Release 页：<https://github.com/wuhua2026/pureslate/releases/tag/v0.2.0>（正文 `.github/release-notes/v0.2.0.md`）；
+- 版本三处 bump：src-tauri/Cargo.toml、tauri.conf.json、Cargo.lock（package.json 历史恒 0.1.0 不参与 CI 版本校验，未动）；发布后 update-manifest + rules pack 经 [skip ci] bot 提交回推 main（35fe3a3）。

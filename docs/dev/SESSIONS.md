@@ -5,6 +5,14 @@
 > 维护（AGENTS.md §9）：任务完成时 agent 自动追加/更新当前会话条目，随任务同一提交。格式：`## YYYY-MM-DD | 主题`。
 > 本初版由历史会话记忆回溯整理（截至 2026-09-29），细节以 git 历史与 TASKS.md 为准。
 
+## 2026-10-14 | v0.2.0 发布（R28 规则 schema 增强 + R29 全界面动效；Release 全绿）
+
+- **发布内容**：v0.1.6 后 12 个提交——R28-1..4 规则引擎 schema 三能力（reg-value 动态目标/segment-regex 段收紧/max-depth 深度封顶，regex-lite 0.1.9）+ R29-1..7 全 12 页动效现代化（motion token/路由过渡/count-up/reduced-motion 总闸，零新前端依赖）。
+- **流程**（吸取 v0.1.6"Release 绿但 main CI 红"教训，顺序前置）：①先确认 R28+R29 push 触发的 main CI run #30（624bc52）completed/success 才动版本；②三处 bump 0.1.6→0.2.0（Cargo.toml/tauri.conf.json/Cargo.lock，package.json 恒 0.1.0 不动），cargo check 实证编出 pureslate v0.2.0；③写 `.github/release-notes/v0.2.0.md`，提交 9b31776；④annotated tag v0.2.0（核对 tag 指向与 conf 版本一致）后分别 push main 与 tag。
+- **Release 结果**：run #12 全 19 步 success（15:35→15:43，约 8.5 分钟；双次 NSIS 重建+size gate+gh release+manifest 回推）。四资产：setup.exe **2.80 MiB**、portable.zip 3.77 MiB、rules-0.2.0.json、build-hashes.json。Release API 实证 published/draft=false/prerelease=false；ls-remote 实证 tag 已在远端（不依赖 push 回显）。
+- **回推同步**：bot 提交 35fe3a3（update-manifest + rules pack，[skip ci]）已 --ff-only 拉回本地，本地=远端 main。
+- **文档同步（本提交）**：CHANGELOG 增 R28/R29/v0.2.0 三节；README 修过期体积（<1MB→约 2.8MB）、补 v0.2.0 下载链接与"软件卸载"功能行（v0.1.6 起已有但此前漏列）；LESSONS ④体积行更新为发布口径。
+
 ## 2026-10-14 | R29 视图层动效：三屏试点 + 全 12 页/通用弹窗铺开完成（方案 A，零新依赖）
 
 - **流程（硬门禁生效）**：先出 SPEC §7 动效 token+规范与 Home/Scan/Report 三屏试点（R29-1..4，4 提交），
