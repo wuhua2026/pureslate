@@ -110,8 +110,8 @@
 
 ## 7. 净室合规（每次发版前核对）
 
-- [ ] 源码 100% 自写；无 Dism++ `Data.xml`、`CBSHost`、`NCleaner` 等任何成分；
+- [ ] 源码 100% 自写，不含任何第三方工具的代码、参数或资源成分；
 - [ ] 规则 XML 全部自研，清理参数（路径/通配/保留策略）为自行设计；
-- [ ] 无竞品品牌词（PureSlate/净板 之外不含"管家/Dism/联想"等词出现在 UI 与包名）；
+- [ ] UI 与包名不含第三方竞品品牌词；
 - [ ] `cargo deny check` 与 `pnpm dlx license-checker` 通过（无 GPL 传染依赖）；
-- [ ] README 含「与 Dism++/联想电脑管家无关联」免责声明 + 「唯一官方发布渠道 = 本仓库 GitHub Releases」。
+- [ ] README 含「唯一官方发布渠道 = 本仓库 GitHub Releases」。
