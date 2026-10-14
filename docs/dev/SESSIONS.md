@@ -5,12 +5,33 @@
 > 维护（AGENTS.md §9）：任务完成时 agent 自动追加/更新当前会话条目，随任务同一提交。格式：`## YYYY-MM-DD | 主题`。
 > 本初版由历史会话记忆回溯整理（截至 2026-09-29），细节以 git 历史与 TASKS.md 为准。
 
+## 2026-10-14 | R29 视图层动效：三屏试点 + 全 12 页/通用弹窗铺开完成（方案 A，零新依赖）
+
+- **流程（硬门禁生效）**：先出 SPEC §7 动效 token+规范与 Home/Scan/Report 三屏试点（R29-1..4，4 提交），
+  用户真机验收放行后才铺其余页面（R29-5..7，3 提交）。试点阶段未提前改其他页。
+- **铺开范围**：①列表页 Files/Startup/Privacy/Apps/Quarantine（页 rise、行 hover、按钮按压缩放、
+  数字 tabular-nums、Startup 弹窗 pop、Privacy 分组 stagger+操作条浮起、Apps 搜索 focus 环/面板 rise）；
+  ②Log/Settings（三卡 stagger、dump 预览淡入）、Executing（进度 scaleX、逐项 ✓ 弹现、完成态字节
+  count-up、取消按钮按压）；③ConfirmTokenModal 改 Transition 遮罩淡入+pop（appear/leave 完整）；
+  ④Placeholder rise、侧栏导航过渡统一 token。全局弹窗 keyframe（ps-mask-in/ps-modal-pop）提升到 App.vue。
+- **关键结论（续试点条目）**：①**安全语义组件刻意不动**——GradeBadge（尤其红级徽章）不加弹跳，
+  严肃/警示语义不靠动效吸引注意力；②执行页高频实时数字只 tabular-nums 不补间，仅完成态落定数字
+  count-up（340ms 封顶），且 composable 在 setup 期调用、watch 续间，完成切卡时自然从 0 补到终值；
+  ③弹窗动画用 Transition 包裹 v-if 根元素、内层选择器（.enter-active .modal）做 pop，
+  比纯挂载 CSS 动画多了完整离场；④进度类统一 scaleX+origin-left 贯穿 Scan/Executing/DiskCard；
+  ⑤表格行不做入场 stagger（行数可能上万），只给 hover；stagger 严格限制在首屏卡片/≤8 类目行/≤3 分组。
+- **验证**：typecheck/71 vitest（模型零回归）/build 全绿；index gzip 稳定 45.04 KB（铺开全 CSS，
+  gzip 增量近零），零新 npm 依赖；reduced-motion 全局总闸（duration+delay 双清零）。
+- **下一步**：全部 12 页已覆盖；剩余可选项（未做，等需求）：深色模式（token 结构已预留）、
+  Executing/Quarantine 列表项增删的 TransitionGroup（表格 FLIP 收益小风险中，暂不做）。
+  R28+R29 共 11 提交在本地未推。
+
 ## 2026-10-14 | R29 视图层动效试点：基建+Home/Scan/Report 三屏（方案 A，待真机验收）
 
 - **做了什么**：用户要求界面现代化+动效。评审否决组件库/GSAP/Lottie，定方案 A（浅色蓝白不变，token 化动效），SPEC §7 新增 motion token（140/220/340ms、ease-out/inout）与 6 条动效规范（只动 transform/opacity、stagger ≤8 级、数字补间走统一 composable、reduced-motion 总闸、安全语义优先、零重依赖）。实现：App.vue 路由 out-in 过渡+`.anim-rise` 工具类+全局减少动画归零（含 delay）；新 `composables/useCountUp.ts`（rAF ease-out 立方，续间/直跳/卸载取消帧）。Home：DiskUsageCard 抽出（scaleX 进度生长+百分比 count-up）、圆环呼吸、宫格 stagger/按压；Scan：路径 keyed out-in 轮换、阶段图标 pop、进度条 scaleX+流光、tabular-nums；Report：总览/已选字节 count-up、前 8 行 stagger、🔴 灰禁 opacity 过渡、A/B 勾号 pop。
 - **关键结论**：①CSS 动画 fill forwards 的终态 opacity 会压过类声明的 opacity——Report 红行 0.55 与 rise 终态打架，用元素变量 `--row-final` 作 keyframe 终态解决（同类问题以后优先变量终态而非 forwards 常量）；②进度类动画一律 scaleX+origin-left，不碰 width（自己定的规范第一时间自查到两处违规并改正）；③reduced-motion 总闸必须同时清 duration **和 delay**，否则 stagger 元素在延迟期仍隐形；④高频实时字节数不补间，只 tabular-nums；数字补间只给落定汇总。
 - **验证**：pnpm typecheck/71 vitest（模型零改动零回归）/build 全绿；index gzip 42.55→45.04 KB（+2.5KB），零新 npm 依赖。
-- **下一步（硬门禁）**：人类 `pnpm tauri dev` 真机看三屏调性（重点：路由淡入节奏、扫描路径连刷不堆积、报告数字滚动、Windows 设置开"减少动画"后全静止）；确认后再开后续 13 页铺开任务。当前 R29 提交未推。
+- **下一步（硬门禁当时）**：人类 `pnpm tauri dev` 真机看三屏调性 → 已于 2026-10-14 放行，铺开见上方条目。
 
 ## 2026-10-13 | R28 规则引擎 schema 增强三任务交付（reg-value/段正则/max-depth；净室只做能力不含数据）
 

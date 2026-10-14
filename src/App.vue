@@ -240,12 +240,12 @@ button {
   font-weight: 500;
   white-space: nowrap;
   transition:
-    background 0.14s ease,
-    color 0.14s ease;
+    background var(--dur-fast) var(--ease-inout),
+    color var(--dur-fast) var(--ease-inout);
 }
 .nav-icon {
   color: var(--text-3);
-  transition: color 0.14s ease;
+  transition: color var(--dur-fast) var(--ease-inout);
   flex-shrink: 0;
 }
 .nav-item:hover {

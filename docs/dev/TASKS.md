@@ -156,7 +156,10 @@
 | R29-1 | ✅ 动效基建 | — | ✅ SPEC §7 增动效 token 与规范；App.vue：motion 变量（140/220/340ms+双缓动）、router-view out-in 过渡（fade+8px）、`.anim-rise`+d1..d6、全局 reduced-motion 归零（含 delay 清零）；`src/composables/useCountUp.ts`（rAF ease-out 立方、目标变化续间、reduced 直跳、卸载取消帧） | ✅ typecheck/71 vitest/build 绿；**真机走查待人类（路由淡入/减少动画总闸）** |
 | R29-2 | ✅ Home 试点 | R29-1 | ✅ hero/区块 stagger rise；抽出 [DiskUsageCard.vue](src/components/DiskUsageCard.vue)：挂载 scaleX 进度生长+百分比 count-up（700ms）；圆环极弱呼吸（opacity/scale，不伪造进度）；宫格 8 卡受控 stagger（≥7 同级差封顶）+按压缩放；散写时长全部换 token | ✅ typecheck/build 绿；真机确认待人类 |
 | R29-3 | ✅ Scan 试点 | R29-1 | ✅ 当前路径 keyed Transition（out-in/fast，路径窗口定高不顶布局）；阶段图标 key=phase pop（scale 0.6→1）；进度条改 scaleX+ease-out（不做 width 过渡）+流光伪元素（cancel/暂停态流光停）；待命/扫描/完成卡 rise；实时数字 tabular-nums；取消按钮按压缩放且始终可点 | ✅ typecheck/build 绿；真机确认待人类（连刷路径/取消即停） |
-| R29-4 | ✅ Report 试点（代码完成，待真机验收） | R29-2,R29-3 | ✅ 三总览指标+底部已选字节 count-up（650/220ms）；三卡 d1-d3 rise+前 8 类目行 stagger（行终态 opacity 走 --row-final 变量，避免覆盖 🔴 灰禁 0.55）；🔴 灰禁展开改 opacity 过渡（🔒/文案/不可选语义不变）；A/B 卡选中态+勾号 pop+按压缩放；主按钮 hover/active | ✅ typecheck/71 vitest（模型零回归）/build 绿（index gzip 42.55→45.04 KB，+2.5KB；零新 npm 依赖）。**硬门禁待办：人类 pnpm tauri dev 真机确认三屏调性 → 过了才开后续页面铺开任务；NSIS 体积复测随下次 build** |
+| R29-4 | ✅ Report 试点（代码完成，待真机验收） | R29-2,R29-3 | ✅ 三总览指标+底部已选字节 count-up（650/220ms）；三卡 d1-d3 rise+前 8 类目行 stagger（行终态 opacity 走 --row-final 变量，避免覆盖 🔴 灰禁 0.55）；🔴 灰禁展开改 opacity 过渡（🔒/文案/不可选语义不变）；A/B 卡选中态+勾号 pop+按压缩放；主按钮 hover/active | ✅ typecheck/71 vitest（模型零回归）/build 绿（index gzip 42.55→45.04 KB，+2.5KB；零新 npm 依赖）。**硬门禁：人类 pnpm tauri dev 真机确认三屏调性 → 2026-10-14 用户放行铺开** |
+| R29-5 | ✅ 列表页铺开 | R29-4 | ✅ Files/Startup/Privacy/Apps/Quarantine：页首 rise、表格行 hover、按钮统一按压缩放+token 过渡、数字 tabular-nums；Startup 弹窗遮罩淡入+pop（keyframe 提升为全局 ps-mask-in/ps-modal-pop）；Privacy 分组 stagger（≤3）+操作条浮起；Apps 面板 rise、搜索 focus 环、残留卡 hover | typecheck/build 绿（ca…提交） |
+| R29-6 | ✅ 状态页与通用弹窗 | R29-4 | ✅ Log（卡片 rise/行 hover/按钮）、Settings（三卡 stagger/dump 行 hover/预览淡入/输入 focus 环）、Executing（进度 scaleX、逐项 ✓ 弹现、完成态双字节 count-up、取消按钮按压；高频实时数字不补间）；ConfirmTokenModal 改 Transition 遮罩淡入+pop（appear/leave）；**GradeBadge 刻意零动效**（红级徽章弹跳会弱化严肃语义） | typecheck/71 vitest/build 绿 |
+| R29-7 | ✅ 收尾与全量门禁 | R29-5,R29-6 | ✅ Placeholder rise；侧栏导航/图标过渡统一 token（不加位移保持导航稳定）；全量门禁+SESSIONS/LESSONS 更新 | 见本行验证列 |
 
 ---
 

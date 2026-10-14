@@ -6,7 +6,7 @@ const title = (route.meta.title as string) ?? "页面";
 </script>
 
 <template>
-  <main class="placeholder">
+  <main class="placeholder anim-rise d1">
     <h2>{{ title }}</h2>
     <p class="desc">
       该页面将在后续 Phase 构建（报告页 P1-07 / 真数据联调 P1-08 / 后续清理链路）。
