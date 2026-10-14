@@ -84,7 +84,7 @@ onMounted(load);
 
     <div v-if="error" class="error">{{ error }}</div>
 
-    <section class="card">
+    <section class="card anim-rise d1">
       <div class="toolbar">
         <span class="m-label">明细（{{ entries.length }}）</span>
         <div class="tools">
@@ -177,11 +177,23 @@ onMounted(load);
   padding: 0.4rem 0.9rem;
   font-size: 0.85rem;
   cursor: pointer;
+  transition:
+    transform var(--dur-fast) var(--ease-inout),
+    border-color var(--dur-fast) var(--ease-inout),
+    color var(--dur-fast) var(--ease-inout),
+    background var(--dur-fast) var(--ease-inout),
+    opacity var(--dur-fast) var(--ease-inout);
+}
+.tbtn:active {
+  transform: scale(0.97);
 }
 .tbtn.primary {
   background: var(--accent);
   border-color: var(--accent);
   color: #fff;
+}
+.tbtn.primary:hover {
+  background: var(--accent-hover);
 }
 .tbtn:disabled {
   opacity: 0.5;
@@ -209,12 +221,19 @@ onMounted(load);
   border-bottom: 1px solid var(--border);
   vertical-align: top;
 }
+.tbl tbody tr {
+  transition: background var(--dur-fast) var(--ease-inout);
+}
+.tbl tbody tr:hover {
+  background: var(--surface-2, #f8fafc);
+}
 .tbl th {
   color: var(--text-2);
   font-weight: 600;
 }
 .mono {
   font-family: ui-monospace, monospace;
+  font-variant-numeric: tabular-nums;
 }
 .fail {
   color: var(--grade-red);

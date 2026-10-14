@@ -2,6 +2,7 @@
 import { computed } from "vue";
 import { useCleanStore } from "../stores/clean";
 import { ALL_DISPOSITIONS } from "../stores/cleanMetrics";
+import { useCountUp } from "../composables/useCountUp";
 
 const store = useCleanStore();
 
@@ -45,6 +46,10 @@ const rows = computed(() =>
 // 完成页首行（SAFETY §4.5：已释放 vs 已隔离，禁止混用"已清理"）。
 const summary = computed(() => store.result);
 
+// 完成态字节数补间（落定汇总，≤340ms；执行中高频数字不补间）。
+const animatedFreed = useCountUp(() => store.freedBytes, { durationMs: 340 });
+const animatedQuarantined = useCountUp(() => store.quarantinedBytes, { durationMs: 340 });
+
 // 最近逐项（倒序，最新在顶）。
 const recent = computed(() => [...store.progressEvents].reverse().slice(0, 6));
 </script>
@@ -61,12 +66,12 @@ const recent = computed(() => [...store.progressEvents].reverse().slice(0, 6));
 
     <!-- 完成态 -->
     <template v-else-if="store.isDone && summary">
-      <section class="done-card">
+      <section class="done-card anim-rise d1">
         <h2 class="done-title">清理完成</h2>
         <p class="semantics">
-          <span class="freed">已释放 <strong class="g-num">{{ formatBytes(store.freedBytes) }}</strong></span>
+          <span class="freed">已释放 <strong class="g-num">{{ formatBytes(animatedFreed) }}</strong></span>
           <span class="sep">·</span>
-          <span class="quar">已隔离 <strong class="y-num">{{ formatBytes(store.quarantinedBytes) }}</strong></span>
+          <span class="quar">已隔离 <strong class="y-num">{{ formatBytes(animatedQuarantined) }}</strong></span>
         </p>
         <p class="sema-note">
           「已释放」= 直清 / 回收站已让渡体积；「已隔离」= 转入隔离区，<b>尚未释放</b>，保留期内可还原。
@@ -84,13 +89,16 @@ const recent = computed(() => [...store.progressEvents].reverse().slice(0, 6));
     </template>
 
     <!-- 执行中 -->
-    <section v-else class="card">
+    <section v-else class="card anim-rise d1">
       <div class="phase-row">
         <span class="phase">{{ store.running ? "正在清理…" : "准备中…" }}</span>
         <span class="pct">{{ store.processed }} / {{ store.itemTotal }} 项</span>
       </div>
       <div class="bar">
-        <div class="bar-fill" :style="{ width: percent + '%' }"></div>
+        <div
+          class="bar-fill"
+          :style="{ transform: `scaleX(${percent / 100})` }"
+        ></div>
       </div>
 
       <!-- 分去向进度 -->
@@ -169,6 +177,9 @@ const recent = computed(() => [...store.progressEvents].reverse().slice(0, 6));
   justify-content: space-between;
   font-weight: 600;
 }
+.phase-row .pct {
+  font-variant-numeric: tabular-nums;
+}
 .bar {
   height: 14px;
   border-radius: 7px;
@@ -178,9 +189,11 @@ const recent = computed(() => [...store.progressEvents].reverse().slice(0, 6));
 }
 .bar-fill {
   height: 100%;
+  width: 100%;
   background: var(--accent);
   border-radius: 7px;
-  transition: width 0.15s linear;
+  transform-origin: left center;
+  transition: transform var(--dur-base) var(--ease-out);
 }
 .disp-stats {
   display: grid;
@@ -207,6 +220,7 @@ const recent = computed(() => [...store.progressEvents].reverse().slice(0, 6));
 .stat-bytes {
   font-size: 1.05rem;
   font-weight: 700;
+  font-variant-numeric: tabular-nums;
 }
 .stat-counts {
   font-size: 0.75rem;
@@ -246,12 +260,27 @@ const recent = computed(() => [...store.progressEvents].reverse().slice(0, 6));
 }
 .st.ok {
   color: var(--grade-green);
+  animation: st-pop var(--dur-base) var(--ease-out);
 }
 .st.fail {
   color: var(--grade-red);
 }
 .st.skip {
   color: var(--text-2);
+}
+/* 逐项完成勾号弹现（≤base，不延迟安全操作反馈）*/
+@keyframes st-pop {
+  0% {
+    opacity: 0;
+    transform: scale(0.3);
+  }
+  60% {
+    transform: scale(1.25);
+  }
+  100% {
+    opacity: 1;
+    transform: scale(1);
+  }
 }
 .rp {
   flex: 1;
@@ -277,6 +306,12 @@ const recent = computed(() => [...store.progressEvents].reverse().slice(0, 6));
   border-radius: 8px;
   font-weight: 600;
   cursor: pointer;
+  transition:
+    transform var(--dur-fast) var(--ease-inout),
+    opacity var(--dur-fast) var(--ease-inout);
+}
+.btn-cancel:active {
+  transform: scale(0.98);
 }
 .btn-cancel:disabled {
   opacity: 0.5;
@@ -313,12 +348,14 @@ const recent = computed(() => [...store.progressEvents].reverse().slice(0, 6));
 }
 .g-num {
   color: var(--grade-green);
+  font-variant-numeric: tabular-nums;
 }
 .quar {
   color: var(--text);
 }
 .y-num {
   color: var(--grade-yellow);
+  font-variant-numeric: tabular-nums;
 }
 .sep {
   color: var(--text-2);
@@ -354,10 +391,22 @@ const recent = computed(() => [...store.progressEvents].reverse().slice(0, 6));
   border-radius: 8px;
   font-weight: 600;
   text-decoration: none;
+  transition:
+    transform var(--dur-fast) var(--ease-inout),
+    background var(--dur-fast) var(--ease-inout);
+}
+.btn:hover {
+  background: var(--accent-hover);
+}
+.btn:active {
+  transform: scale(0.98);
 }
 .btn.ghost {
   background: none;
   color: var(--accent);
   border: 1px solid var(--accent);
+}
+.btn.ghost:hover {
+  background: var(--accent-soft);
 }
 </style>

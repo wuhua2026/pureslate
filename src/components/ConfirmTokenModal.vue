@@ -65,8 +65,9 @@ function close() {
 
 <template>
   <teleport to="body">
-    <div v-if="modelValue" class="mask" @click.self="close">
-      <div class="modal" role="dialog" aria-modal="true" aria-label="二次确认">
+    <Transition name="token-modal" appear>
+      <div v-if="modelValue" class="mask" @click.self="close">
+        <div class="modal" role="dialog" aria-modal="true" aria-label="二次确认">
         <h2 class="m-title">🔴 二次确认</h2>
         <p class="m-desc" :class="{ red: hasRed }">
           {{ hasRed ? "本次清理包含高风险（🔴）项。请核对下方一次性令牌并逐字输入以确认。" : "请核对下方一次性令牌并逐字输入以确认。" }}
@@ -102,6 +103,7 @@ function close() {
         </div>
       </div>
     </div>
+    </Transition>
   </teleport>
 </template>
 
@@ -114,6 +116,26 @@ function close() {
   align-items: center;
   justify-content: center;
   z-index: 50;
+}
+/* R29：遮罩淡入淡出 + 内层弹窗 pop（appear 首次打开也播；reduced-motion 由全局总闸归零）*/
+.token-modal-enter-active {
+  transition: opacity var(--dur-base) var(--ease-out);
+}
+.token-modal-leave-active {
+  transition: opacity var(--dur-fast) var(--ease-inout);
+}
+.token-modal-enter-from,
+.token-modal-leave-to {
+  opacity: 0;
+}
+.token-modal-enter-active .modal {
+  transition:
+    opacity var(--dur-base) var(--ease-out),
+    transform var(--dur-base) var(--ease-out);
+}
+.token-modal-enter-from .modal {
+  opacity: 0;
+  transform: translateY(10px) scale(0.97);
 }
 .modal {
   width: min(420px, 90vw);
@@ -168,6 +190,17 @@ function close() {
   padding: 0.25rem 0.6rem;
   font-size: 0.75rem;
   cursor: pointer;
+  transition:
+    transform var(--dur-fast) var(--ease-inout),
+    border-color var(--dur-fast) var(--ease-inout),
+    color var(--dur-fast) var(--ease-inout);
+}
+.gen:active {
+  transform: scale(0.96);
+}
+.gen:hover:not(:disabled) {
+  border-color: var(--accent);
+  color: var(--accent);
 }
 .pin {
   width: 100%;
@@ -182,9 +215,13 @@ function close() {
   background: var(--bg);
   color: var(--text);
   outline: none;
+  transition:
+    border-color var(--dur-fast) var(--ease-inout),
+    box-shadow var(--dur-fast) var(--ease-inout);
 }
 .pin:focus {
   border-color: var(--accent);
+  box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.12);
 }
 .pin.mismatch {
   border-color: var(--grade-red);
@@ -208,11 +245,22 @@ function close() {
   padding: 0.6rem 1.25rem;
   font-weight: 600;
   cursor: pointer;
+  transition:
+    transform var(--dur-fast) var(--ease-inout),
+    opacity var(--dur-fast) var(--ease-inout),
+    background var(--dur-fast) var(--ease-inout);
+}
+.btn:active {
+  transform: scale(0.97);
 }
 .btn.ghost {
   background: none;
   border: 1px solid var(--border);
   color: var(--text);
+}
+.btn.ghost:hover {
+  border-color: var(--accent);
+  color: var(--accent);
 }
 .btn.primary {
   background: var(--grade-red);

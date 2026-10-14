@@ -112,7 +112,7 @@ onMounted(() => {
 
     <div v-if="!settings" class="empty-list">加载中…</div>
     <template v-else>
-      <section class="card">
+      <section class="card anim-rise d1">
         <h2>更新（默认关闭 · 仅检查版本与规则包）</h2>
         <label class="row">
           <input
@@ -144,7 +144,7 @@ onMounted(() => {
         <p v-if="checkError" class="warn">{{ checkError }}</p>
       </section>
 
-      <section class="card">
+      <section class="card anim-rise d2">
         <h2>专家模式</h2>
         <label class="row">
           <input
@@ -156,7 +156,7 @@ onMounted(() => {
         </label>
       </section>
 
-      <section class="card">
+      <section class="card anim-rise d3">
         <h2>崩溃数据（默认仅本地保存）</h2>
         <label class="row">
           <input
@@ -268,6 +268,15 @@ onMounted(() => {
   color: var(--text, #1f2430);
   font-size: 0.85rem;
   cursor: pointer;
+  transition:
+    transform var(--dur-fast) var(--ease-inout),
+    border-color var(--dur-fast) var(--ease-inout),
+    color var(--dur-fast) var(--ease-inout),
+    background var(--dur-fast) var(--ease-inout),
+    opacity var(--dur-fast) var(--ease-inout);
+}
+.btn:active {
+  transform: scale(0.97);
 }
 .btn:disabled {
   opacity: 0.45;
@@ -293,6 +302,11 @@ onMounted(() => {
   padding: 8px 0;
   border-top: 1px solid var(--border, #e4e7ec);
   font-size: 0.82rem;
+  transition: background var(--dur-fast) var(--ease-inout);
+  border-radius: 6px;
+}
+.dump-row:hover {
+  background: var(--surface-2, #f8fafc);
 }
 .dump-head {
   display: flex;
@@ -307,6 +321,7 @@ onMounted(() => {
 .dump-size {
   color: var(--text-2, #5a6472);
   white-space: nowrap;
+  font-variant-numeric: tabular-nums;
 }
 .dump-actions {
   display: flex;
@@ -318,6 +333,13 @@ onMounted(() => {
   background: var(--bg, #fafafa);
   border: 1px solid var(--border, #e4e7ec);
   border-radius: 8px;
+  animation: ps-preview-in var(--dur-base) var(--ease-out);
+}
+@keyframes ps-preview-in {
+  from {
+    opacity: 0;
+    transform: translateY(-4px);
+  }
 }
 .preview-line {
   margin: 0 0 4px;
