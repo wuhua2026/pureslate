@@ -73,4 +73,4 @@ cd src-tauri && cargo fmt && cargo clippy --all-targets -- -D warnings && cargo 
 
 ## License
 
-MIT。详见 [LICENSE](LICENSE) 与 [NOTICE](NOTICE)（净室声明：本项目不含 Dism++/联想电脑管家的任何代码、清理参数或资源）。
+MIT。详见 [LICENSE](LICENSE) 与 [NOTICE](NOTICE)。

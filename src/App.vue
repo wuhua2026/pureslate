@@ -90,7 +90,7 @@ const setting = { to: "/settings", label: "设置", icon: "settings" } as const;
 </template>
 
 <style>
-/* ===== 全局设计 token（联想电脑管家风格：蓝白 / 大圆角 / 卡片阴影）===== */
+/* ===== 全局设计 token（蓝白 / 大圆角 / 卡片阴影）===== */
 :root {
   --grade-green: #16a34a;
   --grade-yellow: #d9971c;
@@ -105,7 +105,7 @@ const setting = { to: "/settings", label: "设置", icon: "settings" } as const;
   --border: #e7ebf2;
   --border-strong: #d7deea;
 
-  /* 主品牌蓝（联想系管家蓝，比旧值略沉稳） */
+  /* 主品牌蓝（沉稳蓝，比旧值略深） */
   --accent: #2563eb;
   --accent-hover: #1d4ed8;
   --accent-soft: #eaf1ff;
