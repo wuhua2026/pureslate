@@ -121,7 +121,7 @@ watch(
     <div v-if="store.error" class="error">扫描失败：{{ store.error }}</div>
 
     <!-- v0.1.6：待命态——进页不自动扫描，用户选档后主动开始 -->
-    <section v-else-if="idle && !store.isDone" class="card idle-card">
+    <section v-else-if="idle && !store.isDone" class="card idle-card anim-rise d1">
       <div class="idle-icon" aria-hidden="true">
         <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
           <path d="M12 3.5 19 6v5.2c0 4.6-3.1 7.6-7 9.3-3.9-1.7-7-4.7-7-9.3V6Z" />
@@ -160,7 +160,7 @@ watch(
     </p>
 
     <!-- v0.1.5 反馈 3：取消后的部分结果入口 / 完成态兜底出口 -->
-    <section v-else-if="store.isDone && doneExit" class="card done-card">
+    <section v-else-if="store.isDone && doneExit" class="card done-card anim-rise d1">
       <p class="done-text">{{ store.cancelled ? "体检已取消" : "体检完成" }}</p>
       <p class="done-sub">
         {{ store.cancelled ? "已收集的部分结果可查看（不写入任何文件）" : "正在进入报告…" }}
@@ -173,11 +173,13 @@ watch(
       </div>
     </section>
 
-    <section class="card" v-else>
-      <!-- v0.1.5 反馈 2：旋转扫描动效 + 阶段图标 -->
+    <section class="card scan-card anim-rise d1" v-else>
+      <!-- v0.1.5 反馈 2：旋转扫描动效 + 阶段图标（R29：阶段切换 pop）-->
       <div class="scan-visual">
         <div class="radar" :class="{ paused: !store.running }">
-          <div class="radar-core">{{ PHASE_ICON[store.phase] ?? "📂" }}</div>
+          <Transition name="phase-pop">
+            <div :key="store.phase" class="radar-core">{{ PHASE_ICON[store.phase] ?? "📂" }}</div>
+          </Transition>
         </div>
         <div class="phase-col">
           <span class="phase">
@@ -188,7 +190,13 @@ watch(
         </div>
       </div>
       <div class="bar">
-        <div class="bar-fill" :style="{ width: store.percent + '%' }"></div>
+        <div
+          class="bar-fill"
+          :style="{ transform: `scaleX(${store.percent / 100})` }"
+          :class="{ paused: !store.running }"
+        >
+          <span class="bar-sheen" aria-hidden="true"></span>
+        </div>
       </div>
 
       <!-- 实时累计 -->
@@ -208,10 +216,16 @@ watch(
         </div>
       </div>
 
-      <!-- 当前路径（v0.1.5 反馈 2：滚动高亮） -->
+      <!-- 当前路径（v0.1.5 反馈 2；R29：路径切换淡入淡出，快速连刷不堆积）-->
       <div class="path-block">
         <span class="m-label">当前扫描</span>
-        <span class="path" :title="store.currentPath">{{ store.currentPath || "初始化…" }}</span>
+        <span class="path-window">
+          <Transition name="path-fade" mode="out-in">
+            <span :key="store.currentPath" class="path" :title="store.currentPath">{{
+              store.currentPath || "初始化…"
+            }}</span>
+          </Transition>
+        </span>
       </div>
 
       <!-- 取消 -->
@@ -430,6 +444,26 @@ watch(
   justify-content: center;
   font-size: 1.4rem;
 }
+/* R29：阶段图标切换 pop（≤base 时长，只动 transform/opacity）*/
+.phase-pop-enter-active {
+  transition:
+    transform var(--dur-base) var(--ease-out),
+    opacity var(--dur-base) var(--ease-out);
+}
+.phase-pop-enter-from {
+  opacity: 0;
+  transform: scale(0.6);
+}
+.phase-pop-leave-active {
+  transition:
+    transform var(--dur-fast) var(--ease-inout),
+    opacity var(--dur-fast) var(--ease-inout);
+  position: absolute;
+}
+.phase-pop-leave-to {
+  opacity: 0;
+  transform: scale(1.25);
+}
 @keyframes radar-spin {
   to {
     transform: rotate(360deg);
@@ -448,8 +482,10 @@ watch(
 .pct {
   font-size: 1.6rem;
   font-weight: 700;
+  font-variant-numeric: tabular-nums;
 }
 .bar {
+  position: relative;
   height: 14px;
   border-radius: 7px;
   background: var(--bg);
@@ -457,10 +493,41 @@ watch(
   overflow: hidden;
 }
 .bar-fill {
+  position: relative;
   height: 100%;
-  background: var(--accent);
+  width: 100%;
   border-radius: 7px;
-  transition: width 0.15s linear;
+  background: var(--accent);
+  /* R29：进度用 scaleX（只动 transform，SPEC §7），origin 左对齐 */
+  transform-origin: left center;
+  transition: transform var(--dur-base) var(--ease-out);
+  overflow: hidden;
+}
+.bar-fill.paused .bar-sheen {
+  animation-play-state: paused;
+  opacity: 0.35;
+}
+/* R29：进度流光（纯 transform 位移的伪元素，不触发布局）*/
+.bar-sheen {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 40%;
+  background: linear-gradient(
+    90deg,
+    rgba(255, 255, 255, 0) 0%,
+    rgba(255, 255, 255, 0.45) 50%,
+    rgba(255, 255, 255, 0) 100%
+  );
+  animation: bar-sheen-slide 1.6s linear infinite;
+}
+@keyframes bar-sheen-slide {
+  from {
+    transform: translateX(-120%);
+  }
+  to {
+    transform: translateX(320%);
+  }
 }
 .metrics {
   display: grid;
@@ -484,6 +551,7 @@ watch(
 .m-val {
   font-size: 1.3rem;
   font-weight: 700;
+  font-variant-numeric: tabular-nums;
 }
 .m-sub {
   font-size: 0.85rem;
@@ -503,13 +571,39 @@ watch(
   gap: 0.3rem;
   min-width: 0;
 }
+.path-window {
+  position: relative;
+  min-height: 1.2em;
+}
 .path {
+  display: block;
   font-size: 0.85rem;
   color: var(--text-2);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
   font-family: ui-monospace, monospace;
+}
+/* R29：当前路径轮换淡入淡出（fast，mode=out-in 保证快速连刷不堆积）*/
+.path-fade-enter-active {
+  transition:
+    opacity var(--dur-fast) var(--ease-out),
+    transform var(--dur-fast) var(--ease-out);
+}
+.path-fade-leave-active {
+  transition:
+    opacity var(--dur-fast) var(--ease-inout),
+    transform var(--dur-fast) var(--ease-inout);
+  position: absolute;
+  inset-inline: 0;
+}
+.path-fade-enter-from {
+  opacity: 0;
+  transform: translateY(4px);
+}
+.path-fade-leave-to {
+  opacity: 0;
+  transform: translateY(-4px);
 }
 .actions {
   display: flex;
@@ -524,6 +618,12 @@ watch(
   border-radius: 8px;
   font-weight: 600;
   cursor: pointer;
+  transition:
+    transform var(--dur-fast) var(--ease-inout),
+    opacity var(--dur-fast) var(--ease-inout);
+}
+.btn-cancel:active {
+  transform: scale(0.98);
 }
 .btn-cancel:disabled {
   opacity: 0.5;
