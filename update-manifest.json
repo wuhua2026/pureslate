@@ -1,8 +1,8 @@
 {
-  "appSha256": "ec86321eca197729fab53dcd1fd51c7def522ac6b38fa52290185435c0dc9e59",
-  "appVersion": "0.1.6",
-  "rulesSha256": "c07ff313e24cd0a76f80eb1cc99b7b37a9316f87cc7e078a27190bd4645c7b47",
-  "rulesUrl": "https://raw.githubusercontent.com/wuhua2026/pureslate/main/rules/pureslate-rules-0.1.6.json",
-  "appUrl": "https://github.com/wuhua2026/pureslate/releases/download/v0.1.6/PureSlate_0.1.6_x64-setup.exe",
-  "rulesVersion": "0.1.6"
+  "rulesSha256": "86d4a7dbb69a16ae856fa41370ddc6d6bbc81ea343ce3ae4656c7015ba728989",
+  "rulesVersion": "0.2.0",
+  "rulesUrl": "https://raw.githubusercontent.com/wuhua2026/pureslate/main/rules/pureslate-rules-0.2.0.json",
+  "appSha256": "0c22b46bb7b2222e3c8abd6efb64bed8f376760f1ad65451295b640f5dfcd771",
+  "appVersion": "0.2.0",
+  "appUrl": "https://github.com/wuhua2026/pureslate/releases/download/v0.2.0/PureSlate_0.2.0_x64-setup.exe"
 }
