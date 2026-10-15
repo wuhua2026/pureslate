@@ -55,6 +55,7 @@ pureslate/
 ## 3. 核心概念
 
 - **扫描维度 ScanDimension**：`temp`（临时/回收站/%TEMP%）｜`large`（≥500MB 大文件）｜`dup`（重复 hash）｜`cache`（应用缓存）｜`startup`（启动项）｜`privacy`（隐私痕迹）。profile 可开关各维度。
+- **审阅型类目（R30）**：`large.file` 仅"发现供浏览"——items 照常返回，但不进报告/清理方案、不计 found 字节、规则表永不注册（`clean_execute` 对其 fail-closed），UI 无删除入口，只提供 shell 定位。个人大文件（视频/数据集/镜像）处置权完全在用户。
 - **分级 Grade**：`green|yellow|red`（判定规则 SAFETY §1）。
 - **去向 Disposition**：`direct`（直清，仅 🟢）｜`recycle`（系统回收站，仅 🟢）｜`quarantine`（隔离区，🟡/🔴）。
 - **信任链**：R25 隔离区 → R09 日志 → R04 清理，先有后悔药再动刀（Phase 2 顺序依据）。
@@ -185,7 +186,9 @@ export interface AppSettings {
 | `quarantine_purge` | `ids: string[]`, `confirmToken` → `PurgeReport` | 硬删+审计 |
 | `quarantine_status` | — → `QuarantineStatus` | 容量上限状态（P3-06 加性新增） |
 | `startup_list` | — → `StartupEntry[]` | |
-| `uninstall_list` | — → `InstalledApp[]` | R27 只读枚举（§6.7） |
+| `uninstall_list` | — → `InstalledApp[]` | R27 只读枚举（§6.7；R30 展示字段防御解码，乱码见 §6.7） |
+| `shell_reveal` | `path: string` → `null` | R30 只读：资源管理器定位并选中（大文件审阅页；绝对/现存/非卷根，否则 Err） |
+| `uninstall_app_icons` | `appIds: string[]` → `Record<string,string>` | R30 只读批量（≤200）：程序图标 PNG data URL map；缺失/失败 id 不在 map |
 | `startup_toggle` | `id, enabled` → `boolean` | 禁用=备份后移除启动项，不删源程序 |
 | `log_query` | `{from, to, op?}` → `LogEntry[]` | |
 | `log_export` | `path` → `boolean` | 导出指定范围 |
@@ -271,6 +274,7 @@ journal 协议见 SAFETY §3。🟢 direct：`RemoveFile`（Windows API，绕过
 - **残留**：卸载后对安装目录、开始菜单快捷方式、AppData 三目录的候选项产出为 ScanItem，**仅在一次卸载刚完成的后端上下文内**枚举（不做无上下文的全局孤儿扫描）；默认 🟡/quarantine，复用 preflight + journal + 隔离区 + 审计（14 天可还原）。**去向由用户逐项选择**：移入隔离区（默认、可还原）或直接删除（永久、🔴 语义，含任一项即须专家模式 + 二次确认 token）；删除前 UI 明示完整清单与"判定为残留的理由"，逐项确认。为精确卸载残留开白名单口子有严格前提：白名单常量根分**硬根**（SystemRoot/引导卷/卷信息/隔离哨兵/自身设施/XML 声明根，永不豁免）与 **§2.2 程序目录软根**（ProgramFiles*/ProgramData\Microsoft，仅可被后端快照签发的**精确候选授权根**豁免——候选 id 必须出自最近残留扫描快照、路径必须在授权根内、硬保护/reparse/TOCTOU 复核不绕过；见 SAFETY §2.2 R27-3 条款）。空目录（0 文件）候选经 `RemoveDirectoryW` 只删空目录收尾（非空必然失败，不递归删内容）。
 - **审计**：新增 op=`uninstall`（拉起/等待结论/待重启）；残留删除仍走既有 clean/quarantine op（category=`residue.uninstall`），覆盖率口径不变。
 - **契约**：`uninstall_list() → InstalledApp[]`、`uninstall_run(id)` / `uninstall_cancel(txId)` 与 `uninstall_progress`/`uninstall_done` 事件（执行批次）；R27-3 加性新增 `uninstall_residue_scan() → ResidueCandidate[]` 与 `uninstall_residue_clean(ResidueCleanParams) → txId`（复用 clean_progress/clean_done/clean_cancel）。
+- **R30 加性**：①展示字段（DisplayName/Publisher/DisplayVersion/InstallDate）防御解码——UTF-16/CP_ACP/CP936 三候选评分（ANSI 时代老安装器坏 REG_SZ），不可辨识的名称给"异常名称的程序"占位（条目保留可卸载），命令/路径字段仍用原值；②`uninstall_app_icons(appIds)` 批量返回 DisplayIcon 提取的 PNG data URL（32px，失败静默，前端字形回退），图标不影响卸载可用性；③大文件页定位复用 `shell_reveal(path)`。
 
 ## 7. UI 规范
 

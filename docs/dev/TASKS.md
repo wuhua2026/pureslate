@@ -163,6 +163,24 @@
 
 ---
 
+## 附加批次 · R30 v0.2.0 真机反馈热修（大文件误删风险/乱码/图标/横向滚动）
+
+> 触发：v0.2.0 真机四反馈——①165.8GB/121 项个人大文件默认勾选进方案 B（40558 项/181.7GB），
+> 一键可误删上百 GB 个人资料；②ANSI 时代老安装器卸载条目三字段全乱码；③卸载页无软件图标；
+> ④长程序名撑破表格带出窗口横向滚动条。约束：零新依赖（crate/npm）、只读新增（无新删除面）、
+> 契约只加命令不改类型、宁漏勿错。逐任务提交（R30-1 cba1b8a / R30-2 998c290 / R30-3 df6deab /
+> R30-4 8045eec / R30-5 本批文档提交）。
+
+| ID | 任务 | 依赖 | 产出 / DoD | 验证 |
+|----|------|------|-----------|------|
+| R30-1 | ✅ 大文件转审阅型类目 | — | ✅ 后端 `LARGE_REVIEW_CATEGORY`：items 保留供浏览，不推 aggregate、`found_bytes` 排除、永不注册规则表，`resolve_targets` 专用友好文案 fail-closed；前端 reportModel `cleanableItems` 入口排除（类目卡/风险/A-B 方案/汇总）；mock 同口径；Files 页纯审阅化（去级别列/隔离语义，逐行"在资源管理器中显示"）；新只读 IPC `shell_reveal`（SHOpenFolderAndSelectItems+explorer 兜底，PIDL RAII，绝对/现存/非卷根校验） | cargo 222 绿（shell +2）；75 vitest（reportModel/data 排除大文件 +4）；typecheck/build 绿。备注：前后端双保险，陈旧前端也无法经应用删个人大文件 |
+| R30-2 | ✅ 注册表坏编码防御解码 | — | ✅ winreg `reg_data_decode_display`（UTF-16/CP_ACP/CP936 三候选+可疑度评分，阈值 8.0；**去 NUL 后 936 单候选同时修复纯 ANSI 与"UTF16 英文头+GBK 尾"拼接**）+`reg_display_value`（版本仅 ASCII、日期仅 8 位数字）；parse_app 展示字段接入，命令/路径保持原值；DisplayName 存在但不可辨识→"异常名称的程序"占位（条目保留），不存在才跳过 | cargo 228 绿（+6）：pure GBK→极域电子教室、mixed→Minisoft Toolbox极域、正常 UTF16 中文不改动、不可恢复→占位/字段隐藏。备注：MultiByteToWideChar 直调 kernel32 零 crate |
+| R30-3 | ✅ 横向滚动消除 | — | ✅ `.content` 全局 overflow-x 兜底；Apps/Startup×2/Quarantine/Log/Files 五表 `table-layout:fixed`+colgroup **百分比列宽**；td flex 盒模型坑修复（flex 放内层）；窗口 minWidth 900/minHeight 600 | 浏览器实测（608 窄窗）th/td 矩形严格递增不相交、sw≤cw、省略号生效；typecheck/75 vitest/build 绿（index gzip 45.03KB）。**真机正常窗口最终观感挂人类走查** |
+| R30-4 | ✅ 卸载程序图标 | R30-2 | ✅ `uninstall/icons.rs`（零 crate）：DisplayIcon `路径[,索引]` 解析→PrivateExtractIconsW（32px，索引 0/卸载 exe 两级回退）→GetDIBits 32bpp（低位深 AND 掩码补 alpha，GDI RAII）→手写 PNG（CRC32/Adler32/stored deflate）base64；新只读批量 IPC `uninstall_app_icons(ids)`（≤200，一次枚举；失败静默）；Apps 图标列+灰色字形回退+@error 兜底；枚举重构 `enumerate_located`+泛型 `dedupe_by` | cargo 233 绿（+5；PNG 结构/校验和/解析/base64 单测，真机 current_exe 冒烟 CI 可宽容）；--ignored 转储 12 个真实程序图标目检颜色/透明正确（ArcGIS Pro/原神/Git 等）；typecheck/75 vitest/build 绿（Apps gzip 6.10KB，index 45.04 不变）。**真机应用内图标观感挂人类走查** |
+| R30-5 | ✅ 联调门禁与文档 | R30-1..4 | ✅ TASKS/CHANGELOG（2 新命令契约登记）/SESSIONS/LESSONS 同步；全量门禁 + NSIS 体积 <20MB | ✅ cargo fmt --check/clippy --all-targets -D warnings/**233 lib（2 ignored）+27 集成全绿**；pnpm typecheck/**75 vitest**/build 绿；NSIS **2,946,042B=2.81MiB <20MB**（较 v0.2.0 +9.5KB/+0.33%，零新 crate/npm）；浏览器实测布局 + 真机 12 图标目检。**挂人类：pnpm tauri dev 真机走查——方案 B 不含大文件/大文件页定位/乱码条目（条目若已卸载则验证占位逻辑）/图标与省略号观感/窗口拖拽无横滚** |
+
+---
+
 ## 附：裁剪预案（校准点触发，人类决策）
 
 | 触发 | 动作 | 影响 |
