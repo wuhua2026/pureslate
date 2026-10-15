@@ -126,6 +126,10 @@ export const mockCommands = {
   // R30：mock 下无法真正调起 Explorer，返回成功即可走查交互。
   shell_reveal: (_path: string): Promise<null> => Promise.resolve(null),
 
+  // R30：浏览器 mock 无法提取真实图标，返回空 map（走默认字形回退分支）。
+  uninstall_app_icons: (_appIds: string[]): Promise<Record<string, string>> =>
+    Promise.resolve({}),
+
   // R27-2：mock 有状态（dev 走查）——执行后从 stub 移除，重查列表可见条目消失。
   // 进度/完成事件由页面 mock 分支按阶段模拟（与 scan store mock 同约定）。
   uninstall_run: (appId: string): Promise<string> => {

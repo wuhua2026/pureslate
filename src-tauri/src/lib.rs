@@ -107,6 +107,7 @@ pub fn run() {
             ipc::commands::startup_list,
             ipc::commands::uninstall_list,
             ipc::commands::shell_reveal,
+            ipc::commands::uninstall_app_icons,
             ipc::commands::uninstall_run,
             ipc::commands::uninstall_cancel,
             ipc::commands::uninstall_residue_scan,

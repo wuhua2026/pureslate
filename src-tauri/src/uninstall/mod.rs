@@ -1,5 +1,6 @@
 //! 安全卸载辅助（R27 · SPEC §6.7）。
 
+pub mod icons;
 pub mod residue;
 pub mod runner;
 
@@ -201,19 +202,23 @@ fn has_sz_value(values: &[RegValue], name: &str) -> bool {
         .any(|v| v.name.eq_ignore_ascii_case(name) && (v.kind == REG_SZ || v.kind == REG_EXPAND_SZ))
 }
 
-/// 跨视图去重（纯函数）：同 name+publisher+version 保留 priority 最小者；
-/// 输入为按 VIEWS 顺序（priority 升序）枚举的结果，同键首次出现即保留。
-fn dedupe(apps: Vec<RawApp>) -> Vec<RawApp> {
+/// 跨视图去重键（name+publisher+version，全部小写；None 按空串）。
+fn dedupe_key(app: &RawApp) -> (String, String, String) {
+    (
+        app.name.to_lowercase(),
+        app.publisher.as_deref().unwrap_or("").to_lowercase(),
+        app.version.as_deref().unwrap_or("").to_lowercase(),
+    )
+}
+
+/// 跨视图去重（纯函数，泛型单份）：同键保留首次出现者；
+/// 输入须按 VIEWS 顺序（priority 升序）枚举，首次即最高优先级。
+fn dedupe_by<T>(items: Vec<T>, key_of: impl Fn(&T) -> (String, String, String)) -> Vec<T> {
     let mut seen = std::collections::HashSet::new();
     let mut out = Vec::new();
-    for app in apps {
-        let key = (
-            app.name.to_lowercase(),
-            app.publisher.as_deref().unwrap_or("").to_lowercase(),
-            app.version.as_deref().unwrap_or("").to_lowercase(),
-        );
-        if seen.insert(key) {
-            out.push(app);
+    for item in items {
+        if seen.insert(key_of(&item)) {
+            out.push(item);
         }
     }
     out
@@ -237,9 +242,19 @@ impl RawApp {
     }
 }
 
+/// RawApp + 其注册表物理位置（图标提取等内部用途：避免按 id 回查时重复枚举）。
+/// 模块私有：仅 list_apps/located_by_ids 在本模块内消费，不泄露 RawApp 类型。
+struct LocatedApp {
+    id: String,
+    app: RawApp,
+    hive: Hive,
+    full_key: String,
+    wow64: u32,
+}
+
 /// 枚举全部已安装程序（只读）。任一视图/子键失败均跳过（宁缺勿错，不中断整体）。
-pub fn list_apps() -> Vec<InstalledApp> {
-    let mut raws: Vec<RawApp> = Vec::new();
+fn enumerate_located() -> Vec<LocatedApp> {
+    let mut located: Vec<(RawApp, Hive, String, u32)> = Vec::new();
     for view in &VIEWS {
         let Ok(keys) = enum_subkeys_view(view.hive, UNINSTALL_SUBKEY, view.wow64) else {
             continue;
@@ -250,14 +265,65 @@ pub fn list_apps() -> Vec<InstalledApp> {
                 continue;
             };
             if let Some(app) = parse_app(&key, &values, view.scope, view.arch, view.priority) {
-                raws.push(app);
+                located.push((app, view.hive, full, view.wow64));
             }
         }
     }
-    let mut apps = dedupe(raws);
+    // 去重键与列表口径完全一致，保证视图选择不漂移。
+    let located: Vec<LocatedApp> = located
+        .into_iter()
+        .map(|(app, hive, full_key, wow64)| LocatedApp {
+            id: stable_id(app.scope, app.arch, &app.key_name),
+            app,
+            hive,
+            full_key,
+            wow64,
+        })
+        .collect();
+    dedupe_by(located, |l| dedupe_key(&l.app))
+}
+
+/// 测试辅助：暴露物理位置/命令/名称（仅 cfg(test)；供图标模块视觉转储测试）。
+#[cfg(test)]
+pub(crate) fn enumerate_located_test() -> Vec<(
+    Hive,
+    String,
+    u32,
+    String, /*uninstall_command*/
+    String, /*name*/
+)> {
+    enumerate_located()
+        .into_iter()
+        .map(|l| {
+            (
+                l.hive,
+                l.full_key,
+                l.wow64,
+                l.app.uninstall_command,
+                l.app.name,
+            )
+        })
+        .collect()
+}
+
+/// 枚举全部已安装程序（只读）。任一视图/子键失败均跳过（宁缺勿错，不中断整体）。
+pub fn list_apps() -> Vec<InstalledApp> {
+    let mut apps: Vec<RawApp> = enumerate_located().into_iter().map(|l| l.app).collect();
     // 名称不区分大小写排序（跨语种稳定）。
     apps.sort_by_key(|a| a.name.to_lowercase());
     apps.iter().map(RawApp::to_contract).collect()
+}
+
+/// R30：按 id 批量取条目的注册表物理位置（图标 IPC 一次枚举、批量消费）。
+pub(crate) fn located_by_ids(
+    ids: &[String],
+) -> std::collections::HashMap<String, (Hive, String, u32, String)> {
+    let want: std::collections::HashSet<&str> = ids.iter().map(String::as_str).collect();
+    enumerate_located()
+        .into_iter()
+        .filter(|l| want.contains(l.id.as_str()))
+        .map(|l| (l.id, (l.hive, l.full_key, l.wow64, l.app.uninstall_command)))
+        .collect()
 }
 
 /// 卸载执行结果（R27-2）。
@@ -564,20 +630,23 @@ mod tests {
             priority: prio,
         };
         // 输入按枚举顺序（prio 升序）：HKLM64 先到 → 保留。
-        let out = dedupe(vec![
-            mk(0, "machine", "x64", "P"),
-            mk(1, "machine", "x86", "P"),
-            mk(2, "user", "x64", "P"),
-        ]);
+        let out = dedupe_by(
+            vec![
+                mk(0, "machine", "x64", "P"),
+                mk(1, "machine", "x86", "P"),
+                mk(2, "user", "x64", "P"),
+            ],
+            dedupe_key,
+        );
         assert_eq!(out.len(), 1);
         assert_eq!(out[0].scope, "machine");
         assert_eq!(out[0].arch, "x64");
 
         // publisher 不同 → 视为不同程序，均保留。
-        let out2 = dedupe(vec![
-            mk(0, "machine", "x64", "A"),
-            mk(1, "machine", "x86", "B"),
-        ]);
+        let out2 = dedupe_by(
+            vec![mk(0, "machine", "x64", "A"), mk(1, "machine", "x86", "B")],
+            dedupe_key,
+        );
         assert_eq!(out2.len(), 2);
     }
 

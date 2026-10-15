@@ -640,6 +640,44 @@ pub fn shell_reveal(path: String) -> Result<(), String> {
     crate::shell::reveal(&path)
 }
 
+/// R30：批量提取卸载程序图标的 PNG data URL（只读）。
+/// 单项失败（无 DisplayIcon/文件缺失/GDI 失败）静默跳过——键不存在即前端回退默认图标；
+/// 图标永远不影响卸载主功能。批次封顶 200，一次注册表枚举服务整批。
+#[tauri::command]
+pub fn uninstall_app_icons(app_ids: Vec<String>) -> std::collections::HashMap<String, String> {
+    use crate::startup::winreg::{enum_values_view, reg_data_to_string, REG_EXPAND_SZ, REG_SZ};
+    use std::collections::HashMap;
+
+    const MAX_BATCH: usize = 200;
+    let located = crate::uninstall::located_by_ids(&app_ids);
+    let mut out = HashMap::new();
+    for id in app_ids.iter().take(MAX_BATCH) {
+        let Some((hive, full_key, wow64, uninstall_command)) = located.get(id) else {
+            continue;
+        };
+        let Ok(values) = enum_values_view(*hive, full_key, *wow64) else {
+            continue;
+        };
+        let display_icon = values.iter().find_map(|v| {
+            if v.name.eq_ignore_ascii_case("DisplayIcon")
+                && (v.kind == REG_SZ || v.kind == REG_EXPAND_SZ)
+            {
+                let s = reg_data_to_string(&v.data);
+                let t = s.trim();
+                (!t.is_empty()).then(|| t.to_string())
+            } else {
+                None
+            }
+        });
+        if let Some(url) =
+            crate::uninstall::icons::data_url(display_icon.as_deref(), Some(uninstall_command))
+        {
+            out.insert(id.clone(), url);
+        }
+    }
+    out
+}
+
 /// 执行卸载（R27-2，[DESTRUCTIVE] 编排官方卸载器）。返回 txId（经事件推送进度/完成）。
 #[tauri::command]
 pub async fn uninstall_run(

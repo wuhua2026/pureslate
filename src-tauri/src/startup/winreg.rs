@@ -627,6 +627,11 @@ pub fn query_string_value_view(
     }
 }
 
+/// 公开的 `%VAR%` 环境变量展开（R30：DisplayIcon 路径可能含 `%ProgramFiles%`）。
+pub fn expand_environment(input: &str) -> io::Result<String> {
+    expand_environment_strings(input)
+}
+
 /// ExpandEnvironmentStringsW 薄封装：展开字符串中的 `%VAR%` 环境变量（R28）。
 fn expand_environment_strings(input: &str) -> io::Result<String> {
     let src: Vec<u16> = input.encode_utf16().chain(std::iter::once(0)).collect();

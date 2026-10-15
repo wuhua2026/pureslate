@@ -13,6 +13,7 @@ import type {
   ResidueCandidate,
   UninstallDoneEvent,
 } from "../types/ipc";
+import AppIcon from "../components/AppIcon.vue";
 import ConfirmTokenModal from "../components/ConfirmTokenModal.vue";
 import {
   canUninstall,
@@ -82,10 +83,30 @@ async function loadList(): Promise<void> {
   error.value = "";
   try {
     apps.value = await commands.uninstall_list();
+    void loadIcons();
   } catch (e) {
     error.value = String(e);
   } finally {
     loading.value = false;
+  }
+}
+
+// ---- R30 程序图标（批量懒取一次；空串=已尝试但无图标，不再重复请求） ----
+const iconUrls = reactive(new Map<string, string>());
+const iconsLoading = ref(false);
+
+async function loadIcons(): Promise<void> {
+  const ids = apps.value.map((a) => a.id).filter((id) => !iconUrls.has(id));
+  if (ids.length === 0 || iconsLoading.value) return;
+  iconsLoading.value = true;
+  try {
+    const map = await commands.uninstall_app_icons(ids);
+    for (const id of ids) iconUrls.set(id, map[id] ?? "");
+  } catch {
+    // 整批失败（IPC 异常）：全部回退字形，不阻断列表功能。
+    for (const id of ids) iconUrls.set(id, "");
+  } finally {
+    iconsLoading.value = false;
   }
 }
 
@@ -221,6 +242,7 @@ function finishDone(e: UninstallDoneEvent): void {
   if (!isMockMode() && (e.result === "removed" || e.result === "reboot_pending")) {
     void commands.uninstall_list().then((list) => {
       apps.value = list;
+      void loadIcons();
     });
   }
 }
@@ -559,6 +581,7 @@ async function rescanAfterClean(): Promise<void> {
 
       <table v-else class="list">
         <colgroup>
+          <col class="col-icon" />
           <col class="col-name" />
           <col class="col-pub" />
           <col class="col-ver" />
@@ -569,6 +592,7 @@ async function rescanAfterClean(): Promise<void> {
         </colgroup>
         <thead>
           <tr>
+            <th class="ico" aria-label="图标"></th>
             <th>名称</th>
             <th>发布者</th>
             <th>版本</th>
@@ -580,6 +604,19 @@ async function rescanAfterClean(): Promise<void> {
         </thead>
         <tbody>
           <tr v-for="a in visible" :key="a.id">
+            <td class="ico">
+              <img
+                v-if="iconUrls.get(a.id)"
+                :src="iconUrls.get(a.id)"
+                class="app-icon"
+                alt=""
+                draggable="false"
+                @error="iconUrls.set(a.id, '')"
+              />
+              <span v-else class="app-icon-fallback" aria-hidden="true">
+                <AppIcon name="apps" :size="14" />
+              </span>
+            </td>
             <td class="name">
               <div class="name-cell">
                 <span class="name-text" :title="a.name">{{ a.name }}</span>
@@ -681,22 +718,25 @@ async function rescanAfterClean(): Promise<void> {
   overflow: hidden;
   font-size: 0.85rem;
 }
-/* R30-3：百分比列宽（合计 100%）——任意窗口宽度下列区间严格不重叠；
+/* R30-3/R30-4：百分比列宽（合计 100%）——任意窗口宽度下列区间严格不重叠；
    像素列宽在窄窗会超约束把 auto 列挤成 0，导致列重叠。 */
-.col-name {
-  width: 35%;
-}
-.col-pub {
-  width: 16%;
-}
-.col-ver {
-  width: 13%;
-}
-.col-scope {
+.col-icon {
   width: 7%;
 }
+.col-name {
+  width: 32%;
+}
+.col-pub {
+  width: 15%;
+}
+.col-ver {
+  width: 12%;
+}
+.col-scope {
+  width: 6%;
+}
 .col-size {
-  width: 10%;
+  width: 9%;
 }
 .col-date {
   width: 10%;
@@ -728,6 +768,31 @@ async function rescanAfterClean(): Promise<void> {
 .list tbody tr:last-child td {
   border-bottom: none;
 }
+/* R30-4：软件图标（22px，与系统程序列表的观感对齐；缺失走同款灰底字形）。 */
+.ico {
+  text-align: center;
+  vertical-align: middle;
+}
+.app-icon,
+.app-icon-fallback {
+  width: 22px;
+  height: 22px;
+  border-radius: 5px;
+  vertical-align: middle;
+}
+.app-icon {
+  object-fit: contain;
+  /* 图标加载瞬间不撑动行高 */
+  background: transparent;
+}
+.app-icon-fallback {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--surface-2, #f1f4f9);
+  color: var(--text-3, #8a97aa);
+}
+
 /* R30-3：td 保持 table-cell（display:flex 直接放 td 会破坏固定列表格），
    内层 .name-cell 做 flex——文本截断省略，徽章固定不被压缩/截掉。 */
 .name-cell {

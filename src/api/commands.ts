@@ -98,6 +98,15 @@ export const shell_reveal = (path: string) =>
     ? mockCommands.shell_reveal(path)
     : invokeApp<null>("shell_reveal", { path });
 
+/**
+ * R30：批量取程序图标（PNG data URL map，仅成功项有键）。
+ * 只读；无图标/提取失败的程序不在 map 中，前端回退默认字形。
+ */
+export const uninstall_app_icons = (appIds: string[]) =>
+  useMock()
+    ? mockCommands.uninstall_app_icons(appIds)
+    : invokeApp<Record<string, string>>("uninstall_app_icons", { appIds });
+
 /** R27-2：执行卸载编排；返回 txId，进度/完成经事件推送。 */
 export const uninstall_run = (appId: string) =>
   useMock()
