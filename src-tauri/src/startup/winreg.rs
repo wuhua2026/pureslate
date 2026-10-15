@@ -139,7 +139,20 @@ extern "system" {
 #[link(name = "kernel32")]
 extern "system" {
     fn ExpandEnvironmentStringsW(src: *const u16, dst: *mut u16, dst_chars: u32) -> u32;
+    fn MultiByteToWideChar(
+        code_page: u32,
+        flags: u32,
+        multi_byte_str: *const u8,
+        multi_byte_len: i32,
+        wide_char_str: *mut u16,
+        wide_char_len: i32,
+    ) -> i32;
 }
+
+/// 系统 ANSI 代码页（R30 坏编码防御解码候选之一）。
+const CP_ACP: u32 = 0;
+/// 简体中文 GBK 代码页（中文 ANSI 时代安装器的 REG_SZ 实际编码）。
+const CP_GBK: u32 = 936;
 
 /// ERROR_FILE_NOT_FOUND：注册表值/键不存在（与 IO 层 NotFound 同源语义）。
 const ERROR_FILE_NOT_FOUND: i32 = 2;
@@ -347,6 +360,10 @@ pub fn delete_key(hive: Hive, subkey: &str) -> io::Result<()> {
 }
 
 /// REG_SZ / REG_EXPAND_SZ 原始字节 → 字符串（去尾部 NUL）。
+///
+/// 精确路径/命令用此函数（必须与注册表明义一致，不做猜测性转换）。
+/// **展示类字段**（名称/发布者/版本）应走 [`reg_data_decode_display`]——
+/// 老安装器会把坏编码写进 REG_SZ，直解会得到满屏乱码（R30）。
 pub fn reg_data_to_string(data: &[u8]) -> String {
     let units: Vec<u16> = data
         .as_chunks::<2>()
@@ -359,6 +376,179 @@ pub fn reg_data_to_string(data: &[u8]) -> String {
         s.pop();
     }
     s
+}
+
+/// 代码页（CP_ACP/CP936）字节 → 字符串（两段式探测长度；NUL 字节须已剔除，
+/// 否则 API 遇到 0 会提前截断）。失败/空结果返回 None。
+fn codepage_to_string(code_page: u32, bytes: &[u8]) -> Option<String> {
+    if bytes.is_empty() {
+        return None;
+    }
+    // flags=0：非法字节以 U+FFFD 兜底（不报错丢串）；显式长度，不依赖结尾 NUL。
+    let needed = unsafe {
+        MultiByteToWideChar(
+            code_page,
+            0,
+            bytes.as_ptr(),
+            bytes.len() as i32,
+            std::ptr::null_mut(),
+            0,
+        )
+    };
+    if needed <= 0 {
+        return None;
+    }
+    let mut buf = vec![0u16; needed as usize];
+    let got = unsafe {
+        MultiByteToWideChar(
+            code_page,
+            0,
+            bytes.as_ptr(),
+            bytes.len() as i32,
+            buf.as_mut_ptr(),
+            needed,
+        )
+    };
+    if got <= 0 {
+        return None;
+    }
+    let s = String::from_utf16_lossy(&buf[..got as usize]);
+    let t = s.trim();
+    (!t.is_empty()).then(|| t.to_string())
+}
+
+/// 剔除全部 NUL 字节后按代码页解码（R30）。
+///
+/// 关键观察：真机坏数据的典型形态是"UTF-16 英文头（X 00 交错）+ 原始 GBK 尾"。
+/// 去掉 0x00 后，英文头自然塌缩为 ASCII、GBK 尾可由 936 正确解码——
+/// 一个候选同时覆盖"整段 ANSI"与"半段拼接"两种损坏。
+fn ansi_candidate(raw: &[u8], code_page: u32) -> Option<String> {
+    let bytes: Vec<u8> = raw.iter().copied().filter(|&b| b != 0).collect();
+    codepage_to_string(code_page, &bytes)
+}
+
+/// 字符是否可能出现在正常程序名称/发布者文本里。
+///
+/// 收录：ASCII、拉丁扩展、常规标点/货币/箭头/带圈数字、CJK 标点/假名/汉字、
+/// 全角字符、韩文、西里尔文。其余一律视为可疑（控制符、PUA、U+FFFD、
+/// 制表符/框线/几何符号、缅甸文等被坏字节对随机命中的区段）。
+fn is_plausible_display_char(c: char) -> bool {
+    match c {
+        '\t' => true,
+        c if c.is_control() => false,
+        // ASCII 可打印
+        '\u{20}'..='\u{7E}' => true,
+        // Latin-1 + Latin Extended（® © ² ³ 及欧洲重音字母）
+        '\u{A0}'..='\u{024F}' => true,
+        // 通用标点（– — ‘ ’ “ ” … ‰）与货币/箭头/商标/带圈数字
+        '\u{2000}'..='\u{206F}' => true,
+        '\u{20A0}'..='\u{20CF}' => true,
+        '\u{2120}'..='\u{2123}' => true,
+        '\u{2190}'..='\u{21FF}' => true,
+        '\u{2460}'..='\u{24FF}' => true,
+        // CJK 标点 / 假名 / 扩展 A / 汉字主体 / 全角
+        '\u{3000}'..='\u{303F}' => true,
+        '\u{3040}'..='\u{30FF}' => true,
+        '\u{3400}'..='\u{4DBF}' => true,
+        '\u{4E00}'..='\u{9FFF}' => true,
+        '\u{FF00}'..='\u{FF5E}' => true,
+        // 韩文音节 / 西里尔文（本机可能装韩/俄软件，合法）
+        '\u{AC00}'..='\u{D7AF}' => true,
+        '\u{0400}'..='\u{04FF}' => true,
+        _ => false,
+    }
+}
+
+/// 候选文本的可疑度评分（越低越好；0 = 完全干净）。
+/// = 坏字符占比×100 + 异文字系存在惩罚。
+/// 异文惩罚用于打散"GBK 尾被当 UTF-16 对"随机命中韩文/缅甸文/希腊文区段的情形。
+fn display_score(s: &str) -> f32 {
+    let total = s.chars().count().max(1) as f32;
+    let mut bad = 0u32;
+    let mut greek = false;
+    let mut cyrillic = false;
+    let mut kana = false;
+    let mut hangul = false;
+    let mut other_exotic = false;
+    for c in s.chars() {
+        if !is_plausible_display_char(c) {
+            bad += 1;
+        }
+        match c {
+            '\u{0370}'..='\u{03FF}' => greek = true,
+            '\u{0400}'..='\u{04FF}' => cyrillic = true,
+            '\u{0590}'..='\u{10FF}' => other_exotic = true, // 希伯来/阿拉伯/婆罗米系/缅甸文等
+            '\u{3040}'..='\u{30FF}' => kana = true,
+            '\u{AC00}'..='\u{D7AF}' => hangul = true,
+            _ => {}
+        }
+    }
+    let exotic = greek as u32 + cyrillic as u32 + kana as u32 + hangul as u32 + other_exotic as u32;
+    (bad as f32 / total) * 100.0 + exotic as f32 * 1.5
+}
+
+/// 展示类 REG_SZ 防御解码（R30）。
+///
+/// 候选：① UTF-16LE 直解；② 去 NUL 后按系统 ANSI 代码页；③ 同前按 GBK(936)。
+/// 取可疑度最低者；最低仍超过阈值（损坏到不可辨识）时返回 None，
+/// 由调用方决定降级展示（名称给固定占位，发布者/版本直接隐藏）。
+/// **不得用于路径/命令字段**——那里错误"修复"反而会破坏真实值。
+pub fn reg_data_decode_display(raw: &[u8]) -> Option<String> {
+    let mut utf16 = reg_data_to_string(raw);
+    utf16.retain(|c| c != '\0');
+    let utf16 = utf16.trim().to_string();
+
+    let mut best: Option<(f32, u8, String)> = None;
+    let candidates = [
+        Some(utf16).filter(|s| !s.is_empty()).map(|s| (0u8, s)),
+        ansi_candidate(raw, CP_ACP).map(|s| (1u8, s)),
+        ansi_candidate(raw, CP_GBK).map(|s| (2u8, s)),
+    ];
+    for cand in candidates.into_iter().flatten() {
+        let score = display_score(&cand.1);
+        let better = best
+            .as_ref()
+            .map(|(bs, bp, _)| score < *bs || (score == *bs && cand.0 < *bp))
+            .unwrap_or(true);
+        if better {
+            best = Some((score, cand.0, cand.1));
+        }
+    }
+
+    const SCORE_FLOOR: f32 = 8.0;
+    best.filter(|(score, _, s)| *score < SCORE_FLOOR && !s.trim().is_empty())
+        .map(|(_, _, s)| s)
+}
+
+/// 展示类字段策略（R30）：控制哪些字符形态合法。
+#[derive(Clone, Copy)]
+pub enum DisplayField {
+    /// 程序名：允许正常 Unicode 文本，损坏时由调用方给占位名。
+    Name,
+    /// 发布者：允许正常 Unicode 文本，损坏时隐藏（None）。
+    Publisher,
+    /// DisplayVersion：实践中恒为 ASCII 可打印（含点/连字符），其余一律隐藏。
+    Version,
+    /// InstallDate：仅接受 YYYYMMDD 八位数字。
+    Date,
+}
+
+/// 取展示类值并做防御解码与字段形态校验；不可信/不合法 → None。
+pub fn reg_display_value(values: &[RegValue], name: &str, field: DisplayField) -> Option<String> {
+    let raw = values.iter().find_map(|v| {
+        if v.name.eq_ignore_ascii_case(name) && (v.kind == REG_SZ || v.kind == REG_EXPAND_SZ) {
+            Some(&v.data)
+        } else {
+            None
+        }
+    })?;
+    let s = reg_data_decode_display(raw)?;
+    let ok = match field {
+        DisplayField::Name | DisplayField::Publisher => true,
+        DisplayField::Version => !s.is_empty() && s.chars().all(|c| (' '..='~').contains(&c)),
+        DisplayField::Date => s.chars().count() == 8 && s.bytes().all(|b| b.is_ascii_digit()),
+    };
+    ok.then_some(s)
 }
 
 /// 字符串 → REG_SZ 原始字节（UTF-16LE + NUL）。

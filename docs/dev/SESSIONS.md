@@ -10,7 +10,8 @@
 - **真机四问题**（v0.2.0）：①≥500MB 个人大文件 165.8GB/121 项默认勾选进方案 B（40558 项/181.7GB），一键可误删上百 GB 个人资料；②卸载列表老程序（极域电子教室类 ANSI 时代安装器）DisplayName/Publisher/DisplayVersion 全乱码；③卸载页无软件图标；④长程序名撑破表格出现窗口横向滚动条。
 - **R30-1 大文件转审阅型（已提交）**：后端 `LARGE_REVIEW_CATEGORY="large.file"`——items 保留（大文件页浏览），不推 aggregate、`found_bytes` 排除（165GB 虚高消失）、永不注册规则表 + `resolve_targets` 专用友好报错 fail-closed；前端 reportModel 入口 `cleanableItems` 排除（类目卡/风险/方案/汇总双保险），mock 同步口径；Files 页改纯审阅页（去掉级别列与"入隔离区"语义，逐行"在资源管理器中显示"）。
 - 新 IPC `shell_reveal(path)`（只读）：SHOpenFolderAndSelectItems 首选 + explorer.exe /select 兜底，ILCreateFromPathW PIDL + CoTaskMemFree RAII，路径校验（绝对/现存/非卷根）。
-- **下一步**：R30-2 注册表乱码防御解码（MultiByteToWideChar CP_ACP/936 候选+评分）→ R30-3 横向滚动 → R30-4 卸载图标（PrivateExtractIconsW+手写 PNG）→ R30-5 全门禁+文档。
+- **R30-2 乱码防御解码（已提交）**：winreg 新增 `reg_data_decode_display` + `reg_display_value`——三候选（UTF-16 直解 / 去 NUL 后 CP_ACP / 去 NUL 后 CP936）取"可疑度评分"最低者（坏字符占比+异文字系惩罚，阈值 8.0）；**关键洞察：真机坏数据是"UTF-16 英文头+原始 GBK 尾"拼接，剔除全部 0x00 后 CP936 一个候选同时修复纯 ANSI 与半段拼接两形态**（实测 pure GBK→极域电子教室、mixed→Minisoft Toolbox极域）。parse_app 展示字段（DisplayName/Publisher/DisplayVersion/InstallDate）改走防御解码+字段形态校验（版本仅 ASCII、日期仅 8 位数字），命令/路径保持原值；DisplayName 值存在但不可辨识→占位"异常名称的程序"（条目保留可卸载），值不存在才跳过。cargo 228 全绿（+6）。
+- **下一步**：R30-3 横向滚动 → R30-4 卸载图标（PrivateExtractIconsW+手写 PNG）→ R30-5 全门禁+文档。
 
 ## 2026-10-14 | v0.2.0 发布（R28 规则 schema 增强 + R29 全界面动效；Release 全绿）
 

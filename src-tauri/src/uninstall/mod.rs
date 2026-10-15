@@ -9,8 +9,8 @@ use crate::contract::InstalledApp;
 use crate::logging::audit;
 use crate::scanner::walk::CancelToken;
 use crate::startup::winreg::{
-    enum_subkeys_view, enum_values_view, Hive, RegValue, KEY_WOW64_32KEY, KEY_WOW64_64KEY,
-    REG_EXPAND_SZ, REG_SZ,
+    enum_subkeys_view, enum_values_view, reg_display_value, DisplayField, Hive, RegValue,
+    KEY_WOW64_32KEY, KEY_WOW64_64KEY, REG_EXPAND_SZ, REG_SZ,
 };
 use runner::{classify, launch, pending_covers, pending_reboot_entries, split_exe_args, wait_tree};
 
@@ -19,6 +19,10 @@ pub use runner::{OutcomeKind, WaitConclusion};
 /// Uninstall 根键。
 const UNINSTALL_SUBKEY: &str = r"SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall";
 const REG_DWORD: u32 = 4;
+
+/// R30：DisplayName 值存在但编码损坏到不可辨识时的占位名——条目仍保留
+/// （用户可能正想卸载这类老程序），名称不伪装成可识别内容。
+const FALLBACK_DISPLAY_NAME: &str = "异常名称的程序";
 
 /// 一个视图：根键 × WOW64 标志。priority 小者优先（去重保留高优先级条目）。
 struct View {
@@ -137,7 +141,18 @@ fn parse_app(
     arch: &'static str,
     priority: u8,
 ) -> Option<RawApp> {
-    let name = string_value(values, "DisplayName")?;
+    // R30：展示类字段走防御解码（老中文安装器坏 REG_SZ → 乱码/占位）；
+    // 值根本不存在才跳过条目，值存在但不可辨识则保留并给占位名。
+    let name = match reg_display_value(values, "DisplayName", DisplayField::Name) {
+        Some(n) => n,
+        None => {
+            if has_sz_value(values, "DisplayName") {
+                FALLBACK_DISPLAY_NAME.to_string()
+            } else {
+                return None;
+            }
+        }
+    };
 
     if dword_value(values, "SystemComponent").is_some_and(|v| v != 0) {
         return None;
@@ -164,9 +179,11 @@ fn parse_app(
     Some(RawApp {
         key_name: key_name.to_string(),
         name,
-        publisher: string_value(values, "Publisher"),
-        version: string_value(values, "DisplayVersion"),
-        install_date: string_value(values, "InstallDate"),
+        // R30：展示字段防御解码（乱码 → None，UI 显示"未知发布者/—"）；
+        // InstallLocation 是路径语义，必须与原值一致，不走猜测性解码。
+        publisher: reg_display_value(values, "Publisher", DisplayField::Publisher),
+        version: reg_display_value(values, "DisplayVersion", DisplayField::Version),
+        install_date: reg_display_value(values, "InstallDate", DisplayField::Date),
         install_location: string_value(values, "InstallLocation"),
         uninstall_command,
         is_msi,
@@ -175,6 +192,13 @@ fn parse_app(
         estimated_size_bytes,
         priority,
     })
+}
+
+/// 值集合中是否存在指定名称的 SZ/EXPAND_SZ 值（不论内容能否解码）。
+fn has_sz_value(values: &[RegValue], name: &str) -> bool {
+    values
+        .iter()
+        .any(|v| v.name.eq_ignore_ascii_case(name) && (v.kind == REG_SZ || v.kind == REG_EXPAND_SZ))
 }
 
 /// 跨视图去重（纯函数）：同 name+publisher+version 保留 priority 最小者；
@@ -628,5 +652,113 @@ mod tests {
         // 开发机至少装了 PureSlate 自身依赖链上的运行时（或任意程序）；
         // 空列表不致 CI 假失败——仅断言不 panic + 不变量，数量不要求。
         eprintln!("live installed apps: {}", apps.len());
+    }
+
+    // ---- R30：坏编码防御解码（真机：ANSI 时代中文安装器的乱码 Uninstall 项） ----
+
+    /// 极域电子教室 的 GBK(936) 字节（老中文安装器实际写入形态之一）。
+    const GBK_JIYU_DIANZI_JIAOSHI: &[u8] = &[
+        0xBC, 0xAB, // 极
+        0xD3, 0xF2, // 域
+        0xB5, 0xE7, // 电
+        0xD7, 0xD3, // 子
+        0xBD, 0xCC, // 教
+        0xCA, 0xD2, // 室
+    ];
+    /// 极域 二字 GBK 字节。
+    const GBK_JIYU: &[u8] = &[0xBC, 0xAB, 0xD3, 0xF2];
+
+    /// 直接用原始字节构造 REG_SZ（不经 UTF-16，模拟 ANSI 安装器直写）。
+    fn raw_sz(name: &str, data: &[u8]) -> RegValue {
+        RegValue {
+            name: name.into(),
+            kind: REG_SZ,
+            data: data.to_vec(),
+        }
+    }
+
+    /// 构造真机典型坏数据：UTF-16 英文头 + NUL + 原始 GBK 尾。
+    fn mixed_head_gbk(head: &str, tail: &[u8]) -> Vec<u8> {
+        let mut bytes: Vec<u8> = head.encode_utf16().flat_map(|u| u.to_le_bytes()).collect();
+        bytes.extend_from_slice(&[0, 0]);
+        bytes.extend_from_slice(tail);
+        bytes
+    }
+
+    #[test]
+    fn r30_pure_gbk_display_name_decodes() {
+        // 整段 GBK 字节：UTF-16 直解必然乱码，936 候选应还原中文。
+        let vals = vec![
+            raw_sz("DisplayName", GBK_JIYU_DIANZI_JIAOSHI),
+            sz("UninstallString", "x.exe"),
+        ];
+        let app = parse(&vals, "machine", "x64", 0).expect("应解析");
+        eprintln!("pure GBK decode = {}", app.name);
+        assert_eq!(app.name, "极域电子教室");
+    }
+
+    #[test]
+    fn r30_mixed_utf16_head_gbk_tail_repairs() {
+        // 真机形态：UTF-16 "Minisoft Toolbox" + GBK 尾。
+        let data = mixed_head_gbk("Minisoft Toolbox", GBK_JIYU);
+        let vals = vec![raw_sz("DisplayName", &data), sz("UninstallString", "x.exe")];
+        let app = parse(&vals, "machine", "x64", 0).expect("应解析");
+        eprintln!("mixed decode = {}", app.name);
+        assert_eq!(app.name, "Minisoft Toolbox极域");
+    }
+
+    #[test]
+    fn r30_valid_utf16_chinese_unchanged() {
+        // 正常现代中文条目不得被防御逻辑改动（腾讯科技(深圳)有限公司）。
+        let vals = vec![
+            sz("DisplayName", "腾讯科技(深圳)有限公司"),
+            sz("Publisher", "腾讯科技(深圳)有限公司"),
+            sz("DisplayVersion", "9.9.28"),
+        ];
+        let app = parse(&vals, "machine", "x64", 0).expect("应解析");
+        assert_eq!(app.name, "腾讯科技(深圳)有限公司");
+        assert_eq!(app.publisher.as_deref(), Some("腾讯科技(深圳)有限公司"));
+        assert_eq!(app.version.as_deref(), Some("9.9.28"));
+    }
+
+    #[test]
+    fn r30_unrecoverable_garbage_falls_back_and_aux_fields_hidden() {
+        // 含控制符/随机字节，三种候选都不可信 → 占位名；发布者/版本隐藏。
+        let garbage = [0x01u8, 0x02, 0xE0, 0xAA, 0x55, 0x00, 0x7F, 0x80];
+        let vals = vec![
+            raw_sz("DisplayName", &garbage),
+            raw_sz("Publisher", &garbage),
+            raw_sz("DisplayVersion", &garbage),
+            sz("UninstallString", "x.exe"),
+        ];
+        let app = parse(&vals, "machine", "x64", 0).expect("值存在就应保留条目");
+        assert_eq!(app.name, "异常名称的程序");
+        assert_eq!(app.publisher, None);
+        assert_eq!(app.version, None);
+    }
+
+    #[test]
+    fn r30_garbled_version_and_bad_date_hidden() {
+        // 截图同款：ASCII 版本号头 + GBK 乱码尾 → Version 形态校验拒绝。
+        let ver_data = mixed_head_gbk("1.0.0.93", GBK_JIYU);
+        let vals = vec![
+            sz("DisplayName", "某程序"),
+            raw_sz("DisplayVersion", &ver_data),
+            sz("InstallDate", "2026093x"),
+        ];
+        let app = parse(&vals, "machine", "x64", 0).unwrap();
+        assert_eq!(app.version, None);
+        assert_eq!(app.install_date, None);
+
+        // 合法日期保留。
+        let vals2 = vec![sz("DisplayName", "某程序"), sz("InstallDate", "20260930")];
+        let app2 = parse(&vals2, "machine", "x64", 0).unwrap();
+        assert_eq!(app2.install_date.as_deref(), Some("20260930"));
+    }
+
+    #[test]
+    fn r30_missing_display_name_still_skipped() {
+        // 值不存在（区别于"值存在但坏"）→ 条目跳过，不给占位。
+        assert!(parse(&[sz("Publisher", "x")], "machine", "x64", 0).is_none());
     }
 }
