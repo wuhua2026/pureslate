@@ -162,3 +162,11 @@
 - **大文件语义变更（非契约）**：`large.file` 转为**审阅型类目**——items 照常返回（大文件页浏览），但不再产生 aggregate、不计入 `ScanResult.totalBytes`（found_bytes），且后端永不注册规则（`clean_execute` 对其 fail-closed 并返回专用友好错误）；前端报告模型入口排除该类目（方案/风险/汇总/类目卡）。`ScanItem` 形状不变；消费者应注意 `itemCount` 仍含 large 项而 aggregates 不再含。
 - **卸载列表展示字段解码加固（非契约）**：DisplayName/Publisher/DisplayVersion/InstallDate 经防御解码（UTF-16/CP_ACP/CP936 候选评分；版本仅 ASCII、日期仅 8 位数字）；不可辨识的 DisplayName 呈现为"异常名称的程序"（条目保留），损坏的发布者/版本/日期省略（null）。UninstallString/InstallLocation 等路径语义字段保持注册表原值不变。
 - **验证**：cargo 233 lib（+11 自 v0.2.0：shell 2、解码 6、图标 5；另 2 ignored）+27 集成全绿，clippy --all-targets -D warnings 绿；pnpm typecheck/75 vitest（+4）/build 绿；NSIS **2,946,042B=2.81MiB <20MB**（较 v0.2.0 +9.5KB/+0.33%，零新 crate/npm 依赖）；真机图标目检与浏览器布局实测证据见 TASKS R30。
+
+### v0.2.1（发布）
+
+- 2026-10-15 发布：tag `v0.2.1`（annotated，提交 3dd5998，工作流 tag=tauri.conf.json 版本校验通过）；
+- Release run 全步骤绿（双次 NSIS 重建 + 体积门禁 + manifest 生成 + Release 上传 + manifest 回推，SignPath 步骤如预期 skipped 仍为未签名包）；四资产：`PureSlate_0.2.1_x64-setup.exe`（**2,948,879 B ≈ 2.81 MiB**，sha256 `b02304789044212b9e9f7179c314421535cb4b4a22d9937b5de9d52d5344a5e0`）、`PureSlate-0.2.1-portable.zip`（3,979,847 B）、`pureslate-rules-0.2.1.json`、`build-hashes.json`；
+- Release 页：<https://github.com/wuhua2026/pureslate/releases/tag/v0.2.1>（正文 `.github/release-notes/v0.2.1.md`）；
+- 版本三处 bump：src-tauri/Cargo.toml、tauri.conf.json、Cargo.lock（package.json 历史恒 0.1.0 不动）；发布后 update-manifest + rules pack 经 [skip ci] bot 回推 main（54cc060），appSha256/rulesSha256 与 Release 资产一致；
+- README 同步：下载链接 v0.2.1、大文件维度改"审阅型（不清理）"。

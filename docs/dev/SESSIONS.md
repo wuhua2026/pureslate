@@ -5,7 +5,12 @@
 > 维护（AGENTS.md §9）：任务完成时 agent 自动追加/更新当前会话条目，随任务同一提交。格式：`## YYYY-MM-DD | 主题`。
 > 本初版由历史会话记忆回溯整理（截至 2026-09-29），细节以 git 历史与 TASKS.md 为准。
 
-## 2026-10-15 | R30 v0.2.0 真机反馈批次（大文件误删风险/乱码/图标/横向滚动；五任务完成，待真机走查）
+## 2026-10-15 | v0.2.1 发布（R30 真机反馈热修：大文件审阅化/乱码/图标/横滚；Release 全绿）
+
+- **发布**：R30 五任务经人类真机走查放行后发 v0.2.1。release commit 3dd5998（三处 bump + release notes）→ annotated tag v0.2.1 → push main/tag；Release run（双 NSIS 重建+体积门禁+manifest+上传+回推）**全绿**；四资产：`PureSlate_0.2.1_x64-setup.exe` **2,948,879B≈2.81MiB**（sha256 b0230478…44a5e0）、portable.zip 3,979,847B、rules-0.2.1.json、build-hashes.json；Release API 实证 published/draft=false。manifest bot 回推 54cc060（appSha256 与资产一致）；README 同步链接与大文件审阅型语义。
+- Release 页：<https://github.com/wuhua2026/pureslate/releases/tag/v0.2.1>。
+
+## 2026-10-15 | R30 v0.2.0 真机反馈批次（大文件误删风险/乱码/图标/横向滚动；五任务，已随 v0.2.1 发布）
 
 - **真机四问题**（v0.2.0）：①≥500MB 个人大文件 165.8GB/121 项默认勾选进方案 B（40558 项/181.7GB），一键可误删上百 GB 个人资料；②卸载列表老程序（极域电子教室类 ANSI 时代安装器）DisplayName/Publisher/DisplayVersion 全乱码；③卸载页无软件图标；④长程序名撑破表格出现窗口横向滚动条。
 - **R30-1 大文件转审阅型（已提交）**：后端 `LARGE_REVIEW_CATEGORY="large.file"`——items 保留（大文件页浏览），不推 aggregate、`found_bytes` 排除（165GB 虚高消失）、永不注册规则表 + `resolve_targets` 专用友好报错 fail-closed；前端 reportModel 入口 `cleanableItems` 排除（类目卡/风险/方案/汇总双保险），mock 同步口径；Files 页改纯审阅页（去掉级别列与"入隔离区"语义，逐行"在资源管理器中显示"）。
@@ -14,7 +19,7 @@
 - **R30-3 横向滚动修复（已提交）**：`.content` 全局 `overflow-x:hidden` 兜底；5 个表格页（Apps/Startup×2/Quarantine/Log/Files）统一 `table-layout:fixed`+colgroup **百分比列宽**。踩坑：①`display:flex` 直接放 `<td>` 会破坏 table-cell 盒模型（名称列宽被分成 0、与发布者列重叠）——改 td 内嵌 `.name-cell` flex 容器，文本 span 截断、徽章 flex:none；②固定**像素**列宽在窄窗（608px 实测）总和超约束时 auto 列被分到 0 宽照样重叠，改**百分比**后任意宽度列区间严格不相交（浏览器实测 th/td 矩形严格递增、sw≤cw、省略号 scrollWidth>clientWidth 三重证据）；窗口加 minWidth 900/minHeight 600。typecheck/75 vitest/build 绿（index gzip 45.03KB，增量近零）。
 - **R30-4 卸载图标（已提交）**：新 `uninstall/icons.rs`（零新 crate）——DisplayIcon `路径[,索引]` 纯函数解析（负序数/引号/逗号边界）→ PrivateExtractIconsW（32px，索引失败回退 0，再回退卸载命令 exe）→ GetIconInfo/GetObjectW/GetDIBits 取 top-down 32bpp BGRA（<32bpp 源用单色 AND 掩码补 alpha，GDI 对象全 RAII）→ **手写 PNG**（手写 CRC32/Adler32 + stored deflate zlib 块，base64 data URL）；新加性 IPC `uninstall_app_icons(ids)` 批量 ≤200、一次注册表枚举（枚举重构为 `enumerate_located`+泛型 `dedupe_by`，list/located 同口径），单项失败静默→前端灰色 AppIcon 字形回退，`@error` 再兜底。CSP 早有 `img-src data:` 无需改。前端 Apps 增图标列（百分比列宽再平衡 7 列）。**实测证据**：--ignored 转储测试从本机 12 个真实程序（ArcGIS Pro/原神/Git 等）提取 PNG，目检颜色/透明通道全部正确（测试自带 PNG chunk CRC/IHDR/stored 重组/Adler 校验；冒烟测试 CI 可宽容）。cargo 233 全绿（+5，2 ignored）、typecheck/75 vitest/build 绿（Apps gzip 5.83→6.10KB，index 45.04 不变）。
 - **R30-5 门禁与文档（已提交）**：233 lib（2 ignored）+27 集成全绿、typecheck/75 vitest/build 绿、NSIS **2.81MiB**（2,946,042B，较 v0.2.0 +9.5KB/+0.33%，零新依赖）；TASKS 增 R30 批次五行、CHANGELOG 登记 2 新命令（shell_reveal/uninstall_app_icons，既有类型零改动）+大文件语义/解码加固两条非契约说明、LESSONS §① 两条（GBK 混合编码修复、td flex 盒模型坑）§② 两条（审阅型类目决策、手写 PNG 零依赖）§④ 体积/测试数两行。
-- **提交链**：R30-1 cba1b8a → R30-2 998c290 → R30-3 df6deab → R30-4 8045eec → R30-5（本提交）。**挂人类真机走查**：pnpm tauri dev——方案 B 不含大文件且数字合理、大文件页"在资源管理器中显示"、图标渲染与超长名省略、拖窗无横滚（minWidth 900）；走查通过后由人类决定是否发 v0.2.1。
+- **提交链**：R30-1 cba1b8a → R30-2 998c290 → R30-3 df6deab → R30-4 8045eec → R30-5 bae57d7 → release 3dd5998。人类真机走查通过后已发 v0.2.1（见本文件顶部条目）。
 
 ## 2026-10-14 | v0.2.0 发布（R28 规则 schema 增强 + R29 全界面动效；Release 全绿）
 

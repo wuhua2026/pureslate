@@ -6,7 +6,7 @@
 
 ## 下载安装
 
-最新版本：**[v0.2.0](https://github.com/wuhua2026/pureslate/releases/tag/v0.2.0)**（从 [**GitHub Releases**](https://github.com/wuhua2026/pureslate/releases/latest) 始终获取最新版），下载 `PureSlate_0.2.0_x64-setup.exe`：
+最新版本：**[v0.2.1](https://github.com/wuhua2026/pureslate/releases/tag/v0.2.1)**（从 [**GitHub Releases**](https://github.com/wuhua2026/pureslate/releases/latest) 始终获取最新版），下载 `PureSlate_0.2.1_x64-setup.exe`：
 
 - 系统要求：Windows 10 / 11（x64）；
 - 安装包 sha256 见 Release 页附件与 `update-manifest.json`；
@@ -20,7 +20,7 @@
 | 维度 | 说明 | 默认去向 |
 |------|------|---------|
 | 临时文件 | %TEMP%、系统临时目录等 | 🟢 直清 / 回收站 |
-| 大文件 | ≥500MB 文件定位（大小/路径/访问时间） | 🟡 隔离区 |
+| 大文件 | ≥500MB 个人文件**仅定位不清理**（大小/路径/访问时间，可一键在资源管理器中显示），不进任何清理方案 | 审阅型（不清理） |
 | 重复文件 | 大小 → 64KB 采样 → 全量 sha256 三级判重，保留最早一份 | 🟡 隔离区 |
 | 应用缓存 | 规则驱动（含微信等，进程运行中自动整类阻止） | 🟡 隔离区 |
 | 隐私痕迹 | Edge/Chrome 浏览历史、最近文档 | 🟡 隔离区 |
