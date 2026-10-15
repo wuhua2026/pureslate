@@ -191,17 +191,18 @@ const mockHint = isMockMode();
   overflow: hidden;
   font-size: 0.85rem;
 }
+/* R30-3：百分比列宽（合计 100%），窄窗下列也不重叠。 */
 .col-path {
-  width: auto;
+  width: 42%;
 }
 .col-size {
-  width: 84px;
+  width: 10%;
 }
 .col-date {
-  width: 104px;
+  width: 14%;
 }
 .col-op {
-  width: 148px;
+  width: 20%;
 }
 .list th,
 .list td {

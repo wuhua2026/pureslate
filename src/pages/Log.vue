@@ -101,6 +101,13 @@ onMounted(load);
       <div class="state" v-if="loading">加载中…</div>
       <div class="state empty" v-else-if="entries.length === 0">今日暂无操作记录。</div>
       <table v-else class="tbl">
+        <colgroup>
+          <col class="col-time" />
+          <col class="col-op" />
+          <col class="col-disp" />
+          <col class="col-result" />
+          <col />
+        </colgroup>
         <thead>
           <tr>
             <th>时间</th>
@@ -211,8 +218,23 @@ onMounted(load);
 }
 .tbl {
   width: 100%;
+  /* R30-3：fixed 布局，超长对象路径按剩余列宽省略。 */
+  table-layout: fixed;
   border-collapse: collapse;
   font-size: 0.82rem;
+}
+/* R30-3：百分比列宽（合计 100%），窄窗下列也不重叠。 */
+.col-time {
+  width: 16%;
+}
+.col-op {
+  width: 10%;
+}
+.col-disp {
+  width: 9%;
+}
+.col-result {
+  width: 11%;
 }
 .tbl th,
 .tbl td {
@@ -240,7 +262,6 @@ onMounted(load);
 }
 .obj {
   color: var(--text-2);
-  max-width: 420px;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;

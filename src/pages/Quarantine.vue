@@ -127,6 +127,14 @@ onUnmounted(() => {
       </div>
 
       <table class="list">
+        <colgroup>
+          <col class="col-sel" />
+          <col />
+          <col class="col-size" />
+          <col class="col-grade" />
+          <col class="col-date" />
+          <col class="col-days" />
+        </colgroup>
         <thead>
           <tr>
             <th class="sel"></th>
@@ -236,12 +244,30 @@ onUnmounted(() => {
 }
 .list {
   width: 100%;
+  /* R30-3：fixed 布局，超长原路径按列宽省略。 */
+  table-layout: fixed;
   border-collapse: collapse;
   background: var(--surface, #fff);
   border: 1px solid var(--border, #e4e7ec);
   border-radius: 10px;
   overflow: hidden;
   font-size: 0.85rem;
+}
+/* R30-3：百分比列宽（合计 100%），窄窗下列也不重叠。 */
+.col-sel {
+  width: 5%;
+}
+.col-size {
+  width: 10%;
+}
+.col-grade {
+  width: 8%;
+}
+.col-date {
+  width: 12%;
+}
+.col-days {
+  width: 9%;
 }
 .list th,
 .list td {
@@ -269,11 +295,7 @@ onUnmounted(() => {
 .list tbody tr.checked:hover {
   background: rgba(37, 99, 235, 0.1);
 }
-.sel {
-  width: 32px;
-}
 .path {
-  max-width: 380px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;

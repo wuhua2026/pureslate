@@ -82,6 +82,14 @@ async function restore(item: StartupEntry): Promise<void> {
       <p v-if="actionError" class="error">{{ actionError }}</p>
 
       <table class="list" v-if="groups.enabled.length > 0">
+        <colgroup>
+          <col class="col-name" />
+          <col class="col-pub" />
+          <col class="col-impact" />
+          <col class="col-source" />
+          <col />
+          <col class="col-op" />
+        </colgroup>
         <thead>
           <tr>
             <th>名称</th>
@@ -119,6 +127,12 @@ async function restore(item: StartupEntry): Promise<void> {
       <template v-if="groups.disabled.length > 0">
         <h2 class="section">已禁用（备份在 PureSlate，可恢复）</h2>
         <table class="list muted">
+          <colgroup>
+            <col class="col-name2" />
+            <col class="col-source2" />
+            <col />
+            <col class="col-op" />
+          </colgroup>
           <thead>
             <tr>
               <th>名称</th>
@@ -211,12 +225,38 @@ async function restore(item: StartupEntry): Promise<void> {
 }
 .list {
   width: 100%;
+  /* R30-3：fixed 布局，超长命令/名称按列宽省略，不撑出横向滚动。 */
+  table-layout: fixed;
   border-collapse: collapse;
   background: var(--surface, #fff);
   border: 1px solid var(--border, #e4e7ec);
   border-radius: 10px;
   overflow: hidden;
   font-size: 0.85rem;
+}
+/* R30-3：百分比列宽（两表各自合计 100%），窄窗下列也不重叠。 */
+/* 启用表 */
+.col-name {
+  width: 17%;
+}
+.col-pub {
+  width: 14%;
+}
+.col-impact {
+  width: 8%;
+}
+.col-source {
+  width: 13%;
+}
+.col-op {
+  width: 12%;
+}
+/* 已禁用表 */
+.col-name2 {
+  width: 24%;
+}
+.col-source2 {
+  width: 16%;
 }
 .list.muted {
   opacity: 0.85;
@@ -242,14 +282,12 @@ async function restore(item: StartupEntry): Promise<void> {
   border-bottom: none;
 }
 .name {
-  max-width: 180px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
   font-weight: 500;
 }
 .pub {
-  max-width: 140px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -279,7 +317,6 @@ async function restore(item: StartupEntry): Promise<void> {
   white-space: nowrap;
 }
 .cmd {
-  max-width: 320px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;

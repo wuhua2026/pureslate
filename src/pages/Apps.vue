@@ -558,6 +558,15 @@ async function rescanAfterClean(): Promise<void> {
       <div v-if="visible.length === 0" class="state">没有匹配的程序</div>
 
       <table v-else class="list">
+        <colgroup>
+          <col class="col-name" />
+          <col class="col-pub" />
+          <col class="col-ver" />
+          <col class="col-scope" />
+          <col class="col-size" />
+          <col class="col-date" />
+          <col class="col-op" />
+        </colgroup>
         <thead>
           <tr>
             <th>名称</th>
@@ -572,12 +581,14 @@ async function rescanAfterClean(): Promise<void> {
         <tbody>
           <tr v-for="a in visible" :key="a.id">
             <td class="name">
-              {{ a.name }}
-              <span v-if="a.isMsi" class="badge msi" title="Windows Installer 产品">MSI</span>
-              <span class="badge arch">{{ a.arch }}</span>
+              <div class="name-cell">
+                <span class="name-text" :title="a.name">{{ a.name }}</span>
+                <span v-if="a.isMsi" class="badge msi" title="Windows Installer 产品">MSI</span>
+                <span class="badge arch">{{ a.arch }}</span>
+              </div>
             </td>
-            <td class="pub">{{ a.publisher ?? "未知发布者" }}</td>
-            <td>{{ a.version ?? "—" }}</td>
+            <td class="pub" :title="a.publisher ?? ''">{{ a.publisher ?? "未知发布者" }}</td>
+            <td class="ver" :title="a.version ?? ''">{{ a.version ?? "—" }}</td>
             <td>{{ scopeLabel(a.scope) }}</td>
             <td>{{ formatSize(a.estimatedSizeBytes) || "—" }}</td>
             <td>{{ installDateLabel(a.installDate) || "—" }}</td>
@@ -661,12 +672,37 @@ async function rescanAfterClean(): Promise<void> {
 }
 .list {
   width: 100%;
+  /* R30-3：fixed 布局——超长程序名/发布者由列宽+省略号截断，杜绝横向溢出。 */
+  table-layout: fixed;
   border-collapse: collapse;
   background: var(--surface, #fff);
   border: 1px solid var(--border, #e4e7ec);
   border-radius: 10px;
   overflow: hidden;
   font-size: 0.85rem;
+}
+/* R30-3：百分比列宽（合计 100%）——任意窗口宽度下列区间严格不重叠；
+   像素列宽在窄窗会超约束把 auto 列挤成 0，导致列重叠。 */
+.col-name {
+  width: 35%;
+}
+.col-pub {
+  width: 16%;
+}
+.col-ver {
+  width: 13%;
+}
+.col-scope {
+  width: 7%;
+}
+.col-size {
+  width: 10%;
+}
+.col-date {
+  width: 10%;
+}
+.col-op {
+  width: 9%;
 }
 .list th,
 .list td {
@@ -692,19 +728,34 @@ async function rescanAfterClean(): Promise<void> {
 .list tbody tr:last-child td {
   border-bottom: none;
 }
+/* R30-3：td 保持 table-cell（display:flex 直接放 td 会破坏固定列表格），
+   内层 .name-cell 做 flex——文本截断省略，徽章固定不被压缩/截掉。 */
+.name-cell {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  min-width: 0;
+}
 .name {
   font-weight: 600;
 }
-.pub {
+.name-text {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.pub,
+.ver {
   color: var(--text-2, #5a6472);
-  max-width: 180px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 .badge {
   display: inline-block;
-  margin-left: 6px;
+  /* R30-3：名称列改用 flex gap 间距；徽章固定不缩 */
+  margin-left: 0;
+  flex: none;
   padding: 0 6px;
   border-radius: 8px;
   font-size: 0.68rem;

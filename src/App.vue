@@ -285,6 +285,9 @@ button {
 .content {
   padding: 22px 28px 30px;
   min-width: 0;
+  /* R30-3：全局横向溢出兜底——超长单元格由各表 table-layout:fixed 截断，
+     任何遗漏都不允许带出窗口级横向滚动条。 */
+  overflow-x: hidden;
 }
 
 /* 焦点可见性（无障碍） */
