@@ -38,15 +38,28 @@ describe("mock 扫描数据（P0-04）", () => {
   });
 
   it("覆盖全部 6 扫描维度", () => {
-    const covered = ALL_DIMENSIONS.every((d) =>
-      result.items.some((i) => i.categoryId.startsWith(d === "temp" ? "temp" : d)),
-    );
-    // 维度以 categoryId 前缀界定；逐维度断言兜底
-    const dims = new Set(result.aggregates.map((a) => a.categoryId.split(".")[0]));
+    // R30：维度覆盖以 items 为准（large 维度有 items 但不出 aggregate）。
     for (const d of ALL_DIMENSIONS) {
-      expect(dims.has(d), `缺少维度: ${d}`).toBe(true);
+      const prefix = d === "temp" ? "temp" : d;
+      expect(
+        result.items.some((i) => i.categoryId.startsWith(prefix)),
+        `缺少维度: ${d}`,
+      ).toBe(true);
     }
-    void covered;
+  });
+
+  it("R30：large.file 有 items 但无 aggregate、不计 found 字节", () => {
+    const largeItems = result.items.filter((i) => i.categoryId === "large.file");
+    expect(largeItems.length).toBeGreaterThan(0);
+    expect(result.aggregates.some((a) => a.categoryId === "large.file")).toBe(false);
+    const largeYellow = largeItems
+      .filter((i) => i.grade === "yellow")
+      .reduce((s, i) => s + i.sizeBytes, 0);
+    const aggYellow = result.aggregates
+      .filter((a) => a.grade === "yellow")
+      .reduce((s, a) => s + a.totalBytes, 0);
+    expect(result.totalBytes.yellow).toBe(aggYellow);
+    expect(result.totalBytes.yellow + largeYellow).toBeGreaterThan(aggYellow);
   });
 
   it("含中英文文件名", () => {
@@ -70,9 +83,10 @@ describe("mock 扫描数据（P0-04）", () => {
     expect(groups.size).toBeGreaterThanOrEqual(1);
   });
 
-  it("aggregates 聚合总数与 items 一致", () => {
+  it("aggregates 聚合总数 = items 数（R30：审阅型类目不出 aggregate）", () => {
     const sumFromAgg = result.aggregates.reduce((acc, a) => acc + a.itemCount, 0);
-    expect(sumFromAgg).toBe(result.itemCount);
+    const reviewOnly = result.items.filter((i) => i.categoryId === "large.file").length;
+    expect(sumFromAgg).toBe(result.itemCount - reviewOnly);
   });
 
   it("磁盘占用 stub（屏 1 Home）字段合法且未超量", () => {

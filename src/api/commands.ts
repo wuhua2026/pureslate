@@ -92,6 +92,12 @@ export const uninstall_list = () =>
     ? mockCommands.uninstall_list()
     : invokeApp<InstalledApp[]>("uninstall_list");
 
+/** R30：在资源管理器中定位并选中文件/文件夹（大文件审阅页，只读）。 */
+export const shell_reveal = (path: string) =>
+  useMock()
+    ? mockCommands.shell_reveal(path)
+    : invokeApp<null>("shell_reveal", { path });
+
 /** R27-2：执行卸载编排；返回 txId，进度/完成经事件推送。 */
 export const uninstall_run = (appId: string) =>
   useMock()

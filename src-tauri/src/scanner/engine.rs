@@ -24,6 +24,17 @@ use crate::cleaner::dup::{collect_candidates, find_duplicates, DupCandidate};
 /// R05 大文件阈值（SPEC §3：large = ≥500MB）。
 pub const LARGE_MIN_BYTES: u64 = 500 * 1024 * 1024;
 
+/// R30 大文件类目 id（**审阅型，永不进入清理方案/清理执行**）。
+///
+/// 真机反馈（v0.2.0，165.8GB/121 项个人文件被整卷扫出）：≥500MB 的全盘条目
+/// 绝大多数是用户主动存放的资料（视频/数据集/虚拟机镜像），不是垃圾；
+/// 一键批量清理个人大文件违背"宁漏勿错"。故 large 只负责**发现**：
+/// - items 保留（大文件页浏览，支持"在资源管理器中显示"）；
+/// - 不生成 aggregate、不进报告 A/B 方案；
+/// - 该 id 永不注册进规则表，resolve_targets 的 fail-closed 即后端兜底，
+///   即使前端陈旧/有 bug 也无法经本应用删除个人大文件。
+pub const LARGE_REVIEW_CATEGORY: &str = "large.file";
+
 /// 扫描进度回调：`(阶段, 已完成类目, 类目总数, 当前类目路径, 实时累计字节)`。
 pub type ProgressCb<'a> = dyn FnMut(ScanPhase, usize, usize, String, FoundBytes) + 'a;
 
@@ -185,17 +196,18 @@ pub fn run_scan(
         }
     };
 
-    // large 维度（R05）：**全部固定盘**逐卷并行遍历（v0.1.5 反馈 1a：原仅扫首个
+    // large 维度（R05/R30）：**全部固定盘**逐卷并行遍历（v0.1.5 反馈 1a：原仅扫首个
     // target 所在卷，其他盘大文件完全不进结果）。逐卷推进 progress（currentPath=卷根）。
-    // 已知 UX 缺口：单卷遍历期间无中间进度事件（分片级进度回调留待后续）。
+    // R30：large 为**审阅型**类目——items 保留供大文件页浏览，但不生成 aggregate、
+    // 不进报告 A/B 清理方案（个人大文件不可一键清理），且不计入"可清理发现量"。
     if dims.contains(&ScanDimension::Large) && !cancel.is_cancelled() {
-        let large_start = out.items.len();
         for vol_root in crate::quarantine::fixed_drive_roots() {
             if cancel.is_cancelled() {
                 break;
             }
-            out.items
-                .extend(scan_large_items(&vol_root, LARGE_MIN_BYTES, cancel));
+            scan_large_items(&vol_root, LARGE_MIN_BYTES, cancel)
+                .into_iter()
+                .for_each(|it| out.items.push(it));
             progress(
                 ScanPhase::Walking,
                 done,
@@ -203,18 +215,6 @@ pub fn run_scan(
                 vol_root.to_string_lossy().into_owned(),
                 found_bytes(&out.items),
             );
-        }
-        let count = out.items.len() - large_start;
-        if count > 0 {
-            let cat_slice = &out.items[large_start..];
-            out.aggregates.push(category_aggregate(
-                "large.file",
-                "大文件",
-                Grade::Yellow,
-                Disposition::Quarantine,
-                "≥500MB 的大文件清单（信息展示为主，确认后入隔离区 14 天可还原）",
-                cat_slice,
-            ));
         }
     }
 
@@ -304,10 +304,13 @@ fn scan_dup_category(
     items
 }
 
-/// large 维度扫描（R05）：对卷根做一次并行全盘遍历，产出 ≥large_min 的条目。
+/// large 维度扫描（R05/R30）：对卷根做一次并行全盘遍历，产出 ≥large_min 的条目。
 ///
-/// 分级（SAFETY §1）："下载目录大文件"归 🟡 → yellow/quarantine（14 天可还原）；
-/// 大文件多为用户数据，Files 页以信息展示为主，清理走报告页勾选确认。
+/// R30 定位（SAFETY §1 宁漏勿错）：大文件是**审阅型**条目——多为用户主动存放的
+/// 个人资料，不是垃圾。只供大文件页发现/浏览（可"在资源管理器中显示"），
+/// **不提供应用内删除出口**：grade 仅作风险提示，永不进入清理方案；
+/// disposition 字段保留 quarantine 仅为契约兼容，实际无执行路径
+/// （id 不注册规则表，resolve_targets fail-closed）。
 /// 顺序：大小降序、同大小按路径字典序（确定性，与 Files 页默认排序一致）。
 pub fn scan_large_items(vol_root: &Path, large_min: u64, cancel: &CancelToken) -> Vec<ScanItem> {
     let stats = parallel_walk_stats(vol_root, large_min, true, cancel);
@@ -315,15 +318,15 @@ pub fn scan_large_items(vol_root: &Path, large_min: u64, cancel: &CancelToken) -
         .large
         .into_iter()
         .map(|f| ScanItem {
-            id: stable_item_id("large.file", &f.path),
-            category_id: "large.file".into(),
+            id: stable_item_id(LARGE_REVIEW_CATEGORY, &f.path),
+            category_id: LARGE_REVIEW_CATEGORY.into(),
             label: "大文件".into(),
             path: f.path.to_string_lossy().into_owned(),
             size_bytes: f.size,
             grade: Grade::Yellow,
             disposition: Disposition::Quarantine,
             reason: format!(
-                "≥{} 的大文件，请确认是否仍需保留（入隔离区 14 天可还原）",
+                "≥{} 的个人大文件，仅供查阅；PureSlate 不提供大文件删除，请在资源管理器中自行确认处理",
                 human_bytes(large_min)
             ),
             mtime: f.mtime_ms,

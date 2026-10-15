@@ -123,6 +123,9 @@ export const mockCommands = {
 
   uninstall_list: (): Promise<InstalledApp[]> => Promise.resolve(InstalledAppStub),
 
+  // R30：mock 下无法真正调起 Explorer，返回成功即可走查交互。
+  shell_reveal: (_path: string): Promise<null> => Promise.resolve(null),
+
   // R27-2：mock 有状态（dev 走查）——执行后从 stub 移除，重查列表可见条目消失。
   // 进度/完成事件由页面 mock 分支按阶段模拟（与 scan store mock 同约定）。
   uninstall_run: (appId: string): Promise<string> => {

@@ -33,8 +33,9 @@ const seeds: ItemSeed[] = [
   // temp（🟢 direct）
   { idSource: "temp.user|C:\\Windows\\Temp\\installer.log", categoryId: "temp.user", label: "临时文件", path: "C:\\Windows\\Temp\\installer.log", sizeBytes: 4 * MB, grade: "green", disposition: "direct", reason: "系统安装残留临时文件，删除后自动重建", mtime: Date.now() - 3 * 86400e3 },
   { idSource: "temp.user|C:\\Users\\17599\\AppData\\Local\\Temp\\cache_微信.exe.mst", categoryId: "temp.user", label: "临时文件", path: "C:\\Users\\17599\\AppData\\Local\\Temp\\cache_微信.exe.mst", sizeBytes: 12 * MB, grade: "green", disposition: "direct", reason: "安装包临时缓存，可安全清理", mtime: Date.now() - 60e3 },
-  // large（🟡 quarantine，SAFETY §1：下载/媒体类大文件归谨慎档）
-  { idSource: "large.file|D:\\Downloads\\虚拟机镜像\\bigfile_amd64.iso", categoryId: "large.file", label: "大文件", path: "D:\\Downloads\\虚拟机镜像\\bigfile_amd64.iso", sizeBytes: 512 * MB, grade: "yellow", disposition: "quarantine", reason: "超过 500MB 的大文件，确认不需要后入隔离区，14 天内可还原", mtime: Date.now() - 30 * 86400e3, atime: Date.now() - 180 * 86400e3 },
+  // large（R30：审阅型个人数据——仅大文件页浏览/资源管理器定位，不进报告与清理方案；
+  // grade 保留 yellow 仅作风险提示，后端不注册规则、resolve_targets fail-closed）
+  { idSource: "large.file|D:\\Downloads\\虚拟机镜像\\bigfile_amd64.iso", categoryId: "large.file", label: "大文件", path: "D:\\Downloads\\虚拟机镜像\\bigfile_amd64.iso", sizeBytes: 512 * MB, grade: "yellow", disposition: "quarantine", reason: "≥500MB 的个人大文件，仅供查阅；PureSlate 不提供大文件删除，请在资源管理器中自行确认处理", mtime: Date.now() - 30 * 86400e3, atime: Date.now() - 180 * 86400e3 },
   // dup（🟡 quarantine，重复组）
   { idSource: "dup.file|C:\\Users\\17599\\Documents\\照片备份\\2023\\photo_001.jpg", categoryId: "dup.file", label: "重复文件", path: "C:\\Users\\17599\\Documents\\照片备份\\2023\\photo_001.jpg", sizeBytes: 88 * MB, grade: "yellow", disposition: "quarantine", reason: "与 photo_001_副本.jpg 内容相同，保留最早一份", mtime: Date.now() - 20 * 86400e3, dupGroup: "dupgrp-1" },
   { idSource: "dup.file|C:\\Users\\17599\\Downloads\\photo_001_副本.jpg", categoryId: "dup.file", label: "重复文件", path: "C:\\Users\\17599\\Downloads\\photo_001_副本.jpg", sizeBytes: 88 * MB, grade: "yellow", disposition: "quarantine", reason: "重复副本，可在隔离区保留 14 天后再清", mtime: Date.now() - 10 * 86400e3, dupGroup: "dupgrp-1" },
@@ -56,9 +57,13 @@ function toItem(s: ItemSeed): ScanItem {
 }
 
 // ---- 聚合计算 ----
+/** R30：审阅型类目（镜像后端 LARGE_REVIEW_CATEGORY）：有 items、无 aggregate、不计 found。 */
+const REVIEW_ONLY_CATEGORY_IDS = new Set(["large.file"]);
+
 function aggregate(items: ScanItem[]): CategoryAggregate[] {
   const map = new Map<string, CategoryAggregate>();
   for (const it of items) {
+    if (REVIEW_ONLY_CATEGORY_IDS.has(it.categoryId)) continue;
     const existing = map.get(it.categoryId);
     if (existing) {
       existing.totalBytes += it.sizeBytes;
@@ -79,7 +84,9 @@ function aggregate(items: ScanItem[]): CategoryAggregate[] {
 }
 
 function sumBy(items: ScanItem[], grade: Grade): number {
-  return items.filter((i) => i.grade === grade).reduce((acc, i) => acc + i.sizeBytes, 0);
+  return items
+    .filter((i) => i.grade === grade && !REVIEW_ONLY_CATEGORY_IDS.has(i.categoryId))
+    .reduce((acc, i) => acc + i.sizeBytes, 0);
 }
 
 // ---- 主构造：ScanResult ----
@@ -206,7 +213,8 @@ export const InstalledAppStub: InstalledApp[] = [
  */
 export function buildMockCleanProgressEvents(): CleanProgressEvent[] {
   const src = buildMockScanResult().items;
-  const chosen = src.filter((i) => i.grade !== "red");
+  // R30：审阅型大文件无清理执行路径（后端 fail-closed），不产生清理事件。
+  const chosen = src.filter((i) => i.grade !== "red" && !REVIEW_ONLY_CATEGORY_IDS.has(i.categoryId));
   const evts: CleanProgressEvent[] = chosen.map((i) => ({
     txId: "mock-tx-0001",
     itemPath: i.path,

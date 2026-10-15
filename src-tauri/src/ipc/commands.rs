@@ -633,6 +633,13 @@ pub fn uninstall_list() -> Vec<InstalledApp> {
     crate::uninstall::list_apps()
 }
 
+/// R30：在资源管理器中定位并选中文件/文件夹（大文件审阅页"在资源管理器中显示"）。
+/// 只读：不删除/移动任何用户数据；路径必须现存、绝对、非卷根。
+#[tauri::command]
+pub fn shell_reveal(path: String) -> Result<(), String> {
+    crate::shell::reveal(&path)
+}
+
 /// 执行卸载（R27-2，[DESTRUCTIVE] 编排官方卸载器）。返回 txId（经事件推送进度/完成）。
 #[tauri::command]
 pub async fn uninstall_run(

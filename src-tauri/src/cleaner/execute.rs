@@ -48,6 +48,12 @@ pub fn resolve_targets(
             continue;
         }
         let Some((_, cat)) = table.by_id.get(&item.category_id) else {
+            // R30：大文件为审阅型个人数据，应用不提供删除出口（专用友好文案）。
+            if item.category_id == crate::scanner::engine::LARGE_REVIEW_CATEGORY {
+                return Err(
+                    "大文件是仅供查阅的个人数据，PureSlate 不提供删除入口；请在资源管理器中自行确认处理".into(),
+                );
+            }
             return Err(format!(
                 "规则表缺少类目 {}（安全策略：拒绝执行）",
                 item.category_id

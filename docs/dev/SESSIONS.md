@@ -5,6 +5,13 @@
 > 维护（AGENTS.md §9）：任务完成时 agent 自动追加/更新当前会话条目，随任务同一提交。格式：`## YYYY-MM-DD | 主题`。
 > 本初版由历史会话记忆回溯整理（截至 2026-09-29），细节以 git 历史与 TASKS.md 为准。
 
+## 2026-10-15 | R30 v0.2.0 真机反馈批次（大文件误删风险/乱码/图标/横向滚动；进行中）
+
+- **真机四问题**（v0.2.0）：①≥500MB 个人大文件 165.8GB/121 项默认勾选进方案 B（40558 项/181.7GB），一键可误删上百 GB 个人资料；②卸载列表老程序（极域电子教室类 ANSI 时代安装器）DisplayName/Publisher/DisplayVersion 全乱码；③卸载页无软件图标；④长程序名撑破表格出现窗口横向滚动条。
+- **R30-1 大文件转审阅型（已提交）**：后端 `LARGE_REVIEW_CATEGORY="large.file"`——items 保留（大文件页浏览），不推 aggregate、`found_bytes` 排除（165GB 虚高消失）、永不注册规则表 + `resolve_targets` 专用友好报错 fail-closed；前端 reportModel 入口 `cleanableItems` 排除（类目卡/风险/方案/汇总双保险），mock 同步口径；Files 页改纯审阅页（去掉级别列与"入隔离区"语义，逐行"在资源管理器中显示"）。
+- 新 IPC `shell_reveal(path)`（只读）：SHOpenFolderAndSelectItems 首选 + explorer.exe /select 兜底，ILCreateFromPathW PIDL + CoTaskMemFree RAII，路径校验（绝对/现存/非卷根）。
+- **下一步**：R30-2 注册表乱码防御解码（MultiByteToWideChar CP_ACP/936 候选+评分）→ R30-3 横向滚动 → R30-4 卸载图标（PrivateExtractIconsW+手写 PNG）→ R30-5 全门禁+文档。
+
 ## 2026-10-14 | v0.2.0 发布（R28 规则 schema 增强 + R29 全界面动效；Release 全绿）
 
 - **发布内容**：v0.1.6 后 12 个提交——R28-1..4 规则引擎 schema 三能力（reg-value 动态目标/segment-regex 段收紧/max-depth 深度封顶，regex-lite 0.1.9）+ R29-1..7 全 12 页动效现代化（motion token/路由过渡/count-up/reduced-motion 总闸，零新前端依赖）。

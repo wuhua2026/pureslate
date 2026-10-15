@@ -10,6 +10,7 @@ pub mod quarantine;
 pub mod rules;
 pub mod safety;
 pub mod scanner;
+pub mod shell;
 pub mod startup;
 pub mod state;
 pub mod storage;
@@ -105,6 +106,7 @@ pub fn run() {
             ipc::commands::quarantine_status,
             ipc::commands::startup_list,
             ipc::commands::uninstall_list,
+            ipc::commands::shell_reveal,
             ipc::commands::uninstall_run,
             ipc::commands::uninstall_cancel,
             ipc::commands::uninstall_residue_scan,

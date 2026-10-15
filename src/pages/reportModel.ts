@@ -1,8 +1,18 @@
 /**
  * 报告页（屏 2）数据模型——纯函数，无 DOM 依赖，可被 vitest 直接单测。
  * R13 报告式总览 + R14 逐项可解释 + A/B 方案对比（给选项不给结论）。
+ * R30：审阅型类目（large.file 大文件）从报告全链路排除——大文件是用户个人数据，
+ * 只供大文件页发现/浏览，永不进入清理方案（前后端双保险：后端不注册规则 fail-closed）。
  */
 import type { Disposition, Grade, ScanItem } from "../types/ipc";
+
+/** R30 审阅型类目 id：仅供专项页浏览，不计风险、不进方案、不参与汇总。 */
+export const REVIEW_ONLY_CATEGORY_IDS = new Set(["large.file"]);
+
+/** 排除审阅型类目后的可清理条目（报告页一切统计的输入）。 */
+export function cleanableItems(items: ScanItem[]): ScanItem[] {
+  return items.filter((i) => !REVIEW_ONLY_CATEGORY_IDS.has(i.categoryId));
+}
 
 /** 去向预告中文文案（SAFETY §4.5：已释放 vs 已隔离语义区分）。 */
 export const DISPOSITION_CN: Record<Disposition, string> = {
@@ -82,8 +92,10 @@ function sumGrades(items: ScanItem[], grades: Grade[]): { items: number; bytes: 
   return { items: items_, bytes };
 }
 
-/** 生成报告总览。可释放语义：绿=立即释放，黄+红=进隔离区（尚未释放）。 */
-export function buildReportOverview(items: ScanItem[]): ReportOverview {
+/** 生成报告总览。可释放语义：绿=立即释放，黄+红=进隔离区（尚未释放）。
+ *  R30：审阅型类目（large.file）在入口即排除，不进类目卡/风险分布/方案数字。 */
+export function buildReportOverview(rawItems: ScanItem[]): ReportOverview {
+  const items = cleanableItems(rawItems);
   const categories = groupCategories(items);
 
   const riskCategories: Record<Grade, number> = { ...DEFAULT_RISK };

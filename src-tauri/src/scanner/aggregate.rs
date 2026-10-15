@@ -2,8 +2,13 @@
 //! `FoundBytes` 与单类目 `CategoryAggregate`。纯函数，无 IO、无副作用。
 
 use crate::contract::{CategoryAggregate, FoundBytes, Grade, ScanItem};
+use crate::scanner::engine::LARGE_REVIEW_CATEGORY;
 
 /// 全量已发现字节，按三档分级统计。
+///
+/// R30：**审阅型类目（large.file）不计入**——大文件是"发现供浏览"的个人数据，
+/// 不是可清理发现量；计入会让扫描/报告数字虚高（真机 165.8GB），误导用户。
+/// 大文件页自身用 items 另行求和，不依赖本统计。
 pub fn found_bytes(items: &[ScanItem]) -> FoundBytes {
     let mut f = FoundBytes {
         green: 0,
@@ -11,6 +16,9 @@ pub fn found_bytes(items: &[ScanItem]) -> FoundBytes {
         red: 0,
     };
     for it in items {
+        if it.category_id == LARGE_REVIEW_CATEGORY {
+            continue;
+        }
         add_bytes(&mut f, it.grade, it.size_bytes);
     }
     f
