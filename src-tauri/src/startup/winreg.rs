@@ -490,25 +490,45 @@ fn display_score(s: &str) -> f32 {
 /// 展示类 REG_SZ 防御解码（R30）。
 ///
 /// 候选：① UTF-16LE 直解；② 去 NUL 后按系统 ANSI 代码页；③ 同前按 GBK(936)。
-/// 取可疑度最低者；最低仍超过阈值（损坏到不可辨识）时返回 None，
-/// 由调用方决定降级展示（名称给固定占位，发布者/版本直接隐藏）。
+/// 取可疑度最低者；**同分时按 UTF-16 > GBK(936) > CP_ACP 的语义优先级裁定**
+/// （见 [`reg_data_decode_display_with`]）。
+/// 最低仍超过阈值（损坏到不可辨识）时返回 None，由调用方决定降级展示
+/// （名称给固定占位，发布者/版本直接隐藏）。
 /// **不得用于路径/命令字段**——那里错误"修复"反而会破坏真实值。
 pub fn reg_data_decode_display(raw: &[u8]) -> Option<String> {
+    reg_data_decode_display_with(raw, CP_ACP)
+}
+
+/// [`reg_data_decode_display`] 的可注入代码页版本（R31-3）。
+///
+/// `acp_code_page` 语义等同上文的 CP_ACP（0 = 系统 ANSI 代码页）。抽出该参数是为了
+/// 在中文 Windows（ACP=936）上也能构造"非中文 Windows（如 CI runner CP1252）"场景：
+/// 此时 GBK 字节被 CP1252 解出的乱码全部落在 Latin-1 区段、可疑度同为 0 分。
+///
+/// 排序规则：可疑度（[`display_score`]）越低越好；同分时按**显式语义优先级**裁定：
+/// **UTF-16 精确直解(2) > GBK(936)(1) > CP_ACP(0)**。
+/// - GBK 必须压过 ACP——否则非中文 Windows 上 ACP 乱码会并列顶掉 936 正解（R31-3 CI 红根因）；
+/// - UTF-16 必须保住并列优先——合法 UTF-16LE 中文名去掉 NUL 后的字节恰好也能被 GBK
+///   解成"全 CJK 0 分"伪文本，不能让 GBK 抢走（R30 回归，见 r30_valid_utf16_chinese_unchanged）。
+pub(crate) fn reg_data_decode_display_with(raw: &[u8], acp_code_page: u32) -> Option<String> {
     let mut utf16 = reg_data_to_string(raw);
     utf16.retain(|c| c != '\0');
     let utf16 = utf16.trim().to_string();
 
+    // 候选 = (语义优先级, 文本)。优先级：UTF-16 精确直解=2 > GBK(936)=1 > CP_ACP=0。
     let mut best: Option<(f32, u8, String)> = None;
     let candidates = [
-        Some(utf16).filter(|s| !s.is_empty()).map(|s| (0u8, s)),
-        ansi_candidate(raw, CP_ACP).map(|s| (1u8, s)),
-        ansi_candidate(raw, CP_GBK).map(|s| (2u8, s)),
+        Some(utf16).filter(|s| !s.is_empty()).map(|s| (2u8, s)),
+        ansi_candidate(raw, acp_code_page).map(|s| (0u8, s)),
+        ansi_candidate(raw, CP_GBK).map(|s| (1u8, s)),
     ];
     for cand in candidates.into_iter().flatten() {
         let score = display_score(&cand.1);
+        // R31-3：比较 (score, priority)——score 小者优先；同分时 priority 大者优先
+        // （UTF-16 并列胜出、GBK 并列压过 ACP），不再用候选序号单调比较。
         let better = best
             .as_ref()
-            .map(|(bs, bp, _)| score < *bs || (score == *bs && cand.0 < *bp))
+            .map(|(bs, bp, _)| score < *bs || (score == *bs && cand.0 > *bp))
             .unwrap_or(true);
         if better {
             best = Some((score, cand.0, cand.1));
@@ -650,4 +670,86 @@ fn expand_environment_strings(input: &str) -> io::Result<String> {
     let len = (ret as usize).saturating_sub(1);
     dst.truncate(len);
     Ok(String::from_utf16_lossy(&dst))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// 「极域电子教室」的 GBK(936) 字节——老中文安装器直写进 REG_SZ 的实际形态。
+    const GBK_JIYU_DIANZI_JIAOSHI: &[u8] = &[
+        0xBC, 0xAB, // 极
+        0xD3, 0xF2, // 域
+        0xB5, 0xE7, // 电
+        0xD7, 0xD3, // 子
+        0xBD, 0xCC, // 教
+        0xCA, 0xD2, // 室
+    ];
+    /// 「极域」二字 GBK 字节。
+    const GBK_JIYU: &[u8] = &[0xBC, 0xAB, 0xD3, 0xF2];
+
+    /// 真机典型坏数据：UTF-16 英文头 + NUL + 原始 GBK 尾。
+    fn mixed_head_gbk(head: &str, tail: &[u8]) -> Vec<u8> {
+        let mut bytes: Vec<u8> = head.encode_utf16().flat_map(|u| u.to_le_bytes()).collect();
+        bytes.extend_from_slice(&[0, 0]);
+        bytes.extend_from_slice(tail);
+        bytes
+    }
+
+    /// R31-3 根因回归：ACP=1252（CI runner）时，CP1252 把 GBK 字节解成满屏
+    /// Latin-1 乱码（所有字符都在 is_plausible_display_char 的 Latin-1 区段）→ 0 分，
+    /// 与 936 正解并列；旧实现按候选序号取小 → 选 ACP 乱码。现在并列必须选 GBK。
+    #[test]
+    fn r31_acp1252_gbk_bytes_decode_to_chinese() {
+        assert_eq!(
+            reg_data_decode_display_with(GBK_JIYU_DIANZI_JIAOSHI, 1252).as_deref(),
+            Some("极域电子教室"),
+            "ACP=1252 与 GBK 同为 0 分时必须选 936 正解"
+        );
+    }
+
+    /// 同上，覆盖"UTF-16 英文头 + GBK 尾"的拼接坏数据。
+    #[test]
+    fn r31_acp1252_mixed_utf16_head_gbk_tail_repairs() {
+        let raw = mixed_head_gbk("Minisoft Toolbox", GBK_JIYU);
+        assert_eq!(
+            reg_data_decode_display_with(&raw, 1252).as_deref(),
+            Some("Minisoft Toolbox极域"),
+            "英文头不得被丢弃、GBK 尾必须由 936 还原"
+        );
+    }
+
+    /// 不乱修的基线：纯 ASCII 在 ACP=1252 下行为不变。
+    #[test]
+    fn r31_acp1252_pure_ascii_unchanged() {
+        assert_eq!(
+            reg_data_decode_display_with(b"Notepad++\0", 1252).as_deref(),
+            Some("Notepad++")
+        );
+    }
+
+    /// 不乱修的基线：合法 UTF-16LE 中文在 ACP=1252 下必须原样保留
+    /// （UTF-16 候选与 GBK 候选同为 0 分时，UTF-16 必须靠显式优先级胜出）。
+    #[test]
+    fn r31_acp1252_valid_utf16_unchanged() {
+        let raw = string_to_reg_data("腾讯科技(深圳)有限公司");
+        assert_eq!(
+            reg_data_decode_display_with(&raw, 1252).as_deref(),
+            Some("腾讯科技(深圳)有限公司")
+        );
+    }
+
+    /// 中文 Windows 路径（ACP=936）行为不变：公开入口经 CP_ACP 调同一逻辑。
+    #[test]
+    fn r31_public_entry_matches_cp_acp() {
+        let raw = GBK_JIYU_DIANZI_JIAOSHI;
+        assert_eq!(
+            reg_data_decode_display(raw),
+            reg_data_decode_display_with(raw, CP_ACP)
+        );
+        assert_eq!(
+            reg_data_decode_display(raw).as_deref(),
+            Some("极域电子教室")
+        );
+    }
 }
