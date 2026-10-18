@@ -1,11 +1,13 @@
 import { describe, expect, it } from "vitest";
 import { buildMockScanResult } from "../../mocks/data";
+import type { ScanItem } from "../../types/ipc";
 import {
   buildReportOverview,
   cleanableItems,
   DISPOSITION_CN,
   groupCategories,
   REVIEW_ONLY_CATEGORY_IDS,
+  safeCleanItems,
 } from "../reportModel";
 
 describe("报告模型（R13/R14）", () => {
@@ -22,19 +24,76 @@ describe("报告模型（R13/R14）", () => {
     groups.forEach((g) => expect(g.reason).toBeTruthy()); // 每项可解释
   });
 
-  it("可释放语义正确：绿=立即释放，黄+红=进隔离区", () => {
+  it("可释放语义正确：🟢 direct=立即释放，🟡+🔴=进隔离区", () => {
     const ov = buildReportOverview(result.items);
-    const greenBytes = cleanable
-      .filter((i) => i.grade === "green")
+    const greenDirectBytes = cleanable
+      .filter((i) => i.grade === "green" && i.disposition === "direct")
       .reduce((s, i) => s + i.sizeBytes, 0);
-    expect(ov.immediateBytes).toBe(greenBytes);
+    // R31-6：immediateBytes 只算 green+direct（回收站项不立即释放）。
+    expect(ov.immediateBytes).toBe(greenDirectBytes);
     expect(ov.immediateBytes).toBeGreaterThan(0);
+    expect(ov.immediateBytes).toBeLessThanOrEqual(ov.planA.bytes);
 
     const nonGreen = cleanable
       .filter((i) => i.grade !== "green")
       .reduce((s, i) => s + i.sizeBytes, 0);
     expect(ov.quarantineBytes).toBe(nonGreen);
     expect(ov.quarantineBytes).toBeGreaterThan(0);
+  });
+
+  it("R31-6 口径：green+recycle 不计入 immediateBytes（清空回收站前不释放）", () => {
+    const item = (id: string, sizeBytes: number, disposition: ScanItem["disposition"]): ScanItem => ({
+      id,
+      categoryId: "temp.user",
+      label: "临时文件",
+      path: `C:\\Temp\\${id}.tmp`,
+      sizeBytes,
+      grade: "green",
+      disposition,
+      reason: "可安全重建的临时文件",
+    });
+    const ov = buildReportOverview([
+      item("direct-1", 100, "direct"),
+      item("recycle-1", 200, "recycle"),
+    ]);
+    expect(ov.immediateBytes).toBe(100);
+    expect(ov.quarantineBytes).toBe(0);
+    // 一键清理（方案 A）仍会处置全部绿色项，但"可释放"数字不虚高。
+    expect(ov.planA.items).toBe(2);
+    expect(ov.planA.bytes).toBe(300);
+  });
+
+  it("R31-6 需确认项：confirmItems/confirmBytes = 🟡+🔴，不进一键清理", () => {
+    const ov = buildReportOverview(result.items);
+    const confirm = cleanable.filter((i) => i.grade !== "green");
+    const confirmBytes = confirm.reduce((s, i) => s + i.sizeBytes, 0);
+    expect(ov.confirmItems).toBe(confirm.length);
+    expect(ov.confirmBytes).toBe(confirmBytes);
+    expect(ov.confirmItems).toBe(ov.riskItems.yellow + ov.riskItems.red);
+    expect(ov.confirmBytes).toBe(ov.quarantineBytes);
+    // 一键清理口径 = 全部绿色项（与需确认项无交集）。
+    expect(ov.planA.items).toBe(ov.riskItems.green);
+    expect(ov.confirmItems).toBeGreaterThan(0); // mock 三档齐全，提示文案非空
+  });
+
+  it("R31-6 safeCleanItems：只取 🟢 安全项，🟡/🔴 与审阅型大文件一律不入选", () => {
+    const safe = safeCleanItems(result.items);
+    expect(safe.length).toBeGreaterThan(0);
+    expect(safe.length).toBe(buildReportOverview(result.items).planA.items);
+    for (const it of safe) {
+      expect(it.grade).toBe("green");
+      expect(REVIEW_ONLY_CATEGORY_IDS.has(it.categoryId)).toBe(false);
+    }
+    // 🟡/🔴 条目一个都不能进一键清理。
+    expect(safe.some((i) => i.grade === "yellow" || i.grade === "red")).toBe(false);
+  });
+
+  it("R31-6 mock 一键清理走查前提：安全项 / 立即释放 / 需确认项均非空", () => {
+    const ov = buildReportOverview(result.items);
+    expect(safeCleanItems(result.items).length).toBeGreaterThan(0);
+    expect(ov.planA.items).toBeGreaterThan(0);
+    expect(ov.immediateBytes).toBeGreaterThan(0);
+    expect(ov.confirmItems).toBeGreaterThan(0);
   });
 
   it("风险分布统计正确", () => {
@@ -61,11 +120,21 @@ describe("报告模型（R13/R14）", () => {
     expect(ov.redCategoryCount).toBeGreaterThan(0);
   });
 
+  it("R31-6 方案命名：推荐清理（只清安全项）/ 深度清理（含需确认项），去掉评审语言", () => {
+    const ov = buildReportOverview(result.items);
+    expect(ov.planA.name).toBe("推荐清理（只清安全项）");
+    expect(ov.planB.name).toBe("深度清理（含需确认项）");
+    expect(ov.planA.isDefault).toBe(true);
+    expect(ov.planB.isDefault).toBe(false);
+  });
+
   it("空列表→全零且不抛错", () => {
     const ov = buildReportOverview([]);
     expect(ov.categories).toEqual([]);
     expect(ov.immediateBytes).toBe(0);
     expect(ov.quarantineBytes).toBe(0);
+    expect(ov.confirmItems).toBe(0);
+    expect(ov.confirmBytes).toBe(0);
     expect(ov.planA.bytes).toBe(0);
     expect(ov.planB.bytes).toBe(0);
   });

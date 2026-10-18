@@ -1,8 +1,10 @@
 /**
  * 报告页（屏 2）数据模型——纯函数，无 DOM 依赖，可被 vitest 直接单测。
- * R13 报告式总览 + R14 逐项可解释 + A/B 方案对比（给选项不给结论）。
+ * R13 报告式总览 + R14 逐项可解释 + A/B 方案对比。
  * R30：审阅型类目（large.file 大文件）从报告全链路排除——大文件是用户个人数据，
  * 只供大文件页发现/浏览，永不进入清理方案（前后端双保险：后端不注册规则 fail-closed）。
+ * R31-6：报告页默认进入"一键清理"简化视图——只清 🟢 安全项；🟡/🔴 一律不进一键流程，
+ * 作为"需确认项"提示；A/B 方案仅在展开完整报告后展示。
  */
 import type { Disposition, Grade, ScanItem } from "../types/ipc";
 
@@ -12,6 +14,12 @@ export const REVIEW_ONLY_CATEGORY_IDS = new Set(["large.file"]);
 /** 排除审阅型类目后的可清理条目（报告页一切统计的输入）。 */
 export function cleanableItems(items: ScanItem[]): ScanItem[] {
   return items.filter((i) => !REVIEW_ONLY_CATEGORY_IDS.has(i.categoryId));
+}
+
+/** R31-6 一键清理候选：只取 🟢 安全项（临时文件 / 可重建缓存）。
+ *  🟡/🔴 一律不进一键流程（必须走完整报告的人工确认），与专家模式无关。 */
+export function safeCleanItems(rawItems: ScanItem[]): ScanItem[] {
+  return cleanableItems(rawItems).filter((i) => i.grade === "green");
 }
 
 /** 去向预告中文文案（SAFETY §4.5：已释放 vs 已隔离语义区分）。 */
@@ -44,10 +52,16 @@ export interface ReportOverview {
   categories: ReportCategory[];
   riskCategories: Record<Grade, number>; // 各类目数
   riskItems: Record<Grade, number>; // 各项数
-  immediateBytes: number; // 立即释放（绿）
-  quarantineBytes: number; // 进隔离区（黄+红，尚未释放）
-  planA: ReportPlan; // 保守：仅绿
-  planB: ReportPlan; // 激进：绿+黄
+  /** 立即释放：仅 🟢 且去向 direct；回收站项要等清空回收站才释放空间，不计入。 */
+  immediateBytes: number;
+  /** 进隔离区（🟡+🔴，尚未释放）。 */
+  quarantineBytes: number;
+  /** 需人工确认的项数（🟡+🔴，不进一键清理）。 */
+  confirmItems: number;
+  /** 需人工确认的字节数（🟡+🔴，不进一键清理）。 */
+  confirmBytes: number;
+  planA: ReportPlan; // 推荐清理：仅绿（一键清理口径）
+  planB: ReportPlan; // 深度清理：绿+黄
   redCategoryCount: number; // 🔴 被灰禁类目数
 }
 
@@ -92,8 +106,19 @@ function sumGrades(items: ScanItem[], grades: Grade[]): { items: number; bytes: 
   return { items: items_, bytes };
 }
 
-/** 生成报告总览。可释放语义：绿=立即释放，黄+红=进隔离区（尚未释放）。
- *  R30：审阅型类目（large.file）在入口即排除，不进类目卡/风险分布/方案数字。 */
+/** 仅统计去向为 direct 的条目字节（回收站/隔离区在完成前都不算"已释放"）。 */
+function sumDirectBytes(items: ScanItem[], grades: Grade[]): number {
+  let bytes = 0;
+  for (const it of items) {
+    if (grades.includes(it.grade) && it.disposition === "direct") bytes += it.sizeBytes;
+  }
+  return bytes;
+}
+
+/** 生成报告总览。可释放语义：🟢 direct=立即释放；🟡+🔴=进隔离区（尚未释放）；
+ *  🟢 recycle 进回收站，清空回收站前不计入立即释放。
+ *  R30：审阅型类目（large.file）在入口即排除，不进类目卡/风险分布/方案数字。
+ *  R31-6：另出 confirmItems/confirmBytes（🟡+🔴）供"一键清理"简化卡提示。 */
 export function buildReportOverview(rawItems: ScanItem[]): ReportOverview {
   const items = cleanableItems(rawItems);
   const categories = groupCategories(items);
@@ -111,10 +136,12 @@ export function buildReportOverview(rawItems: ScanItem[]): ReportOverview {
     categories,
     riskCategories,
     riskItems,
-    immediateBytes: green.bytes, // 立即释放
+    immediateBytes: sumDirectBytes(items, ["green"]), // 立即释放：绿 + 直清
     quarantineBytes: yellow.bytes + red.bytes, // 进隔离区，可还原
-    planA: { id: "A", name: "保守（仅绿色）", grades: ["green"], items: green.items, bytes: green.bytes, isDefault: true },
-    planB: { id: "B", name: "激进（绿+黄）", grades: ["green", "yellow"], items: green.items + yellow.items, bytes: green.bytes + yellow.bytes, isDefault: false },
+    confirmItems: yellow.items + red.items, // 🟡/🔴 需人工确认（不进一键清理）
+    confirmBytes: yellow.bytes + red.bytes,
+    planA: { id: "A", name: "推荐清理（只清安全项）", grades: ["green"], items: green.items, bytes: green.bytes, isDefault: true },
+    planB: { id: "B", name: "深度清理（含需确认项）", grades: ["green", "yellow"], items: green.items + yellow.items, bytes: green.bytes + yellow.bytes, isDefault: false },
     redCategoryCount: redCategories(categories),
   };
 }
