@@ -222,6 +222,11 @@ fn do_scan(
         Ok(t) => t,
         Err(e) => {
             eprintln!("[scan] 规则加载失败，返回空结果: {e}");
+            audit_scan(
+                scan_id,
+                "fail",
+                Some(format!("规则加载失败，返回空结果: {e}")),
+            );
             finish_empty(app, app_state, scan_id, started_at);
             return;
         }
@@ -290,7 +295,35 @@ fn do_scan(
     if let Ok(mut scans) = app_state.scans.lock() {
         scans.finish(result.clone(), items);
     }
+    // R32-0：扫描完成写一条 op=scan 审计（此前只有白名单降级才写，SPEC §4.4 op 集口子）。
+    audit_scan(
+        scan_id,
+        "ok",
+        Some(format!(
+            "items={} green={}B yellow={}B red={}B whitelistOk={}",
+            result.item_count,
+            result.total_bytes.green,
+            result.total_bytes.yellow,
+            result.total_bytes.red,
+            result.whitelist_ok.unwrap_or(true)
+        )),
+    );
     let _ = app.emit(events::SCAN_DONE, result);
+}
+
+/// R32-0：写一条扫描审计（op=scan；成功/规则加载失败各一条）。
+fn audit_scan(scan_id: &str, result: &str, detail: Option<String>) {
+    let _ = crate::logging::audit::record(&crate::contract::LogEntry {
+        ts: now_ms(),
+        op: "scan".into(),
+        tx_id: Some(scan_id.to_string()),
+        category_id: None,
+        path: None,
+        size_bytes: None,
+        disposition: None,
+        result: Some(result.into()),
+        detail,
+    });
 }
 
 /// 规则加载失败时的收尾：仍以空结果登记并推送完成事件。

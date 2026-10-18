@@ -314,6 +314,10 @@ fn apply_one(t: &CleanTarget, retention_days: u32) -> Result<(), String> {
 }
 
 /// 🟢 direct：Windows `DeleteFileW`，绕过回收站。零第三方依赖。
+///
+/// R32-0：>260 字符的路径直接喂 Win32 API 会失败（真机审计发现 13 条长路径删除失败），
+/// 因此长路径统一加 `\\?\` 扩展前缀；失败时把 `GetLastError` 文本写进错误（审计/journal
+/// 可定位原因，而不是只有"删除失败"）。
 fn delete_direct(path: &Path) -> Result<(), String> {
     #[cfg(windows)]
     {
@@ -321,14 +325,14 @@ fn delete_direct(path: &Path) -> Result<(), String> {
         unsafe extern "system" {
             fn DeleteFileW(lp_file_name: *const u16) -> i32;
         }
-        let wide: Vec<u16> = path
-            .to_string_lossy()
+        let wide: Vec<u16> = extended_path(path)
             .encode_utf16()
             .chain(std::iter::once(0))
             .collect();
         let rc = unsafe { DeleteFileW(wide.as_ptr()) };
         if rc == 0 {
-            Err(format!("删除失败: {}", path.to_string_lossy()))
+            let err = std::io::Error::last_os_error();
+            Err(format!("删除失败: {}（{err}）", path.display()))
         } else {
             Ok(())
         }
@@ -338,6 +342,30 @@ fn delete_direct(path: &Path) -> Result<(), String> {
         let _ = path;
         Err("direct 删除仅支持 Windows".into())
     }
+}
+
+/// Win32 扩展长度路径（R32-0）：仅当路径达到 MAX_PATH 才加 `\\?\` 前缀。
+///
+/// - 已带 `\\?\`：原样返回（幂等）；
+/// - UNC（`\\server\share`）：`\\?\UNC\server\share`；
+/// - 本地盘符绝对路径（`C:\…`）：`\\?\C:\…`；
+/// - 其它/相对路径：原样（不猜测，保持既有语义）。
+///
+/// 短路径不加前缀——verbatim 语义会关闭 `.`/`..`/尾随点归一化，没必要改变既有行为。
+fn extended_path(path: &Path) -> String {
+    let s = path.to_string_lossy();
+    // MAX_PATH = 260（含结尾 NUL），即路径 >= 260 字符时普通 Win32 API 失败。
+    if s.chars().count() < 260 || s.starts_with(r"\\?\") {
+        return s.into_owned();
+    }
+    if let Some(rest) = s.strip_prefix(r"\\") {
+        return format!(r"\\?\UNC\{rest}");
+    }
+    let b = s.as_bytes();
+    if b.len() >= 2 && b[1] == b':' {
+        return format!(r"\\?\{s}");
+    }
+    s.into_owned()
 }
 
 #[cfg(test)]
@@ -454,5 +482,49 @@ mod tests {
         assert_eq!(rep.ok, 1);
         crate::storage::set_data_root_override(None);
         std::fs::remove_dir_all(&r).ok();
+    }
+
+    /// R32-0：扩展长度路径前缀的纯函数语义。
+    #[test]
+    fn extended_path_prefixes_only_when_needed() {
+        // 短路径原样（不改变既有语义）。
+        assert_eq!(extended_path(Path::new(r"C:\a\b.txt")), r"C:\a\b.txt");
+        // 已带前缀：幂等。
+        assert_eq!(
+            extended_path(Path::new(r"\\?\C:\a\b.txt")),
+            r"\\?\C:\a\b.txt"
+        );
+        // 长 UNC → \\?\UNC\...
+        let unc = format!(r"\\server\share\{}", "x".repeat(300));
+        let got = extended_path(Path::new(&unc));
+        assert!(got.starts_with(r"\\?\UNC\server\share\"), "got={got}");
+        // 长本地路径 → \\?\C:\...
+        let long = format!(r"C:\{}", "d".repeat(300));
+        let got = extended_path(Path::new(&long));
+        assert!(got.starts_with(r"\\?\C:\"), "got={got}");
+        // 相对长路径：不猜测，原样。
+        let rel = "d".repeat(300);
+        assert_eq!(extended_path(Path::new(&rel)), rel);
+    }
+
+    /// R32-0 真机回归：>MAX_PATH 的 direct 删除必须成功（审计中曾有 13 条长路径删除失败）。
+    #[test]
+    fn delete_direct_handles_over_max_path() {
+        let root = std::env::temp_dir().join(format!("pureslate-longdel-{}", std::process::id()));
+        let mut dir = root.clone();
+        while dir.to_string_lossy().chars().count() < 280 {
+            dir = dir.join("longdir_0123456789");
+        }
+        std::fs::create_dir_all(&dir).unwrap();
+        let f = dir.join("long-path-file.tmp");
+        std::fs::write(&f, b"x").unwrap();
+        assert!(
+            f.to_string_lossy().chars().count() > 260,
+            "构造的长路径不足 260 字符: {}",
+            f.to_string_lossy().chars().count()
+        );
+        delete_direct(&f).expect("长路径 direct 删除应成功（\\?\\ 前缀）");
+        assert!(!f.exists(), "长路径文件应已删除");
+        std::fs::remove_dir_all(&root).ok();
     }
 }

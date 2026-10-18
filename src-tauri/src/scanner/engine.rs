@@ -127,11 +127,10 @@ pub fn run_scan(
                     starts.push(start);
                 }
             }
-            // v0.1.5 反馈 1b：temp.user 追加非系统固定盘根下的垃圾目录（代码级枚举——
-            // 静态 XML 无法表达"每个固定盘根"，且会产生大量无效 walkdir 错误流）。
-            if cat.id == "temp.user" {
-                starts.extend(super::expand::multi_drive_temp_roots());
-            }
+            // R32-0：**不再**把非系统固定盘根下的 `Temp`/`tmp`/`_scratch` 追加为
+            // temp.user 扫描根。2026-10-19 真机复盘：用户把 `E:\tmp` 当文件区（安装包/
+            // 素材暂存），一次一键清理按 direct 永久删除了 9.46 GiB 用户文件。数据盘根下
+            // 同名目录不能假定为"可重建临时文件"，故该扩展整体移除（详见 LESSONS）。
             for start in &starts {
                 if cancel.is_cancelled() {
                     break;

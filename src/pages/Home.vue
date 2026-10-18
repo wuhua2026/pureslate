@@ -54,7 +54,7 @@ const tiles: Array<{
   c: string;
   bg: string;
 }> = [
-  { to: "/scan", auto: true, intent: "clean", title: "一键清理", desc: "临时文件与缓存，安全项直接清", icon: "scan", c: "#2563eb", bg: "#eaf1ff" },
+  { to: "/scan", auto: true, intent: "clean", title: "一键清理", desc: "系统临时文件与缓存，安全项直接清", icon: "scan", c: "#2563eb", bg: "#eaf1ff" },
   { to: "/report", title: "扫描报告", desc: "查看分级结果并清理", icon: "report", c: "#4f46e5", bg: "#ecebff" },
   { to: "/files", title: "大文件", desc: "定位占用空间的大文件", icon: "files", c: "#0891b2", bg: "#e0f4fa" },
   { to: "/startup", title: "启动项", desc: "管理开机自启程序", icon: "startup", c: "#16a34a", bg: "#e4f7ec" },
@@ -99,7 +99,7 @@ const promises = [
         <div class="hero-text">
           <h2>一键清理</h2>
           <p class="hero-desc">
-            只清理可安全重建的<strong>临时文件与缓存</strong>，不会动你的文档/照片；
+            只清理系统临时目录（%TEMP%）与可重建缓存（缩略图/浏览器），不会动你的文档、照片和其它目录里的文件；
             有风险的项目会让你确认。
           </p>
           <ul class="promise-row">

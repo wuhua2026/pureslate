@@ -166,8 +166,8 @@ function oneClickClean(): void {
             <span class="simple-num">{{ formatBytes(animatedImmediate) }}</span>
           </p>
           <p class="simple-sub">
-            共 <strong>{{ overview.planA.items }}</strong> 项安全项（临时文件 / 可重建缓存），
-            清理后会自动重建，不影响你的文档与照片。
+            共 <strong>{{ overview.planA.items }}</strong> 项安全项（系统临时文件 / 可重建缓存），
+            删除后由系统或应用自动重建；不会动你的文档与照片。
           </p>
           <p v-if="overview.confirmItems > 0" class="simple-confirm">
             另有 🟡/🔴 {{ overview.confirmItems }} 项需要你确认，不会进入一键清理。

@@ -15,9 +15,12 @@
     <guard process=""/>
   </category>
   <category id="temp.thumb" label="缩略图缓存" risk="green" disposition="direct"
-            description="图片/视频缩略图缓存，删除后自动重建">
+            description="资源管理器缩略图/图标缓存数据库，删除后自动重建">
     <target type="knownFolder" value="Thumbnail Cache"/>
-    <include pattern="*" recursive="true"/>
+    <!-- R32-0：收紧为缓存数据库文件本身。原 `*` 递归会清空整个 Explorer 目录
+         （含 ExplorerStartupLog*.etl 等非缓存文件），真机审计中发现。 -->
+    <include pattern="thumbcache_*.db" recursive="false"/>
+    <include pattern="iconcache_*.db" recursive="false"/>
     <guard process=""/>
   </category>
 </ruleset>

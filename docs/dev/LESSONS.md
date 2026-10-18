@@ -6,6 +6,18 @@
 
 ## ① 踩坑记录
 
+### 目录名叫 `tmp` 不等于临时文件：一次真机一键清理永久删除了 9.46 GiB 文件区（2026-10-19，R32-0）
+- 现象：作者真机试用一键清理后 `E:\tmp` 被清空。审计导出实证：单事务 176 项 / 9.55 GiB / 100% direct 永久删除，`E:\tmp` 占 68 项 9.46 GiB（ArcGIS 安装包、SetupFiles cab、FME 扩展包…），0 项可恢复；而 `E:\tmp` 实际是作者的文件区。
+- 根因：v0.1.5「反馈 1b」把**非系统固定盘根**下的 `Temp`/`tmp`/`_scratch` 追加为 `temp.user` 扫描根（`multi_drive_temp_roots`），`E:\tmp` 名字命中；`temp.user` 是 green/direct + maxAgeDays=7 → 7 天前文件直接 `DeleteFileW`。R31-6 的一键清理把它变成两次点击可达，文案还写着"可安全重建、不影响文档/照片"。
+- 修复（R32-0）：删除 `multi_drive_temp_roots` 与 engine 接入点；数据盘根同名目录不进入任何清理候选；`temp.thumb` 同步收紧；一键文案改为"系统临时目录（%TEMP%）与可重建缓存…不会动其它目录"。
+- 复利结论：①**"目录叫什么名字"不是分级依据**——跨盘/用户可写区域的同名目录一律按用户数据对待，删除面扩展必须配"审阅型或白名单"边界；②删除能力上线前必须在有真实用户数据的机器上走查，不能只靠 mock/空目录；③**结构化审计导出能当事故取证**：177 行 JSONL 完整还原了删除清单/字节数/失败原因，这次复盘全靠它——审计字段（尤其 path/size/result/detail）值得继续加密。
+
+### 直接调 Win32 时要自己处理长路径，且失败必须带 GetLastError（2026-10-19，R32-0）
+- 现象：审计导出里 13 条 `%TEMP%` 测试残留删除失败，路径长度 303 字符；detail 只有"删除失败: 路径"，无法判断是长路径还是占用/权限。
+- 根因：`delete_direct` 直接把普通路径喂 `DeleteFileW`；Rust std 的 `std::fs` 会自动加 `\\?\`，但**自己 `#[link]` 直调的 Win32 API 不会**，>260 即失败（MAX_PATH 含 NUL）。
+- 修复（R32-0）：`extended_path()` 在 ≥260 字符时加 `\\?\`（本地盘 `\\?\C:\…`、UNC `\\?\UNC\…`、已带前缀幂等），失败时记录 `std::io::Error::last_os_error()`；新增 >260 字符真实删除单测。
+- 复利结论：①自调 Win32 的路径类 API 都要先问"长路径怎么办"（DeleteFileW/CreateFileW/SHFileOperationW/GetFileAttributesW…），std 帮你做的事 FFI 不会；②错误信息不带 os code 的审计等于没写——`format!("{err}")` 必须进 journal/audit；③长路径测试要真造 >260 字符路径（用 ASCII 段保证"字符数=字节数"），不能只断言前缀函数。
+
 ### 卷根下新建的目录默认对 Authenticated Users 可写：隔离区 manifest 必须当不可信输入（2026-10-18，R31-1）
 - 现象：独立审计指出隔离区 purge 盲信 manifest 的 `quarantinePath`；实测 `icacls C:\.pureslate-quarantine` 含 `Authenticated Users:(I)(M)`，以 Medium IL（未提权）在该目录创建/删除探测文件成功。发布版 `build.rs` 恒 `requireAdministrator` 且启动即跑生命周期 → 任意本地中权限进程写一行 manifest 即可借提权进程删任意管理员可删文件（confused deputy）。
 - 根因：卷根默认 ACL 对**新建子对象**给 `Authenticated Users: Modify`（继承 ACE），应用只在卷根建 `.pureslate-quarantine` 而未显式设 ACL；purge 把 manifest 当唯一信任锚，只校验"条目存在"，没校验"路径属于隔离区根 + 哈希一致"。
@@ -288,6 +300,7 @@
 
 | 日期 | 指标 | 数值 | 门禁 | 状态 |
 |---|---|---|---|---|
+| 2026-10-19 | **R32-0 真机误删复盘热修**（清理面收窄 + 长路径删除 + 扫描审计） | cargo **252 lib**（2 ignored）+ **27 集成**（合计 279）；vitest **80**；clippy `-D warnings` 0 | 全绿 | ✅ +2 cargo（extended_path/长路径删除）；规则回归测试扩展（thumb 收紧、temp.user 单一 target） |
 | 2026-10-19 | **R31 审计收口批次**（破坏面收紧 + 规则 fail-closed + 一键清理 UX + restore 审计） | cargo **250 lib**（2 ignored）+ **27 集成**（合计 277）；vitest **80**（11 文件）；clippy `-D warnings` 0；前端 index gzip 45.03KB 持平 | 全绿 | ✅ +9 cargo（含 acp=1252 注入用例）/ +5 vitest。安装包体积待下次打包复测 |
 | 2026-10-15 | **v0.2.1 发布** NSIS 安装包（shell reveal + 图标提取/手写 PNG，零新依赖） | **2.81 MiB**（CI 产物 2,948,879 B；本地构建 2,946,042 B；较 v0.2.0 约 +12.3 KiB / +0.43%）；portable.zip 3.80 MiB | <20MB | ✅ Release run 全绿，四资产已发布 |
 | 2026-10-15 | 单测规模 | cargo **233 lib**（2 ignored）+27 集成；vitest **75** | 全绿 | ✅ R30：+11 cargo / +4 vitest |

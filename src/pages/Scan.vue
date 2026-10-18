@@ -151,7 +151,7 @@ watch(
       <h1>{{ pageTitle }}</h1>
       <p class="sub">
         <template v-if="cleanIntent">
-          只清理可安全重建的临时文件与缓存，不会动你的文档/照片；有风险的项目会让你确认。
+          只清理系统临时目录（%TEMP%）与可重建缓存（缩略图/浏览器），不会动你的文档、照片和其它目录里的文件；有风险的项目会让你确认。
         </template>
         <template v-else>只读扫描 · 不删除任何文件 · 全程可在确认后逐项处置</template>
       </p>

@@ -1222,5 +1222,27 @@ mod tests {
                 "{id} 不应被隐式赋深度"
             );
         }
+        // R32-0 回归：缩略图缓存只匹配缓存数据库文件，不再 `*` 递归清空 Explorer 目录。
+        let (_, thumb) = table.by_id.get("temp.thumb").expect("缩略图类目存在");
+        assert_eq!(
+            thumb.includes.len(),
+            2,
+            "应只保留 thumbcache/iconcache 两条"
+        );
+        let pats: Vec<&str> = thumb.includes.iter().map(|g| g.pattern.as_str()).collect();
+        assert!(pats.contains(&"thumbcache_*.db"), "pats={pats:?}");
+        assert!(pats.contains(&"iconcache_*.db"), "pats={pats:?}");
+        assert!(
+            thumb.includes.iter().all(|g| g.max_depth == Some(1)),
+            "缓存数据库只在 Explorer 目录直属层"
+        );
+        // R32-0 回归：temp.user 只以 %TEMP% 为 target（非系统盘 tmp 扩展已移除）。
+        let (_, user) = table.by_id.get("temp.user").expect("用户临时文件类目存在");
+        assert_eq!(
+            user.targets.len(),
+            1,
+            "temp.user 只应保留 %TEMP% 单一 target"
+        );
+        assert_eq!(user.targets[0].value, "%TEMP%");
     }
 }
