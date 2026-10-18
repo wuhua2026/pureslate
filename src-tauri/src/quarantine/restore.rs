@@ -13,7 +13,7 @@ use std::path::{Path, PathBuf};
 use crate::contract::{QuarantineEntry, QuarantineState, RestoreFailure, RestoreReport};
 
 use super::manifest::{load_manifest, update_entry_state, ManifestEntry, ManifestState};
-use super::store::{copy_verify_delete, same_volume};
+use super::store::{copy_verify_delete, inside_quarantine_root, same_volume};
 
 /// 单条还原结果。
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -26,19 +26,6 @@ pub enum RestoreOutcome {
     Skipped(String),
     /// 还原失败。
     Failed(String),
-}
-
-/// 判断隔离文件路径是否位于对应隔离区根内（段级前缀，防伪造 manifest 越界移动）。
-fn inside_quarantine_root(root: &Path, src: &Path) -> bool {
-    let norm = |p: &Path| -> String {
-        p.to_string_lossy()
-            .replace('/', "\\")
-            .trim_end_matches('\\')
-            .to_lowercase()
-    };
-    let r = norm(root);
-    let s = norm(src);
-    s == r || s.starts_with(&format!("{r}\\"))
 }
 
 /// 还原单条隔离项。

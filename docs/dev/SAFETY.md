@@ -78,6 +78,7 @@
 ### 4.4 生命周期（lifecycle）
 - 默认保留 14 天（settings 可配 7–30）；到期前 3 天发 `quarantine_expiry_warning` 事件（UI 通知）；
 - 到期自动清除 = 硬删隔离区文件 + manifest 置 `purged` + 写审计日志（去向字段 `auto-purge`）；
+- **purge 前信任校验（R31-1，与 §4.3 还原 T-2 同口径）**：manifest 位于用户可写位置，`quarantine_path` 不得盲信。硬删前必须 ①路径段级位于本隔离区根内（拒绝 `..`/ADS/段尾点空格形态）②路径链无 junction/symlink ③文件 sha256 与 manifest 记录一致；任一不过 → 跳过删除、保留条目、写 `auto_purge|purge` fail 审计，**绝不静默删除**。文件已缺失时只做状态收敛（幂等）；
 - 容量上限 = min(5GB, 所在盘剩余空间 10%)；超限提示用户显式确认释放最早批次，**不得静默丢弃**；
 - 「确认清空」须二次确认 token（同 🔴 语义）。
 

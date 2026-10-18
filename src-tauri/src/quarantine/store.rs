@@ -5,7 +5,7 @@
 //! 本模块只保证"文件安全迁入隔离区 + manifest 有记录"这一最小原子面。
 
 use std::fs;
-use std::path::{Path, PathBuf};
+use std::path::{Component, Path, PathBuf};
 use std::time::SystemTime;
 
 use sha2::{Digest, Sha256};
@@ -185,6 +185,49 @@ pub(crate) fn volume_of(p: &Path) -> Option<String> {
     }
 }
 
+/// 隔离区根内判定（R31-1，purge / restore 共用）。
+///
+/// manifest 位于用户可写位置（卷根 `.pureslate-quarantine`），其 `quarantine_path`
+/// 不得盲信：伪造行可指向任意路径，借提权进程之手删除/移动。本函数做**段级**归属
+/// 判定并拒绝可被 Win32 归一化绕过的形态（宁可误拒，不可误放）：
+/// - 非绝对路径；
+/// - `.` / `..` 段（本应用生成的隔离路径不含遍历段，出现即视为伪造）；
+/// - 段尾 `.` / 空格（Win32 会静默截断，可绕过字符串前缀比较）；
+/// - 段内含 `:`（NTFS 备用数据流 ADS，如 `file:stream`）。
+///
+/// 大小写不敏感（Windows 语义）；要求 `src` 是 root 的**严格子项**。
+pub(crate) fn inside_quarantine_root(root: &Path, src: &Path) -> bool {
+    if !root.is_absolute() || !src.is_absolute() {
+        return false;
+    }
+    let (Some(r), Some(s)) = (normalized_segments(root), normalized_segments(src)) else {
+        return false;
+    };
+    s.len() > r.len() && s.starts_with(&r)
+}
+
+/// 词法归一为小写段序列；任何可疑形态返回 None（调用方按"不在根内"处理）。
+fn normalized_segments(p: &Path) -> Option<Vec<String>> {
+    let mut out: Vec<String> = Vec::new();
+    for c in p.components() {
+        match c {
+            Component::Prefix(prefix) => {
+                out.push(prefix.as_os_str().to_string_lossy().to_lowercase());
+            }
+            Component::RootDir => out.push(String::from("\\")),
+            Component::CurDir | Component::ParentDir => return None,
+            Component::Normal(seg) => {
+                let s = seg.to_string_lossy().to_lowercase();
+                if s.is_empty() || s.ends_with('.') || s.ends_with(' ') || s.contains(':') {
+                    return None;
+                }
+                out.push(s);
+            }
+        }
+    }
+    (!out.is_empty()).then_some(out)
+}
+
 // 仅供测试：避免预留守卫占用告警。
 
 #[cfg(test)]
@@ -281,5 +324,55 @@ mod tests {
         // 当前 2026-08 应为 true（今日日期 2026-08-25）
         assert!(y >= 2026);
         assert!((1..=12).contains(&m));
+    }
+
+    /// R31-1：根内判定（purge/restore 共用的信任链第一道闸）。
+    #[test]
+    fn inside_quarantine_root_semantics() {
+        let root = Path::new(r"C:\.pureslate-quarantine");
+        // 正常隔离路径：根内 ✓
+        assert!(inside_quarantine_root(
+            root,
+            Path::new(r"C:\.pureslate-quarantine\202610\batch\abcd1234_x.tmp")
+        ));
+        // 大小写不敏感（Windows 语义）
+        assert!(inside_quarantine_root(
+            root,
+            Path::new(r"c:\.PURESLATE-QUARANTINE\202610\batch\x.tmp")
+        ));
+        // 正/反斜杠混用同样归一
+        assert!(inside_quarantine_root(
+            root,
+            Path::new("C:/.pureslate-quarantine/202610/batch/x.tmp")
+        ));
+        // 根自身不是"根内子项"
+        assert!(!inside_quarantine_root(root, root));
+        // 根外
+        assert!(!inside_quarantine_root(
+            root,
+            Path::new(r"C:\Windows\System32\kernel32.dll")
+        ));
+        // 前缀相似的兄弟目录
+        assert!(!inside_quarantine_root(
+            root,
+            Path::new(r"C:\.pureslate-quarantine2\x.tmp")
+        ));
+        // `..` 遍历（字符串前缀看似在根内）
+        assert!(!inside_quarantine_root(
+            root,
+            Path::new(r"C:\.pureslate-quarantine\..\Windows\System32\kernel32.dll")
+        ));
+        // 段尾点：Win32 会静默截断，可绕过字符串比较
+        assert!(!inside_quarantine_root(
+            root,
+            Path::new(r"C:\.pureslate-quarantine\202610.\x.tmp")
+        ));
+        // NTFS 备用数据流（ADS）
+        assert!(!inside_quarantine_root(
+            root,
+            Path::new(r"C:\.pureslate-quarantine\202610\x.tmp:evil")
+        ));
+        // 相对路径
+        assert!(!inside_quarantine_root(root, Path::new(r"202610\x.tmp")));
     }
 }

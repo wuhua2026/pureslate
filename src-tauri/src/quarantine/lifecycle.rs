@@ -13,13 +13,14 @@
 
 use std::collections::HashSet;
 use std::fs;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use crate::contract::{PurgeReport, RestoreFailure};
 
 use super::manifest::{
     load_manifest, prune_restored_before, update_entry_state, ManifestEntry, ManifestState,
 };
+use super::store::{inside_quarantine_root, sha256_file};
 
 /// 到期提醒窗口：3 天（SAFETY §4.4）。
 pub const EXPIRY_WARNING_MS: i64 = 3 * 86_400_000;
@@ -49,6 +50,57 @@ fn quota_bytes_for(free_bytes: u64) -> u64 {
     QUOTA_CAP_BYTES.min(free_bytes / 10)
 }
 
+/// 硬删前的信任校验结果（R31-1）。
+enum PurgeTarget {
+    /// 路径通过根内 / 非 reparse / sha256 校验，可安全删除。
+    Verified(PathBuf),
+    /// 文件已不存在（幂等收敛：只迁移状态，不删任何东西）。
+    Missing,
+}
+
+/// 复核 manifest 行的 `quarantine_path` 是否可信。
+///
+/// **R31-1 信任链收口**：manifest 是用户可写文件（卷根 `.pureslate-quarantine`），
+/// 而发布版恒以管理员运行、启动即跑生命周期——盲信 `quarantine_path` 会让任何本地
+/// 中权限进程借提权进程之手删除任意管理员可删文件（confused deputy）。因此删除前与
+/// 还原侧 T-2 同口径校验：
+/// ① 必须位于本隔离区根内（拒绝 `..` / ADS / 段尾点空格等归一化绕过）；
+/// ② 路径链不得含 junction/symlink（防中间目录被替换重定向到根外）；
+/// ③ 文件 sha256 必须与 manifest 记录一致（防内容被替换后误判/误删）。
+/// 任一不过 → `Err(reason)`：调用方跳过删除、保留条目、写 fail 审计（不静默）。
+fn verify_purge_target(root: &Path, e: &ManifestEntry) -> Result<PurgeTarget, String> {
+    let p = PathBuf::from(&e.quarantine_path);
+    if !inside_quarantine_root(root, &p) {
+        return Err("隔离路径不在隔离区根内（疑似伪造 manifest），拒绝删除".into());
+    }
+    if !p.exists() {
+        return Ok(PurgeTarget::Missing);
+    }
+    if !p.is_file() {
+        return Err("隔离路径不是普通文件，拒绝删除".into());
+    }
+    if let Some(seg) = crate::cleaner::preflight::first_reparse_component(&p) {
+        return Err(format!(
+            "隔离路径组件含 junction/symlink，拒绝删除（{}）",
+            seg.display()
+        ));
+    }
+    match sha256_file(&p) {
+        Ok(actual) if actual.eq_ignore_ascii_case(&e.sha256) => Ok(PurgeTarget::Verified(p)),
+        Ok(_) => Err("隔离文件 sha256 与 manifest 记录不一致，拒绝删除".into()),
+        Err(err) => Err(format!("读取隔离文件失败，拒绝删除: {err}")),
+    }
+}
+
+/// 状态迁移到 purged；失败返回原因（由调用方写 fail 审计，不静默）。
+fn mark_purged(root: &Path, e: &ManifestEntry) -> Result<(), String> {
+    match update_entry_state(root, &e.id, ManifestState::Purged) {
+        Err(err) => Err(format!("manifest 状态迁移失败: {err}")),
+        Ok(false) => Err("manifest 条目未找到".into()),
+        Ok(true) => Ok(()),
+    }
+}
+
 /// 对单个隔离区根执行一遍生命周期。`now`/`free_bytes` 注入（测试可控）。
 pub fn run_pass_at_root(root: &Path, now: i64, free_bytes: u64) -> LifecycleReport {
     let mut report = LifecycleReport::default();
@@ -56,32 +108,39 @@ pub fn run_pass_at_root(root: &Path, now: i64, free_bytes: u64) -> LifecycleRepo
         return report;
     };
 
-    // 1) 到期自动清除：硬删文件 + state→purged + 审计。文件缺失也收敛状态（幂等）。
+    // 1) 到期自动清除：先信任校验（R31-1）→ 硬删 → state→purged + 审计。
+    //    校验失败不迁移状态（保留条目待人工处理），只写 fail 审计。
     for e in &entries {
         if e.state != ManifestState::Quarantined || e.expires_at > now {
             continue;
         }
-        let qpath = Path::new(&e.quarantine_path);
-        let removed = if qpath.is_file() {
-            fs::remove_file(qpath).is_ok()
-        } else {
-            true
-        };
-        match update_entry_state(root, &e.id, ManifestState::Purged) {
-            Err(err) => audit(
-                e,
-                "auto_purge",
-                "fail",
-                Some(format!("manifest 状态迁移失败: {err}")),
-            ),
-            Ok(false) => audit(e, "auto_purge", "fail", Some("manifest 条目未找到".into())),
-            Ok(true) => {
-                if removed {
+        match verify_purge_target(root, e) {
+            Err(reason) => audit(e, "auto_purge", "fail", Some(reason)),
+            Ok(PurgeTarget::Missing) => match mark_purged(root, e) {
+                Ok(()) => {
                     report.purged += 1;
                     report.purged_bytes += e.size_bytes;
                     audit(e, "auto_purge", "ok", None);
-                } else {
-                    audit(e, "auto_purge", "fail", Some("隔离区文件删除失败".into()));
+                }
+                Err(reason) => audit(e, "auto_purge", "fail", Some(reason)),
+            },
+            Ok(PurgeTarget::Verified(p)) => {
+                if let Err(err) = fs::remove_file(&p) {
+                    audit(
+                        e,
+                        "auto_purge",
+                        "fail",
+                        Some(format!("隔离区文件删除失败: {err}")),
+                    );
+                    continue;
+                }
+                match mark_purged(root, e) {
+                    Ok(()) => {
+                        report.purged += 1;
+                        report.purged_bytes += e.size_bytes;
+                        audit(e, "auto_purge", "ok", None);
+                    }
+                    Err(reason) => audit(e, "auto_purge", "fail", Some(reason)),
                 }
             }
         }
@@ -192,7 +251,7 @@ pub fn purge_across(
     report
 }
 
-/// 对单个根按 id 硬删：文件删除 + state→purged + 审计（op=purge）。
+/// 对单个根按 id 硬删：信任校验（R31-1）→ 文件删除 → state→purged + 审计（op=purge）。
 fn purge_at_root(
     root: &Path,
     ids: &[String],
@@ -214,32 +273,39 @@ fn purge_at_root(
             });
             continue;
         }
-        let qpath = Path::new(&e.quarantine_path);
-        let removed = if qpath.is_file() {
-            fs::remove_file(qpath).is_ok()
-        } else {
-            true
+        let verified = match verify_purge_target(root, &e) {
+            Err(reason) => {
+                audit(&e, "purge", "fail", Some(reason.clone()));
+                report.failures.push(RestoreFailure {
+                    id: e.id.clone(),
+                    reason,
+                });
+                continue;
+            }
+            Ok(v) => v,
         };
-        match update_entry_state(root, &e.id, ManifestState::Purged) {
-            Err(err) => report.failures.push(RestoreFailure {
-                id: e.id.clone(),
-                reason: format!("manifest 状态迁移失败: {err}"),
-            }),
-            Ok(false) => report.failures.push(RestoreFailure {
-                id: e.id.clone(),
-                reason: "manifest 条目未找到".into(),
-            }),
-            Ok(true) => {
-                if removed {
-                    report.purged += 1;
-                    audit(&e, "purge", "ok", None);
-                } else {
-                    report.failures.push(RestoreFailure {
-                        id: e.id.clone(),
-                        reason: "隔离区文件删除失败".into(),
-                    });
-                    audit(&e, "purge", "fail", Some("隔离区文件删除失败".into()));
-                }
+        if let PurgeTarget::Verified(p) = &verified {
+            if let Err(err) = fs::remove_file(p) {
+                let reason = format!("隔离区文件删除失败: {err}");
+                audit(&e, "purge", "fail", Some(reason.clone()));
+                report.failures.push(RestoreFailure {
+                    id: e.id.clone(),
+                    reason,
+                });
+                continue;
+            }
+        }
+        match mark_purged(root, &e) {
+            Ok(()) => {
+                report.purged += 1;
+                audit(&e, "purge", "ok", None);
+            }
+            Err(reason) => {
+                audit(&e, "purge", "fail", Some(reason.clone()));
+                report.failures.push(RestoreFailure {
+                    id: e.id.clone(),
+                    reason,
+                });
             }
         }
     }
@@ -351,12 +417,19 @@ mod tests {
             }
         }
 
-        /// 造一条 manifest 记录 + 对应隔离区文件并落 manifest。
+        /// 造一条 manifest 记录 + 对应隔离区文件并落 manifest（sha256 取真实文件哈希）。
         fn seed(&self, id: &str, size: u64, moved_at: i64, expires_at: i64) -> ManifestEntry {
-            let e = self.entry(id, size, moved_at, expires_at);
+            let mut e = self.entry(id, size, moved_at, expires_at);
             fs::write(&e.quarantine_path, vec![0u8; size as usize]).unwrap();
+            e.sha256 =
+                crate::quarantine::store::sha256_file(Path::new(&e.quarantine_path)).unwrap();
             add_manifest_entry(&self.root, &e).unwrap();
             e
+        }
+
+        /// 沙箱 base（隔离区根的父目录），用于放"根外受害文件"。
+        fn base(&self) -> &Path {
+            self.root.parent().expect("sandbox root has parent")
         }
     }
 
@@ -507,5 +580,99 @@ mod tests {
             Some("purge"),
         );
         assert!(!logs.is_empty(), "purge 须写审计");
+    }
+
+    /// R31-1：伪造 manifest 指向隔离区根外 → 不删除、不迁移状态、写 fail 审计。
+    #[test]
+    fn forged_manifest_outside_root_not_deleted() {
+        let sb = Sandbox::new("forged-outside");
+        let victim = sb.base().join("victim-sentinel.bin");
+        fs::write(&victim, b"user data").unwrap();
+        let mut e = sb.entry("evil", 9, NOW - 20 * DAY, NOW - DAY);
+        e.quarantine_path = victim.to_string_lossy().into_owned();
+        e.sha256 = crate::quarantine::store::sha256_file(&victim).unwrap();
+        add_manifest_entry(&sb.root, &e).unwrap();
+
+        let report = run_pass_at_root(&sb.root, NOW, u64::MAX / 10);
+
+        assert!(victim.exists(), "隔离区根外路径绝不能被删除");
+        assert_eq!(report.purged, 0);
+        let (entries, _) = load_manifest(&sb.root).unwrap();
+        assert_eq!(
+            entries[0].state,
+            ManifestState::Quarantined,
+            "校验失败不迁移状态（保留待人工处理）"
+        );
+        let now = crate::logging::audit::now_ms();
+        let logs = crate::logging::audit::query(now - 60_000, now + 60_000, Some("auto_purge"));
+        assert!(
+            logs.iter().any(|l| l.result.as_deref() == Some("fail")),
+            "拒绝删除须写 fail 审计，不得静默"
+        );
+    }
+
+    /// R31-1：`..` 遍历形态即使字符串前缀在根内也必须拒绝。
+    #[test]
+    fn traversal_quarantine_path_rejected() {
+        let sb = Sandbox::new("traversal");
+        let victim = sb.base().join("victim-traversal.bin");
+        fs::write(&victim, b"user data").unwrap();
+        let mut e = sb.entry("trav", 9, NOW - 20 * DAY, NOW - DAY);
+        e.quarantine_path = format!(r"{}\..\victim-traversal.bin", sb.root.display());
+        e.sha256 = crate::quarantine::store::sha256_file(&victim).unwrap();
+        add_manifest_entry(&sb.root, &e).unwrap();
+
+        let report = run_pass_at_root(&sb.root, NOW, u64::MAX / 10);
+
+        assert!(victim.exists(), "`..` 遍历不得删除根外文件");
+        assert_eq!(report.purged, 0);
+        let (entries, _) = load_manifest(&sb.root).unwrap();
+        assert_eq!(entries[0].state, ManifestState::Quarantined);
+    }
+
+    /// R31-1：隔离文件内容被替换（sha256 与 manifest 不符）→ 拒绝删除并保留条目。
+    #[test]
+    fn sha_mismatch_blocks_auto_purge() {
+        let sb = Sandbox::new("sha-mismatch");
+        let e = sb.seed("m1", 10, NOW - 20 * DAY, NOW - DAY);
+        // 内容被替换（manifest 里的 sha256 仍是原内容）。
+        fs::write(&e.quarantine_path, b"tampered!").unwrap();
+
+        let report = run_pass_at_root(&sb.root, NOW, u64::MAX / 10);
+
+        assert!(
+            Path::new(&e.quarantine_path).exists(),
+            "sha256 不符的隔离文件不得硬删"
+        );
+        assert_eq!(report.purged, 0);
+        let (entries, _) = load_manifest(&sb.root).unwrap();
+        assert_eq!(entries[0].state, ManifestState::Quarantined);
+    }
+
+    /// R31-1：手动 purge 同样要走信任校验（伪造根外路径拒绝且记失败）。
+    #[test]
+    fn purge_across_forged_outside_path_not_deleted() {
+        let sb = Sandbox::new("purge-forged");
+        let victim = sb.base().join("victim-purge.bin");
+        fs::write(&victim, b"user data").unwrap();
+        let mut e = sb.entry("evil", 9, NOW - DAY, NOW + 13 * DAY);
+        e.quarantine_path = victim.to_string_lossy().into_owned();
+        e.sha256 = crate::quarantine::store::sha256_file(&victim).unwrap();
+        add_manifest_entry(&sb.root, &e).unwrap();
+
+        let report = purge_across(
+            std::slice::from_ref(&sb.root),
+            &["evil".to_string()],
+            "PS-1234",
+        );
+
+        assert!(victim.exists(), "手动 purge 也不得删除根外文件");
+        assert_eq!(report.purged, 0);
+        assert!(
+            report.failures.iter().any(|f| f.id == "evil"),
+            "拒绝须记入 failures"
+        );
+        let (entries, _) = load_manifest(&sb.root).unwrap();
+        assert_eq!(entries[0].state, ManifestState::Quarantined);
     }
 }
