@@ -16,8 +16,9 @@
   - R31-4 `d7855e4`：实现 SAFETY §2.1 唯一例外 `%SystemRoot%\Temp`（仅 🟢 direct/recycle，`is_hard_protected` 不豁免）；`expand_env` 支持 `%VAR%\子目录`（temp.system 不再硬编码 C: 盘）；`temp.thumb`/`temp.system` → direct、`cache.browser` → green/direct（微信缓存保持 🟡）。见 `docs/review/R31-4.md`。
   - R31-5/6：`reportModel.immediateBytes` 只计 green+direct（回收站不立即释放）；首页「一键清理」→ 快速扫描 → 简化结果页（可释放 X / N 项安全项 / 另有 Z 项需确认）→「立即清理」两击闭环；🟡/🔴 仍逐项确认；方案 A/B 改名「推荐清理/深度清理」；深度体检与完整报告保留。
   - R31-7：新增 `docs/dev/AUDIT-2026-10-18.md`（24 条问题 → 已修/文档修正/已知未修/接受边界 + R32 计划）；README/SECURITY/SAFETY/SPEC/CHANGELOG 按实修正（撤"7–30 可配"、"运行中进程文件永不进候选"、证据可复现性等不实宣称）。
+  - R31-8：补齐 restore 审计（`op=restore`，成功/冲突/跳过/失败四结果，含原路径/类目/大小/去向），SPEC §4.4 op 集不再有空洞。
 - **关键结论**：①清理工具的信任链里"用户可写状态文件 → 提权进程执行"必须按不可信输入处理，且卷根子目录默认 ACL 天然可写；②"一键清理"只清 🟢 可重建项、保持结果页一次确认（两击），在规则包签名落地前不做免确认自动清理；③文档宣称必须与实现同批维护，"一次性人工证据"要标注不可复现。
-- **门禁**：cargo fmt --check / clippy -D warnings / cargo test 全绿（lib 276 + 集成 27）；pnpm typecheck / vitest / build 全绿；零新 crate/npm。
+- **门禁**：cargo fmt --check / clippy -D warnings / cargo test 全绿（250 lib + 27 集成 = 277）；pnpm typecheck / vitest 80 / build 全绿；零新 crate/npm。
 - **下一步**：推送后确认 main CI 转绿（R31-3 修复需远端验证）；R32 待办见 TASKS.md「R32 待办」与 AUDIT §3（single-flight/去重、MFT 会话复用、autoPurge/retention 接线、更新通道签名、restore 审计等）；一键清理与 Grading 真机走查。
 
 ## 2026-10-15 | v0.2.1 发布（R30 真机反馈热修：大文件审阅化/乱码/图标/横滚；Release 全绿）

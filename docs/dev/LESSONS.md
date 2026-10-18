@@ -288,7 +288,7 @@
 
 | 日期 | 指标 | 数值 | 门禁 | 状态 |
 |---|---|---|---|---|
-| 2026-10-19 | **R31 审计收口批次**（破坏面收紧 + 规则 fail-closed + 一键清理 UX） | cargo **276 lib**（2 ignored）+ **27 集成**；vitest **80**（11 文件）；clippy `-D warnings` 0；前端 index gzip 45.03KB 持平 | 全绿 | ✅ +8 cargo（含 acp=1252 注入用例）/ +5 vitest。安装包体积待下次打包复测 |
+| 2026-10-19 | **R31 审计收口批次**（破坏面收紧 + 规则 fail-closed + 一键清理 UX + restore 审计） | cargo **250 lib**（2 ignored）+ **27 集成**（合计 277）；vitest **80**（11 文件）；clippy `-D warnings` 0；前端 index gzip 45.03KB 持平 | 全绿 | ✅ +9 cargo（含 acp=1252 注入用例）/ +5 vitest。安装包体积待下次打包复测 |
 | 2026-10-15 | **v0.2.1 发布** NSIS 安装包（shell reveal + 图标提取/手写 PNG，零新依赖） | **2.81 MiB**（CI 产物 2,948,879 B；本地构建 2,946,042 B；较 v0.2.0 约 +12.3 KiB / +0.43%）；portable.zip 3.80 MiB | <20MB | ✅ Release run 全绿，四资产已发布 |
 | 2026-10-15 | 单测规模 | cargo **233 lib**（2 ignored）+27 集成；vitest **75** | 全绿 | ✅ R30：+11 cargo / +4 vitest |
 | 2026-10-14 | **v0.2.0 发布** NSIS 安装包（含 regex-lite 0.1.9 + 全界面动效） | **2.80 MiB**（2,936,309 B；较 v0.1.6 2.75 MiB **+50.7 KiB / +1.8%**；portable.zip 3.77 MiB） | <20MB | ✅ Release run #12 四资产已发布 |

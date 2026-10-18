@@ -157,7 +157,7 @@ export interface ScanResult {
 ```
 
 要求：破坏性操作覆盖率 100%（M8）；只追加；按天滚动（audit-2026-08-24.jsonl）；可导出。
-**现状说明（2026-10-18 审计）**：op 集含 `restore`，但 `quarantine/restore.rs` 目前**未写审计**（R32-3 待补）；空目录收尾的 `RemoveDirectoryW` 亦无 journal/审计（R32-3）。
+**现状说明（2026-10-18 审计）**：`restore` 审计已于 R31-8 补齐（ok/conflict/skip/fail 四种结果）；空目录收尾的 `RemoveDirectoryW` 仍无 journal/审计（R32-3）。
 
 ### 4.5 设置（settings.json）
 

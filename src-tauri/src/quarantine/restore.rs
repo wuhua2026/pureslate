@@ -131,6 +131,25 @@ pub fn restore_one(root: &Path, entry: &ManifestEntry) -> RestoreOutcome {
     }
 }
 
+/// 审计一条还原操作（SPEC §4.4 op 集含 `restore`；R31-8 补齐）。
+/// 只读/移动语义：`result` ∈ ok|skip|fail；冲突兜底算 ok（文件已安全落盘并告知）。
+fn audit_restore(e: &ManifestEntry, result: &str, detail: Option<String>) {
+    let entry = crate::contract::LogEntry {
+        ts: crate::logging::audit::now_ms(),
+        op: "restore".into(),
+        tx_id: None,
+        category_id: Some(e.category_id.clone()),
+        path: Some(e.original_path.clone()),
+        size_bytes: Some(e.size_bytes),
+        disposition: Some(crate::contract::Disposition::Quarantine),
+        result: Some(result.into()),
+        detail,
+    };
+    if let Err(err) = crate::logging::audit::record(&entry) {
+        eprintln!("[restore] 审计写入失败: {err}");
+    }
+}
+
 /// 对**单个卷**隔离区根执行还原并汇总。`ids` 为空 → 还原全部可还原项。
 fn restore_to_root(root: &Path, ids: &[String], report: &mut RestoreReport) {
     let Ok((entries, _)) = load_manifest(root) else {
@@ -145,9 +164,27 @@ fn restore_to_root(root: &Path, ids: &[String], report: &mut RestoreReport) {
         }
         report.requested += 1;
         match restore_one(root, &e) {
-            RestoreOutcome::Restored => report.restored += 1,
-            RestoreOutcome::Conflict => report.conflict += 1,
-            RestoreOutcome::Skipped(r) | RestoreOutcome::Failed(r) => {
+            RestoreOutcome::Restored => {
+                report.restored += 1;
+                audit_restore(&e, "ok", None);
+            }
+            RestoreOutcome::Conflict => {
+                report.conflict += 1;
+                audit_restore(
+                    &e,
+                    "ok",
+                    Some("原路径冲突，已还原到 restore-conflict 目录".into()),
+                );
+            }
+            RestoreOutcome::Skipped(r) => {
+                audit_restore(&e, "skip", Some(r.clone()));
+                report.failures.push(RestoreFailure {
+                    id: e.id,
+                    reason: r,
+                });
+            }
+            RestoreOutcome::Failed(r) => {
+                audit_restore(&e, "fail", Some(r.clone()));
                 report.failures.push(RestoreFailure {
                     id: e.id,
                     reason: r,
@@ -302,6 +339,35 @@ mod tests {
         let e = entries.iter().find(|e| e.id == entry.id).unwrap();
         assert_eq!(e.state, ManifestState::Restored);
         // root 为 SandboxGuard，作用域结束（Drop）自动清覆盖并删沙箱。
+    }
+
+    /// R31-8：还原成功须写 op=restore 审计（SPEC §4.4 op 集）。restore_to_root 为模块内私有，
+    /// 单测直接调用（沙箱 data root 已注入，审计落沙箱）。
+    #[test]
+    fn restore_writes_audit() {
+        let root = sandbox("audit");
+        let qroot = root.join(QUARANTINE_DIR);
+        std::fs::create_dir_all(&qroot).unwrap();
+        let (entry, _orig, _hash) = seal_sample(&root, "audited.tmp", "audit-body");
+
+        let mut report = RestoreReport {
+            requested: 0,
+            restored: 0,
+            conflict: 0,
+            failures: vec![],
+        };
+        restore_to_root(&qroot, &[], &mut report);
+
+        assert_eq!(report.restored, 1);
+        let now = crate::logging::audit::now_ms();
+        let logs = crate::logging::audit::query(now - 60_000, now + 60_000, Some("restore"));
+        assert_eq!(logs.len(), 1, "还原成功须恰写一条 restore 审计");
+        assert_eq!(logs[0].result.as_deref(), Some("ok"));
+        assert_eq!(logs[0].path.as_deref(), Some(entry.original_path.as_str()));
+        assert_eq!(
+            logs[0].disposition,
+            Some(crate::contract::Disposition::Quarantine)
+        );
     }
 
     #[test]

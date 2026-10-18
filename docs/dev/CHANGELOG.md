@@ -15,6 +15,7 @@
 - **分级/去向调整（R31-4）**：`cache.browser` yellow/quarantine → green/direct（进程守卫保留）；`temp.thumb`/`temp.system` recycle → direct；微信缓存保持 🟡 隔离。
 - **解码修复（R31-3）**：展示字段三候选并列优先级改为显式 **UTF-16 > GBK(936) > CP_ACP**（抽出可注入代码页核心函数）；修复非中文 Windows 老 ANSI 中文名乱码与 main CI 红。
 - **前端（R31-5/6，无 IPC 契约变更）**：首页「一键清理」两击闭环（快速扫描 → 简化结果页 →「立即清理」只提交 🟢 安全项）；🟡/🔴 不进一键流程；方案 A/B 改名「推荐清理/深度清理」；`ReportOverview` 前端模型加性 `confirmItems/confirmBytes` 与 `safeCleanItems()`；「可立即释放」只计 green+direct。
+- **审计补齐（R31-8）**：隔离区还原（restore）操作写入 `op=restore` 审计（ok/conflict/skip/fail），补齐 SPEC §4.4 声明的 op 集。
 - **文档按实修正（R31-7）**：新增审计记录；README 撤"7–30 可配/运行中进程文件永不进候选/证据可复现"等不实宣称；SECURITY 删除不可兑现的 community-review 发布承诺；SAFETY §2.5 标注未实现；SPEC §5 补齐 5 命令/3 事件/2 个 StartupSource 及残留/卸载类型。
 - **历史说明**：`v0.1.5` 从未单独发版（代码批次并入 v0.1.6），下方历史节保留原文并已标注。
 
