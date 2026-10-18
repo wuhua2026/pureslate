@@ -7,15 +7,15 @@
     <exclude pattern="*.lock"/>
     <guard process=""/>
   </category>
-  <category id="temp.system" label="系统临时目录" risk="green" disposition="recycle"
-            description="Windows 系统临时目录中的过期文件">
-    <target type="path" value="C:\Windows\Temp"/>
+  <category id="temp.system" label="系统临时目录" risk="green" disposition="direct"
+            description="Windows 系统临时目录（%SystemRoot%\Temp）中的过期文件，删除后由系统/程序自动重建">
+    <target type="env" value="%SystemRoot%\Temp"/>
     <include pattern="*" recursive="true" maxAgeDays="3"/>
     <exclude pattern="*.tmp.lock"/>
     <guard process=""/>
   </category>
-  <category id="temp.thumb" label="缩略图缓存" risk="green" disposition="recycle"
-            description="图片/视频缩略图缓存，可自动重建">
+  <category id="temp.thumb" label="缩略图缓存" risk="green" disposition="direct"
+            description="图片/视频缩略图缓存，删除后自动重建">
     <target type="knownFolder" value="Thumbnail Cache"/>
     <include pattern="*" recursive="true"/>
     <guard process=""/>

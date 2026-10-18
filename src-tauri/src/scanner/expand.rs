@@ -28,16 +28,35 @@ pub fn expand_target(target: &Target) -> Option<PathBuf> {
     }
 }
 
-/// 从环境变量展开 target 值（`%TEMP%` → env `TEMP`）。
+/// 从环境变量展开 target 值（R31-4：支持 `%VAR%\子目录` 复合形态）。
+///
+/// `%SystemRoot%\Temp` 这类"环境变量 + 固定子目录"的 target 必须能展开
+/// （temp.system 的跨系统盘适配）；任一 `%VAR%` 解析失败 → `None`（宁缺勿扫）。
 fn expand_env(value: &str) -> Option<PathBuf> {
-    let var = value.trim().trim_start_matches('%').trim_end_matches('%');
-    if var.is_empty() {
+    let v = value.trim();
+    if v.is_empty() {
         return None;
     }
-    std::env::var(var)
-        .ok()
-        .filter(|s| !s.is_empty())
-        .map(PathBuf::from)
+    // 不含 % 的裸值：按绝对路径处理（向后兼容 type=env 的误用写法）。
+    if !v.contains('%') {
+        return Some(PathBuf::from(v));
+    }
+    let mut out = String::with_capacity(v.len());
+    let mut rest = v;
+    while let Some(start) = rest.find('%') {
+        out.push_str(&rest[..start]);
+        let after = &rest[start + 1..];
+        let end = after.find('%')?; // 未闭合 → None
+        let name = &after[..end];
+        if name.is_empty() {
+            return None;
+        }
+        let val = std::env::var(name).ok().filter(|s| !s.is_empty())?;
+        out.push_str(&val);
+        rest = &after[end + 1..];
+    }
+    out.push_str(rest);
+    (!out.trim().is_empty()).then(|| PathBuf::from(out))
 }
 
 /// 绝对路径直接使用。
@@ -206,6 +225,29 @@ mod tests {
     #[test]
     fn unknown_env_is_none() {
         let t = Target::simple(TargetType::Env, "%PURESLATE_NO_SUCH_ENV_xyz%");
+        assert!(expand_target(&t).is_none());
+    }
+
+    /// R31-4：`%SystemRoot%\Temp` 复合形态可展开（temp.system 不再硬编码 C: 盘）。
+    #[test]
+    fn env_with_subdir_expands() {
+        let Ok(system_root) = std::env::var("SystemRoot") else {
+            return;
+        };
+        let t = Target::simple(TargetType::Env, "%SystemRoot%\\Temp");
+        let got = expand_target(&t).expect("复合环境变量 target 应可展开");
+        // expand_target 会把短名/环境值归一为磁盘长名形态（大小写可能与 env 原值不同）。
+        assert!(
+            got.to_string_lossy()
+                .eq_ignore_ascii_case(&PathBuf::from(&system_root).join("Temp").to_string_lossy()),
+            "got={}",
+            got.display()
+        );
+        // 任一变量缺失 → 整体 None（不做半截展开）。
+        let t = Target::simple(TargetType::Env, "%SystemRoot%\\%PURESLATE_NO_SUCH_ENV_xyz%");
+        assert!(expand_target(&t).is_none());
+        // 未闭合的 % 也按展开失败处理。
+        let t = Target::simple(TargetType::Env, "%SystemRoot%\\Temp%");
         assert!(expand_target(&t).is_none());
     }
 

@@ -31,7 +31,11 @@ pub fn verify(t: &CleanTarget) -> Result<(), String> {
     //    c) §2.4 用户核心目录——direct/recycle 整树拦；quarantine 按 H1 放行；
     //       R27-3 精确授权根内任何去向放行（残留可能位于 Documents 下的异常安装位，
     //       已由枚举器高置信 + 用户逐项确认兜底，硬保护 a) 仍优先）。
-    if is_hard_protected(p) {
+    // R31-4：SAFETY §2.1 唯一例外——`%SystemRoot%\Temp` 仅对 🟢 direct/recycle
+    // 放行（temp.system 类目，与扫描侧 is_excluded_from_scan 同口径）。
+    let safe_temp_exception = t.disposition != Disposition::Quarantine
+        && crate::safety::whitelist::is_safe_temp_exception(p);
+    if is_hard_protected(p) && !safe_temp_exception {
         return Err(format!(
             "执行前复核：目标命中硬保护白名单（系统/引导/隔离区/规则声明），已拒绝 ({})",
             p.to_string_lossy()

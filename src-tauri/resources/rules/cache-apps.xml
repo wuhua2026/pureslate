@@ -6,8 +6,8 @@
     <include pattern="FileStorage\Cache\**" recursive="true" maxAgeDays="30"/>
     <guard process="WeChat.exe"/>
   </category>
-  <category id="cache.browser" label="浏览器缓存" risk="yellow" disposition="quarantine"
-            description="网页缓存资源；清理后浏览器自动重建，不影响收藏与历史">
+  <category id="cache.browser" label="浏览器缓存" risk="green" disposition="direct"
+            description="网页缓存资源；清理后浏览器自动重建，不影响收藏与历史；浏览器运行中自动跳过">
     <target type="knownFolder" value="Local AppData"/>
     <include pattern="**\Google\Chrome\User Data\Default\Cache\**" recursive="true"/>
     <include pattern="**\Microsoft\Edge\User Data\Default\Cache\**" recursive="true"/>

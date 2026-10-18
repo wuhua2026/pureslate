@@ -97,10 +97,40 @@ pub fn is_user_core_data(path: &Path) -> bool {
 /// 扫描期保护判定（H1 · v0.1.4）：白名单根全类目拦截；§2.4 用户核心目录仅对
 /// **非 quarantine** 去向整树拦截。walk/mft/dup 的过滤统一走本函数。
 pub fn is_excluded_from_scan(path: &Path, disposition: Disposition) -> bool {
+    // SAFETY §2.1 例外（R31-4）：`%SystemRoot%\Temp` 是系统临时垃圾的安全清理目标，
+    // 仅对 🟢 direct/recycle 放行；quarantine 去向仍按硬保护拦截。
+    if disposition != Disposition::Quarantine && is_safe_temp_exception(path) {
+        return false;
+    }
     if is_whitelisted(path) {
         return true;
     }
     disposition != Disposition::Quarantine && is_user_core_data(path)
+}
+
+/// SAFETY §2.1 例外根：`%SystemRoot%\Temp`（系统临时目录）及其子项。
+///
+/// 只用于 **扫描/清理放行判定**（`is_excluded_from_scan` 与 preflight）；`is_hard_protected`
+/// 本身不豁免——还原目标、quarantine 去向、SystemRoot 其它子目录仍一律拦截。
+/// 调用方必须同时约束去向为 direct/recycle（🟢），否则例外不生效。
+pub fn is_safe_temp_exception(path: &Path) -> bool {
+    if path_has_short_component(path) {
+        if let Some(long) = expand_short_name(path) {
+            return safe_temp_segs(&normalize_segments(path))
+                || safe_temp_segs(&normalize_segments(&long));
+        }
+    }
+    safe_temp_segs(&normalize_segments(path))
+}
+
+/// 段级：路径是否位于 `<SystemRoot>\Temp` 之内（大小写/分隔符归一）。
+fn safe_temp_segs(p_segs: &[String]) -> bool {
+    let Some(root) = env("SystemRoot") else {
+        return false;
+    };
+    let mut expected = normalize_segments(&root);
+    expected.push("temp".to_string());
+    prefix_matches(p_segs, &expected)
 }
 
 // ===== XML 附加白名单根（resources/rules/whitelist.xml，SAFETY §2 白名单维护）=====
@@ -768,5 +798,32 @@ mod tests {
             ));
         }
         set_xml_roots(vec![]);
+    }
+
+    /// R31-4：SAFETY §2.1 例外——`%SystemRoot%\Temp` 仅对 🟢 direct/recycle 放行；
+    /// 其它 SystemRoot 子目录、quarantine 去向、还原目标（is_hard_protected）一律拦。
+    #[test]
+    fn systemroot_temp_exception_green_only() {
+        let Ok(win) = std::env::var("SystemRoot") else {
+            return;
+        };
+        let temp_file = Path::new(&win).join("Temp").join("sub").join("x.tmp");
+        let sys_file = Path::new(&win).join("System32").join("kernel32.dll");
+
+        // 扫描放行：%SystemRoot%\Temp 内 🟢 去向（temp.system）。
+        assert!(is_safe_temp_exception(&temp_file));
+        assert!(!is_excluded_from_scan(&temp_file, Disposition::Direct));
+        assert!(!is_excluded_from_scan(&temp_file, Disposition::Recycle));
+        // quarantine 去向仍拦（临时目录不得成为隔离来源的豁免口）。
+        assert!(is_excluded_from_scan(&temp_file, Disposition::Quarantine));
+        // SystemRoot 其它子目录仍拦。
+        assert!(is_excluded_from_scan(&sys_file, Disposition::Direct));
+        // 硬保护本身不豁免：还原目标 / preflight 之外的白名单语义不变。
+        assert!(is_hard_protected(&temp_file));
+        assert!(is_whitelisted(&temp_file));
+        // 前缀相似但不同名（Temp vs Temporary）不误放。
+        assert!(!is_safe_temp_exception(
+            &Path::new(&win).join("Temporary").join("x.tmp")
+        ));
     }
 }

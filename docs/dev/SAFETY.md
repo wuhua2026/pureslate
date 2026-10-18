@@ -13,6 +13,8 @@
 实现规则：
 - 分级以规则 XML 的 `risk` 属性声明为准（SPEC §4.1）；
 - **无法判定时默认 🔴**（保守原则），并记日志；
+- **去向与分级必须匹配（R31-2 fail-closed）**：🟢 只允许 `direct`/`recycle`，🟡/🔴 只允许 `quarantine`；不匹配/缺失的 `disposition` 整类丢目并记日志（绝不静默降级为直删）；
+- **可重建缓存按 🟢 处理（R31-4）**：浏览器缓存（Chrome/Edge `Cache` 目录，进程守卫在运行中整类跳过）、缩略图缓存、`%TEMP%`、`%SystemRoot%\Temp` 过期文件——删除后自动重建，计入"立即释放"；
 - 🟢 误删率目标 <0.5%、🟡 <2%、🔴 零容忍（M2 分档门禁，度量方法见 §6）。
 - **审阅型类目（R30 增补，优先级高于上表）**：`large.file`（≥500MB 全盘文件）是用户个人资料（视频/数据集/虚拟机镜像），即使 🟡/隔离区可还原也**永不进入删除候选**——不生成清理 aggregate、规则表不注册、`resolve_targets` fail-closed、UI 无删除入口；只允许只读浏览与 shell 定位（SPEC §3）。
 
@@ -20,7 +22,7 @@
 
 以下路径/对象**永远不得进入任何删除候选**，无论规则如何声明：
 
-1. 系统目录：`%SystemRoot%`（C:\Windows）及其子目录（`C:\Windows\Temp` 等显式声明的例外由规则集白名单子句放行）；
+1. 系统目录：`%SystemRoot%`（C:\Windows）及其子目录——**唯一例外（R31-4 已实现）**：`%SystemRoot%\Temp`（系统临时目录）及其子项，且**仅对 🟢 direct/recycle 去向**放行（`temp.system` 类目，按 `maxAgeDays` 与进程/文件锁过滤）；quarantine 去向、还原目标、SystemRoot 其它任何子目录一律拦截。实现见 `safety/whitelist::is_safe_temp_exception`（扫描侧 `is_excluded_from_scan` + 执行侧 `preflight::verify` 同口径；`is_hard_protected` 本身不豁免）；
 2. 程序目录：`%ProgramFiles%`、`%ProgramFiles(x86)%`、`%ProgramData%\Microsoft`；
    - **R27-3 精确残留豁免条款（白名单分层）**：常量白名单根分两层——
      **硬根**（§2.1 SystemRoot、§2.3 引导/卷信息、§2.6 隔离区与自身设施、whitelist.xml 声明根）**永不豁免**；
@@ -36,6 +38,7 @@
 4. 用户核心数据目录（默认 🔴 且不建议清理）：`Documents`、`Desktop`、`Pictures`、`Videos`、`Music` 的**非缓存子路径**（例外：这些目录下被规则显式标记为缓存的路径，如 `Pictures\Thumbnails`）。
    **v0.1.4 语义分层（H1 修复）**：§2.4 五目录从通用白名单根拆出（`is_user_core_data`）——对 **quarantine 去向**（🟡/🔴 隔离区：可还原 + 用户逐项确认）的扫描与清理**放行**（dup/cache 等类目必须进入这些目录才能提供产品价值）；对 **direct/recycle 去向**（🟢 直清）仍整树拦截（preflight 强制，用户文档绝不进直清候选）；系统目录等其余白名单根对所有类目全拦不变；还原（restore）目标检查同步不含 §2.4（恢复用户数据不属删除）。
 5. 运行中进程的可执行文件与已加载 DLL（通过系统句柄快照判定）；
+   - **注（2026-10-18 审计）：本条尚未实现**——属独立句柄快照 FFI 逻辑，R02 推迟（见 `safety/whitelist.rs` 头注释、`CHANGELOG` v0.1.x 条目）。当前实际保护是：规则声明的 `<guard process>`（运行中整类跳过）+ 系统文件锁导致删除失败；不得在 README/对外文案中声称"运行中进程文件永不进候选"。
 6. 自身设施：`.pureslate-quarantine\` 隔离区目录、journal 目录、manifest、日志文件——只能由对应模块按状态机操作，不进通用清理；
 7. OneDrive/云盘占位文件（reparse point，属性含 `FILE_ATTRIBUTE_RECALL_ON_DATA_ACCESS`）：跳过不扫描，UI 提示为已知限制；
 8. 符号链接/junction 指向的目标路径不跟随、不删除（见 §4.3）。
