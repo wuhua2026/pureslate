@@ -143,8 +143,10 @@ pub fn parse_ruleset(xml: &str) -> Result<Ruleset, RulesError> {
                 match name.as_str() {
                     "ruleset" => parse_ruleset_attrs(&e, &mut id, &mut version, &mut lang)?,
                     "category" => {
-                        cur = Some(PartialCategory::default());
-                        parse_category_attrs(&e, cur.as_mut().expect("just set"))?;
+                        // 先解析属性再落库，避免对 Option 使用 expect（AGENTS 红线 6）。
+                        let mut pc = PartialCategory::default();
+                        parse_category_attrs(&e, &mut pc)?;
+                        cur = Some(pc);
                     }
                     // 空壳元素虽不符合 schema，但以常规元素处理（其 Empty 分支在下方统一结算）。
                     _ => {}
@@ -305,6 +307,7 @@ fn parse_ruleset_attrs(
 }
 
 /// 解析 `<category>` 起始属性（id/label/risk/disposition/description）。
+/// R31-2：非法 disposition 记 fatal（整类丢弃），不再静默降级为 direct。
 fn parse_category_attrs(
     e: &quick_xml::events::BytesStart<'_>,
     c: &mut PartialCategory,
@@ -316,7 +319,14 @@ fn parse_category_attrs(
             "id" => c.id = Some(val),
             "label" => c.label = Some(val),
             "risk" => c.risk = parse_risk(&val),
-            "disposition" => c.disposition = parse_disposition(&val),
+            "disposition" => match parse_disposition(&val) {
+                Some(d) => c.disposition = Some(d),
+                None => {
+                    c.fatal.get_or_insert_with(|| {
+                        format!("disposition `{val}` 非法（仅 direct/recycle/quarantine）")
+                    });
+                }
+            },
             "description" => c.description = Some(val),
             _ => {}
         }
@@ -416,9 +426,28 @@ fn parse_glob_attrs(e: &quick_xml::events::BytesStart<'_>) -> Result<GlobRule, S
         let val = a.unescape_value().unwrap_or_default().into_owned();
         match key.as_str() {
             "pattern" => pattern = Some(val),
-            "recursive" => recursive = val != "false",
-            "maxAgeDays" => max_age_days = val.parse().unwrap_or(0),
-            "minSizeMB" => min_size_mb = val.parse().unwrap_or(0),
+            // R31-2：recursive 只接受严格布尔字面量，拼写错误一律 fail-closed
+            // （此前 `recursive="yes"` 会被当成 true，等于静默放开递归面）。
+            "recursive" => {
+                recursive = match val.as_str() {
+                    "true" => true,
+                    "false" => false,
+                    other => {
+                        return Err(format!("recursive `{other}` 非法（仅 true/false）"));
+                    }
+                }
+            }
+            // R31-2：数值属性解析失败 → 丢类目（此前 unwrap_or(0) 会把非法值静默变成"不限"）。
+            "maxAgeDays" => {
+                max_age_days = val
+                    .parse()
+                    .map_err(|_| format!("maxAgeDays `{val}` 不是合法 u32"))?;
+            }
+            "minSizeMB" => {
+                min_size_mb = val
+                    .parse()
+                    .map_err(|_| format!("minSizeMB `{val}` 不是合法 u64"))?;
+            }
             "segment-regex" => segment_regex = Some(val),
             "segment-index" => {
                 segment_index = Some(
@@ -479,11 +508,14 @@ fn parse_risk(s: &str) -> Risk {
     }
 }
 
-fn parse_disposition(s: &str) -> Disposition {
+/// R31-2：disposition 严格解析。未知/缺失字符串 → None，由调用方按 fail-closed 处理
+/// （非法属性 → 整类丢弃），绝不静默降级为 direct。
+fn parse_disposition(s: &str) -> Option<Disposition> {
     match s {
-        "recycle" => Disposition::Recycle,
-        "quarantine" => Disposition::Quarantine,
-        _ => Disposition::Direct,
+        "direct" => Some(Disposition::Direct),
+        "recycle" => Some(Disposition::Recycle),
+        "quarantine" => Some(Disposition::Quarantine),
+        _ => None,
     }
 }
 
@@ -506,7 +538,8 @@ struct PartialCategory {
     id: Option<String>,
     label: Option<String>,
     risk: Risk,
-    disposition: Disposition,
+    /// R31-2：None = 属性缺失或非法；finish 时按 fail-closed 丢弃类目。
+    disposition: Option<Disposition>,
     description: Option<String>,
     targets: Vec<Target>,
     includes: Vec<GlobRule>,
@@ -527,6 +560,10 @@ impl PartialCategory {
         if let Some(reason) = this.fatal.take() {
             return Err((reason, id));
         }
+        // R31-2：disposition 属性缺失 → 丢类目（非法值已在解析期记 fatal，不在此处静默降级）。
+        let Some(disposition) = this.disposition else {
+            return Err(("category 缺少 disposition".into(), id.clone()));
+        };
         let label = this.label.take().unwrap_or_else(|| id.clone());
         if this.targets.is_empty() {
             return Err(("category 无任何 target".into(), id.clone()));
@@ -562,7 +599,7 @@ impl PartialCategory {
             id,
             label,
             risk: this.risk,
-            disposition: this.disposition,
+            disposition,
             description: this.description,
             targets: this.targets,
             includes: this.includes,
@@ -571,7 +608,11 @@ impl PartialCategory {
         };
         if !cat.is_valid_config() {
             let cid = cat.id.clone();
-            return Err(("green 类目只允许 direct/recycle 去向".into(), cid));
+            return Err((
+                "disposition 与 risk 不匹配（green 只允许 direct/recycle；yellow/red 只允许 quarantine）"
+                    .into(),
+                cid,
+            ));
         }
         Ok(cat)
     }
@@ -781,6 +822,105 @@ mod tests {
         let rs = parse_ruleset(xml).expect("should parse");
         assert_eq!(rs.categories.len(), 1);
         assert_eq!(rs.categories[0].id, "ok");
+    }
+
+    // ---- R31-2 fail-closed：disposition / 数值 / recursive ----
+
+    #[test]
+    fn invalid_or_missing_disposition_drops_category() {
+        // 非法 disposition 不得静默降级为 direct；缺失 disposition 不得默认放行。
+        let xml = r#"<ruleset id="r" version="1">
+  <category id="bad.invalid-disp" label="l" risk="yellow" disposition="delete">
+    <target type="path" value="C:\a"/><include pattern="*"/>
+  </category>
+  <category id="bad.missing-disp" label="l" risk="yellow">
+    <target type="path" value="C:\b"/><include pattern="*"/>
+  </category>
+  <category id="good" label="l" risk="yellow" disposition="quarantine">
+    <target type="path" value="C:\c"/><include pattern="*"/>
+  </category>
+</ruleset>"#;
+        let rs = parse_ruleset(xml).expect("文件级解析应成功（非法只丢 category）");
+        assert_eq!(rs.categories.len(), 1);
+        assert_eq!(rs.categories[0].id, "good");
+    }
+
+    #[test]
+    fn disposition_risk_mismatch_drops_category() {
+        // R31-2：green 只允许 direct/recycle；yellow/red 只允许 quarantine。
+        let xml = r#"<ruleset id="r" version="1">
+  <category id="bad.yellow-direct" label="l" risk="yellow" disposition="direct">
+    <target type="path" value="C:\a"/><include pattern="*"/>
+  </category>
+  <category id="bad.red-direct" label="l" risk="red" disposition="direct">
+    <target type="path" value="C:\b"/><include pattern="*"/>
+  </category>
+  <category id="bad.red-recycle" label="l" risk="red" disposition="recycle">
+    <target type="path" value="C:\c"/><include pattern="*"/>
+  </category>
+  <category id="ok.green-direct" label="l" risk="green" disposition="direct">
+    <target type="path" value="C:\d"/><include pattern="*"/>
+  </category>
+  <category id="ok.green-recycle" label="l" risk="green" disposition="recycle">
+    <target type="path" value="C:\e"/><include pattern="*"/>
+  </category>
+  <category id="ok.yellow-quarantine" label="l" risk="yellow" disposition="quarantine">
+    <target type="path" value="C:\f"/><include pattern="*"/>
+  </category>
+  <category id="ok.red-quarantine" label="l" risk="red" disposition="quarantine">
+    <target type="path" value="C:\g"/><include pattern="*"/>
+  </category>
+</ruleset>"#;
+        let rs = parse_ruleset(xml).expect("文件级解析应成功");
+        let ids: Vec<&str> = rs.categories.iter().map(|c| c.id.as_str()).collect();
+        assert_eq!(
+            ids,
+            vec![
+                "ok.green-direct",
+                "ok.green-recycle",
+                "ok.yellow-quarantine",
+                "ok.red-quarantine"
+            ],
+            "risk/disposition 不匹配的类目必须丢弃，合法的三类去向保留"
+        );
+    }
+
+    #[test]
+    fn invalid_glob_numeric_or_recursive_attrs_drop_category() {
+        // R31-2：非法数值/布尔属性不得被 unwrap_or(0)/!= "false" 静默兜底。
+        let cases = [
+            r#"<include pattern="*" maxAgeDays="abc"/>"#,
+            r#"<include pattern="*" maxAgeDays="-1"/>"#,
+            r#"<include pattern="*" minSizeMB="1.5"/>"#,
+            r#"<include pattern="*" recursive="yes"/>"#,
+            r#"<include pattern="*" recursive="0"/>"#,
+            r#"<include pattern="*" recursive=""/>"#,
+        ];
+        for inc in cases {
+            let frag = format!(
+                r#"<category id="bad" label="l" risk="green" disposition="direct"><target type="path" value="C:\tmp"/>{inc}</category>
+  <category id="good" label="ok" risk="green" disposition="direct"><target type="path" value="C:\tmp"/><include pattern="*"/></category>"#
+            );
+            let cats = parse_one_category(&frag);
+            assert_eq!(cats.len(), 1, "非法 glob 属性应只丢 bad：{inc}");
+            assert_eq!(cats[0].id, "good");
+        }
+    }
+
+    #[test]
+    fn valid_glob_attrs_still_parse_after_strictening() {
+        // 合法配置行为不变：严格化只拒非法字面量，不改变合法值与缺省语义。
+        let g = parse_one_include(
+            r#"<include pattern="*" recursive="true" maxAgeDays="7" minSizeMB="12"/>"#,
+        );
+        assert!(g.recursive);
+        assert_eq!(g.max_age_days, 7);
+        assert_eq!(g.min_size_mb, 12);
+
+        let g = parse_one_include(r#"<include pattern="*.lnk" recursive="false"/>"#);
+        assert!(!g.recursive);
+        assert_eq!(g.max_age_days, 0, "缺省 maxAgeDays = 不限");
+        assert_eq!(g.min_size_mb, 0, "缺省 minSizeMB = 不限");
     }
 
     #[test]

@@ -163,12 +163,14 @@ pub struct Category {
 }
 
 impl Category {
-    /// green 只允许 direct/recycle；否则非法。
+    /// 去向与分级必须匹配（SPEC §4.1，R31-2 fail-closed）：
+    /// green 只允许 direct/recycle；yellow/red 只允许 quarantine。
+    /// 不匹配的类目在加载期整类丢弃（宁缺勿错）。
     pub fn is_valid_config(&self) -> bool {
-        matches!(
-            (self.risk, self.disposition),
-            (Risk::Green, Disposition::Direct) | (Risk::Green, Disposition::Recycle)
-        ) || self.risk != Risk::Green
+        match self.risk {
+            Risk::Green => matches!(self.disposition, Disposition::Direct | Disposition::Recycle),
+            Risk::Yellow | Risk::Red => self.disposition == Disposition::Quarantine,
+        }
     }
 }
 
