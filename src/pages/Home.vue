@@ -38,6 +38,8 @@ onMounted(async () => {
 const tiles: Array<{
   to: string;
   auto?: boolean;
+  /** R31-6：一键清理入口标记——跳 /scan 时带 intent=clean，自动快速扫描。 */
+  intent?: "clean";
   title: string;
   desc: string;
   icon:
@@ -51,9 +53,8 @@ const tiles: Array<{
     | "log";
   c: string;
   bg: string;
-  deep?: boolean;
 }> = [
-  { to: "/scan", auto: true, title: "一键体检", desc: "临时 · 缓存 · 隐私 · 启动项", icon: "scan", c: "#2563eb", bg: "#eaf1ff" },
+  { to: "/scan", auto: true, intent: "clean", title: "一键清理", desc: "临时文件与缓存，安全项直接清", icon: "scan", c: "#2563eb", bg: "#eaf1ff" },
   { to: "/report", title: "扫描报告", desc: "查看分级结果并清理", icon: "report", c: "#4f46e5", bg: "#ecebff" },
   { to: "/files", title: "大文件", desc: "定位占用空间的大文件", icon: "files", c: "#0891b2", bg: "#e0f4fa" },
   { to: "/startup", title: "启动项", desc: "管理开机自启程序", icon: "startup", c: "#16a34a", bg: "#e4f7ec" },
@@ -85,21 +86,21 @@ const promises = [
       <router-link to="/quarantine" class="recovery-link">查看隔离区 →</router-link>
     </section>
 
-    <!-- 体检主卡 -->
+    <!-- 清理主卡（R31-6：默认入口改为"一键清理"两击流程） -->
     <section class="hero-card anim-rise d1">
       <div class="hero-left">
-        <!-- 状态圆环：未扫描=中性待检态（不伪造健康分数） -->
-        <div class="ring" aria-label="待体检">
+        <!-- 状态圆环：未扫描=中性待清态（不伪造健康分数） -->
+        <div class="ring" aria-label="待清理">
           <div class="ring-inner">
-            <span class="ring-title">待体检</span>
+            <span class="ring-title">待清理</span>
             <span class="ring-sub">未扫描</span>
           </div>
         </div>
         <div class="hero-text">
-          <h2>一键体检</h2>
+          <h2>一键清理</h2>
           <p class="hero-desc">
-            扫描临时文件、缓存、隐私痕迹与启动项，<strong>只读分析、不删任何文件</strong>；
-            结果按绿/黄/红分级，等你逐项确认后再清理。
+            只清理可安全重建的<strong>临时文件与缓存</strong>，不会动你的文档/照片；
+            有风险的项目会让你确认。
           </p>
           <ul class="promise-row">
             <li v-for="p in promises" :key="p.t">
@@ -110,9 +111,13 @@ const promises = [
         </div>
       </div>
       <div class="hero-actions">
-        <router-link :to="{ path: '/scan', query: { auto: '1' } }" class="btn-main" @click="goScan(false)">
+        <router-link
+          :to="{ path: '/scan', query: { auto: '1', intent: 'clean' } }"
+          class="btn-main"
+          @click="goScan(false)"
+        >
           <AppIcon name="scan" :size="19" />
-          开始体检
+          一键清理
         </router-link>
         <router-link :to="{ path: '/scan', query: { auto: '1' } }" class="btn-ghost" @click="goScan(true)">深度体检</router-link>
         <span class="deep-hint">深度含大文件/重复文件，大容量盘较慢</span>
@@ -139,10 +144,12 @@ const promises = [
         <router-link
           v-for="(t, i) in tiles"
           :key="t.to"
-          :to="{ path: t.to, query: t.auto ? { auto: '1' } : {} }"
+          :to="{
+            path: t.to,
+            query: t.intent === 'clean' ? { auto: '1', intent: 'clean' } : t.auto ? { auto: '1' } : {},
+          }"
           class="tile tile-in"
           :style="{ animationDelay: Math.min(i, 6) * 40 + 120 + 'ms' }"
-          @click="t.deep && goScan(true)"
         >
           <span class="tile-icon" :style="{ background: t.bg, color: t.c }">
             <AppIcon :name="t.icon" :size="22" />

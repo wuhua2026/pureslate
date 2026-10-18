@@ -13,9 +13,21 @@ const route = useRoute();
 const elevated = ref<boolean | null>(null);
 const isDeep = computed(() => store.deepScan);
 
+// R31-6：一键清理入口（/scan?auto=1&intent=clean）——强制快速维度、进页自动开扫，
+// 正常完成（未取消）后自动进入简化结果页 /report?intent=clean；取消则停留不跳。
+const cleanIntent = computed(() => route.query.intent === "clean");
+const pageTitle = computed(() => {
+  if (cleanIntent.value) return "一键清理";
+  return isDeep.value ? "深度体检" : "一键体检";
+});
+const reportTarget = computed(() =>
+  cleanIntent.value ? { path: "/report", query: { intent: "clean" } } : { path: "/report" },
+);
+
 // v0.1.6：进入体检页默认"待命"，需用户点开始；仅首页主按钮带 ?auto=1 才自动扫
 //（侧栏"一键体检"是导航语义，不应一进页就开始扫描）。
-const idle = ref(true);
+// R31-6：clean 模式同步置 false，避免等待 app_meta/disk_usage 期间闪出"准备就绪"待命卡。
+const idle = ref(route.query.intent !== "clean");
 
 /** 由待命卡片/首页 auto 入口调用：选定档位并开始。 */
 async function begin(deep: boolean): Promise<void> {
@@ -27,6 +39,21 @@ async function begin(deep: boolean): Promise<void> {
 // v0.1.5 反馈 3：完成态显式出口——自动跳转 3s 未离开/被取消时显示大按钮。
 const doneExit = ref(false);
 let doneTimer: number | undefined;
+
+// R31-6：一键清理模式的完成态文案（不出现"体检"措辞，延续用户视角的"清理"）。
+const doneTitle = computed(() => {
+  if (store.cancelled) return cleanIntent.value ? "清理扫描已取消" : "体检已取消";
+  return cleanIntent.value ? "安全项扫描完成" : "体检完成";
+});
+const doneSub = computed(() =>
+  store.cancelled
+    ? "已收集的部分结果可查看（不写入任何文件）"
+    : `正在进入${cleanIntent.value ? "清理结果" : "报告"}…`,
+);
+const doneButton = computed(() => {
+  if (store.cancelled) return "查看已收集结果";
+  return cleanIntent.value ? "查看清理结果" : "体检完成 → 查看报告";
+});
 
 // v0.1.5 反馈 2：多卷进度提示——固定盘总数（disk_usage）+ currentPath 盘符推进序号。
 const totalVolumes = ref(0);
@@ -58,6 +85,13 @@ onMounted(async () => {
     totalVolumes.value = disks.length;
   } catch {
     totalVolumes.value = 0;
+  }
+  // R31-6：一键清理模式——默认快速维度并自动开扫（大文件/dup 不参与一键清理）。
+  if (cleanIntent.value) {
+    store.setDeepScan(false);
+    idle.value = false;
+    void store.start();
+    return;
   }
   // 仅首页"开始体检/深度体检"主按钮（?auto=1）自动开扫；侧栏进入停留待命态。
   if (route.query.auto === "1") {
@@ -101,7 +135,7 @@ watch(
   () => store.isDone,
   (done) => {
     if (!done) return;
-    if (!store.cancelled) router.push("/report");
+    if (!store.cancelled) void router.push(reportTarget.value);
     const delay = store.cancelled ? 0 : 3000;
     doneTimer = window.setTimeout(() => {
       doneExit.value = true;
@@ -114,8 +148,13 @@ watch(
   <main class="scan">
     <header class="scan-head">
       <router-link to="/" class="back">← 首页</router-link>
-      <h1>{{ isDeep ? "深度体检" : "一键体检" }}</h1>
-      <p class="sub">只读扫描 · 不删除任何文件 · 全程可在确认后逐项处置</p>
+      <h1>{{ pageTitle }}</h1>
+      <p class="sub">
+        <template v-if="cleanIntent">
+          只清理可安全重建的临时文件与缓存，不会动你的文档/照片；有风险的项目会让你确认。
+        </template>
+        <template v-else>只读扫描 · 不删除任何文件 · 全程可在确认后逐项处置</template>
+      </p>
     </header>
 
     <div v-if="store.error" class="error">扫描失败：{{ store.error }}</div>
@@ -161,19 +200,16 @@ watch(
 
     <!-- v0.1.5 反馈 3：取消后的部分结果入口 / 完成态兜底出口 -->
     <section v-else-if="store.isDone && doneExit" class="card done-card anim-rise d1">
-      <p class="done-text">{{ store.cancelled ? "体检已取消" : "体检完成" }}</p>
-      <p class="done-sub">
-        {{ store.cancelled ? "已收集的部分结果可查看（不写入任何文件）" : "正在进入报告…" }}
-      </p>
+      <p class="done-text">{{ doneTitle }}</p>
+      <p class="done-sub">{{ doneSub }}</p>
       <div class="done-btns">
-        <button class="btn-done" @click="router.push('/report')">
-          {{ store.cancelled ? "查看已收集结果" : "体检完成 → 查看报告" }}
-        </button>
+        <button class="btn-done" @click="router.push(reportTarget)">{{ doneButton }}</button>
         <button class="btn-done-ghost" @click="begin(store.deepScan)">再扫一次</button>
       </div>
     </section>
 
     <section class="card scan-card anim-rise d1" v-else>
+      <p v-if="cleanIntent" class="clean-hint">正在扫描可安全清理的项目…</p>
       <!-- v0.1.5 反馈 2：旋转扫描动效 + 阶段图标（R29：阶段切换 pop）-->
       <div class="scan-visual">
         <div class="radar" :class="{ paused: !store.running }">
@@ -231,9 +267,15 @@ watch(
       <!-- 取消 -->
       <div class="actions">
         <button class="btn-cancel" :disabled="!store.running" @click="store.cancel()">
-          取消体检
+          {{ cleanIntent ? "取消扫描" : "取消体检" }}
         </button>
-        <p class="tip">可随时取消，已扫描部分不写入任何文件。完成自动进入报告。</p>
+        <p class="tip">
+          {{
+            cleanIntent
+              ? "可随时取消，已扫描部分不写入任何文件。完成自动进入清理结果。"
+              : "可随时取消，已扫描部分不写入任何文件。完成自动进入报告。"
+          }}
+        </p>
       </div>
     </section>
   </main>
@@ -363,6 +405,13 @@ watch(
   margin: 12px 0 0;
   font-size: 0.78rem;
   color: var(--grade-yellow);
+}
+/* R31-6：一键清理模式的进行中提示（标题已说明只清安全项，这里只报进行态） */
+.clean-hint {
+  margin: 0;
+  font-size: 0.9rem;
+  font-weight: 600;
+  color: var(--accent);
 }
 .done-btns {
   margin-top: 10px;
