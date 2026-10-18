@@ -4,6 +4,20 @@
 
 ## [Unreleased]
 
+### R31 审计收口与一键清理（2026-10-18/19）
+
+> 触发：2026-10-18 独立代码审计（见 `docs/dev/AUDIT-2026-10-18.md`）。无破坏性契约变更；
+> 规则 schema 语义收紧属**行为变更**（规则包必须遵守），Rust/TS 两端类型无删除。
+
+- **破坏面收紧（R31-1，[DESTRUCTIVE]）**：隔离区 purge/auto_purge 删除前校验 ①路径段级位于隔离区根内（拒 `..`/ADS/尾随点空格）②路径链无 junction/symlink ③sha256 与 manifest 一致；失败不删、不迁状态、写 fail 审计；restore 侧根内判定同步加固。评审文档 `docs/review/R31-1.md`。
+- **规则 schema fail-closed（R31-2，行为变更）**：`disposition` 缺失/非法 → 整类丢目（原静默降级 direct）；green 只准 direct/recycle、yellow/red 只准 quarantine；`maxAgeDays`/`minSizeMB` 非合法整数、`recursive` 非 true/false → 整类丢目（原 `unwrap_or(0)`/`!= "false"` 兜底）。
+- **白名单例外（R31-4，SAFETY §2.1 实现）**：`%SystemRoot%\Temp` 仅对 🟢 direct/recycle 放行（扫描 `is_excluded_from_scan` 与执行 `preflight` 同口径；`is_hard_protected` 不豁免，还原目标仍拦）；`expand_env` 支持 `%VAR%\子目录`。
+- **分级/去向调整（R31-4）**：`cache.browser` yellow/quarantine → green/direct（进程守卫保留）；`temp.thumb`/`temp.system` recycle → direct；微信缓存保持 🟡 隔离。
+- **解码修复（R31-3）**：展示字段三候选并列优先级改为显式 **UTF-16 > GBK(936) > CP_ACP**（抽出可注入代码页核心函数）；修复非中文 Windows 老 ANSI 中文名乱码与 main CI 红。
+- **前端（R31-5/6，无 IPC 契约变更）**：首页「一键清理」两击闭环（快速扫描 → 简化结果页 →「立即清理」只提交 🟢 安全项）；🟡/🔴 不进一键流程；方案 A/B 改名「推荐清理/深度清理」；`ReportOverview` 前端模型加性 `confirmItems/confirmBytes` 与 `safeCleanItems()`；「可立即释放」只计 green+direct。
+- **文档按实修正（R31-7）**：新增审计记录；README 撤"7–30 可配/运行中进程文件永不进候选/证据可复现"等不实宣称；SECURITY 删除不可兑现的 community-review 发布承诺；SAFETY §2.5 标注未实现；SPEC §5 补齐 5 命令/3 事件/2 个 StartupSource 及残留/卸载类型。
+- **历史说明**：`v0.1.5` 从未单独发版（代码批次并入 v0.1.6），下方历史节保留原文并已标注。
+
 ### Phase 0（M0 契约冻结）
 
 - 建立仓库骨架：AGENTS.md 落库至根，SPEC/TASKS/SAFETY 落库至 `docs/dev/`；
@@ -92,7 +106,7 @@
 - **M1** journal intent 写失败 → 该目标 fail-closed 跳过（原吞错后照常删除，违反红线 #2）；result 写失败显式告警（恢复协议兜底）。**M2** manifest 状态迁移/行清理改同盘 temp+rename 原子替换（崩溃窗口不再丢全部行）。**M3** rules_url 域白名单（三通道域+REPO_SLUG 绑定，域外拒绝+审计）。**M5** OneDrive 占位文件（RECALL_ON_DATA_ACCESS/OFFLINE）walk/mft/dup 三处跳过（SAFETY §2.7 落地）。**M6** whitelist 两处 expect → into_inner（红线 #6 清零）。
 - **验证**：cargo fmt/clippy -D warnings/test 全绿（176 passed，+5 测试）；pnpm typecheck/vitest(54)/build 全绿。评审文档 docs/review/P4-08.md（破坏面：H1 为"扩大扫描面、收窄删除面"变更，direct 候选在 §2.4 仍整树拦）。挂账：M4/M7/低危 L 系列下批。
 
-### v0.1.5 真机反馈批量修复（多盘扫描/报告错误处理/动效/启动项扩展）
+### v0.1.5 真机反馈批量修复（多盘扫描/报告错误处理/动效/启动项扩展）——**未单独发版，代码批次并入 v0.1.6**
 
 - **契约修正（镜像不一致）**：`StartupSource` Rust 端 serde 由 camelCase（"hkcuRun"）改 **snake_case**（"hkcu_run"）——与 ipc.ts/mock 既定事实源对齐（原不一致导致真实模式来源列显示空白，从未被走查发现）。
 - **契约加性**：①`StartupSource` 增 `startup_folder_all_users` / `active_setup` 两源；②`StartupEntry.systemDisabled?: boolean`（StartupApproved 系统禁用态，只读展示）；③`ScanResult.volume` 语义扩展为"覆盖卷串"（全部固定盘如 "C:+D:"，单盘机器与旧行为一致；消费面已核：仅前端展示/断言非空，后端不解析）。

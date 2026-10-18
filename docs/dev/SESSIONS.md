@@ -5,6 +5,21 @@
 > 维护（AGENTS.md §9）：任务完成时 agent 自动追加/更新当前会话条目，随任务同一提交。格式：`## YYYY-MM-DD | 主题`。
 > 本初版由历史会话记忆回溯整理（截至 2026-09-29），细节以 git 历史与 TASKS.md 为准。
 
+## 2026-10-18 | 独立审计收口 + 一键清理 UX（R31：安全信任链/规则 fail-closed/CI 红/默认入口）
+
+- **背景**：作者在另一会话让 AI 对公开仓库 v0.2.1 做独立代码审计（3 路并行静态分析 + Lead 复核，24 条问题），随后回到本仓库会话裁决：①清掉分析下载物料；②把审计结论写进项目文档；③默认入口改成普通用户习惯的「一键清理」；④先修安全底座再动 UX。
+- **实测证据（本机复核）**：`C:\.pureslate-quarantine` ACL 含 `Authenticated Users:(I)(M)`（继承卷根默认 ACL），Medium IL 实测可创建/删除文件 → 结合发布版恒提权 + purge 盲信 manifest，确认 confused deputy 路径真实存在（非纯理论）；main CI HEAD 77ac017 run 38686334077 仍红（2 个 GBK 解码用例，非 flake）。
+- **R31 修复链（逐任务提交）**：
+  - R31-1 `ba4ab0f` [DESTRUCTIVE]：purge/auto_purge 前做 根内（段级，拒 `..`/ADS/尾随点/8.3）+ 非 reparse + sha256 三重校验；失败不删/不迁状态/写 fail 审计；restore 侧根内判定同步加固。见 `docs/review/R31-1.md`。
+  - R31-2 `cee6c82`：规则解析 fail-closed——`disposition` 缺失/非法整类丢目、green 只准 direct/recycle、黄红只准 quarantine、`maxAgeDays/minSizeMB/recursive` 非法即丢类目；顺带清同文件生产 `expect`。
+  - R31-3 `9af4a89`：解码并列裁决改显式优先级 **UTF-16 > GBK(936) > CP_ACP**，抽出可注入代码页核心函数 + acp=1252 单测（本机 ACP=936 无法复现 CI 场景）；修非中文 Windows 老 ANSI 中文名乱码与 main CI 红。
+  - R31-4 `d7855e4`：实现 SAFETY §2.1 唯一例外 `%SystemRoot%\Temp`（仅 🟢 direct/recycle，`is_hard_protected` 不豁免）；`expand_env` 支持 `%VAR%\子目录`（temp.system 不再硬编码 C: 盘）；`temp.thumb`/`temp.system` → direct、`cache.browser` → green/direct（微信缓存保持 🟡）。见 `docs/review/R31-4.md`。
+  - R31-5/6：`reportModel.immediateBytes` 只计 green+direct（回收站不立即释放）；首页「一键清理」→ 快速扫描 → 简化结果页（可释放 X / N 项安全项 / 另有 Z 项需确认）→「立即清理」两击闭环；🟡/🔴 仍逐项确认；方案 A/B 改名「推荐清理/深度清理」；深度体检与完整报告保留。
+  - R31-7：新增 `docs/dev/AUDIT-2026-10-18.md`（24 条问题 → 已修/文档修正/已知未修/接受边界 + R32 计划）；README/SECURITY/SAFETY/SPEC/CHANGELOG 按实修正（撤"7–30 可配"、"运行中进程文件永不进候选"、证据可复现性等不实宣称）。
+- **关键结论**：①清理工具的信任链里"用户可写状态文件 → 提权进程执行"必须按不可信输入处理，且卷根子目录默认 ACL 天然可写；②"一键清理"只清 🟢 可重建项、保持结果页一次确认（两击），在规则包签名落地前不做免确认自动清理；③文档宣称必须与实现同批维护，"一次性人工证据"要标注不可复现。
+- **门禁**：cargo fmt --check / clippy -D warnings / cargo test 全绿（lib 276 + 集成 27）；pnpm typecheck / vitest / build 全绿；零新 crate/npm。
+- **下一步**：推送后确认 main CI 转绿（R31-3 修复需远端验证）；R32 待办见 TASKS.md「R32 待办」与 AUDIT §3（single-flight/去重、MFT 会话复用、autoPurge/retention 接线、更新通道签名、restore 审计等）；一键清理与 Grading 真机走查。
+
 ## 2026-10-15 | v0.2.1 发布（R30 真机反馈热修：大文件审阅化/乱码/图标/横滚；Release 全绿）
 
 - **发布**：R30 五任务经人类真机走查放行后发 v0.2.1。release commit 3dd5998（三处 bump + release notes）→ annotated tag v0.2.1 → push main/tag；Release run（双 NSIS 重建+体积门禁+manifest+上传+回推）**全绿**；四资产：`PureSlate_0.2.1_x64-setup.exe` **2,948,879B≈2.81MiB**（sha256 b0230478…44a5e0）、portable.zip 3,979,847B、rules-0.2.1.json、build-hashes.json；Release API 实证 published/draft=false。manifest bot 回推 54cc060（appSha256 与资产一致）；README 同步链接与大文件审阅型语义。

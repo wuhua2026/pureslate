@@ -93,16 +93,16 @@ pureslate/
 ```
 
 字段语义：
-- `risk`：green|yellow|red；`disposition`：direct|recycle|quarantine（green 只准 direct/recycle）；
+- `risk`：green|yellow|red；`disposition`：direct|recycle|quarantine。**约束（R31-2 起 fail-closed）**：green 只准 direct/recycle，yellow/red 只准 quarantine；`disposition` 缺失或非上述字面量 → 整个 category 丢弃（绝不静默降级为 direct）；
 - `target type`：
   - `env`（环境变量）｜`path`（绝对路径）｜`knownFolder`（Known Folder API）；
   - `reg-value`（R28，注册表字符串值动态路径）：属性 `hive`（HKLM｜HKCU）、`key`（子键路径，反斜杠分隔）、`value`（值名）、`view`（native=64 位视图，默认；wow64=32 位视图）、`base`（path=值本身即目标目录，默认；parent=注册表值是文件路径时取其父目录）。仅接受 REG_SZ / REG_EXPAND_SZ（后者先经 ExpandEnvironmentStrings 展开）；以 KEY_READ=0x20019（不含写位）只读打开，错误类型传播、生产路径无 unwrap（AGENTS 红线 6）。**机器相关软失败**：键/值不存在、类型不符、值为空、展开结果为空或不存在 → 跳过该 target（不丢弃 category，语义等同"本机未安装或不在默认位置"）并记日志；XML 属性非法（未知 hive/view/base、缺必填属性）→ 加载期丢弃整个 category。
   - **reg-value 安全约束**：注册表值是外部数据，解析出的路径与其它 target 一样必经白名单（SAFETY §2）与分级去向，无任何豁免；另加一道 loader 闸——含 reg-value target 的 category，其每条 include 必须**含路径分隔符**（具体子目录）或为**纯扩展名形态**（`*.ext`），禁止裸根全收模式（`*`｜`**`｜`*.*`｜`**/*`），违反 → category 丢弃。该闸只防"异常注册表值指向卷根→整盘入候选"的失控面，不替代白名单。
-- `include/exclude`：glob（`*` `**`）；`maxAgeDays`=0 表示不限；可选 `minSizeMB`；
+- `include/exclude`：glob（`*` `**`）；`maxAgeDays`=0 表示不限；可选 `minSizeMB`；**严格解析（R31-2）**：`maxAgeDays`/`minSizeMB` 非合法无符号整数、或 `recursive` 非字面量 `true`/`false` → 整个 category 丢弃（不做 `unwrap_or(0)` 兜底）；
   - `segment-regex` + `segment-index`（R28）：glob 命中之后的**单路径段收紧条件**。相对 target 根把路径按分隔符切段（index 0 起，含文件名所在段），第 index 段必须存在且整段匹配该正则（引擎自动首尾锚定，规则里不用写 `^$`）；段不存在或不匹配 → 该 include 不命中（**fail-closed**）。语法为 regex-lite 支持的语法（字符类、量词、`\d` 等，无反向引用）；正则编译失败 → **加载期丢弃该条 include/exclude 并记日志**（收紧约束失效时绝不退化为无约束的裸 glob）。典型用途：把多账号软件的账号目录从 `*` 收紧为形态确定的 ID 目录；具体形态必须基于本机实测，规则全部自研（AGENTS 红线 5）。
   - `max-depth`（R28）：相对 target 根允许命中的最大路径段数（根直属文件 = 1）。category 遍历深度取全部 include 的最大值（walkdir `max_depth`），命中时每条 include 再按各自值裁尾；缺省 = 不限。`recursive="false"` 明确等价于 `max-depth="1"`（此前仅靠 glob 形状隐式约束）；二者同时声明且矛盾（recursive=false 且 max-depth>1）→ category 丢弃。
 - `guard process`：清理前进程守卫（SAFETY §5.1）；
-- 解析失败/字段非法 → 该 category 整体丢弃并记日志（**宁缺勿错**）；
+- 解析失败/字段非法/risk-disposition 不匹配 → 该 category 整体丢弃并记日志（**宁缺勿错**）；
 - 多 ruleset 同 id category 时后加载覆盖先加载（规则包更新语义）。
 
 ### 4.2 扫描结果（contract.rs ↔ ipc.ts 共享）
@@ -148,6 +148,7 @@ export interface ScanResult {
 ```
 
 `state ∈ quarantined | restored | purged`；restored 行保留 30 天后由 lifecycle 清理。
+**信任锚（R31-1）**：manifest 位于用户可写位置，`quarantinePath` 不得盲信——purge/auto_purge 删除前必须校验 ①路径段级位于本隔离区根内（拒 `..`/ADS/尾随点空格）②路径链无 junction/symlink ③sha256 与记录一致；失败跳过并写 fail 审计（详见 SAFETY §4.4）。
 
 ### 4.4 审计日志（%LOCALAPPDATA%\PureSlate\logs\audit.jsonl，R09/M8）
 
@@ -156,13 +157,14 @@ export interface ScanResult {
 ```
 
 要求：破坏性操作覆盖率 100%（M8）；只追加；按天滚动（audit-2026-08-24.jsonl）；可导出。
+**现状说明（2026-10-18 审计）**：op 集含 `restore`，但 `quarantine/restore.rs` 目前**未写审计**（R32-3 待补）；空目录收尾的 `RemoveDirectoryW` 亦无 journal/审计（R32-3）。
 
 ### 4.5 设置（settings.json）
 
 ```ts
 export interface AppSettings {
-  quarantineRetentionDays: number;   // 默认 14，范围 7–30
-  quarantineAutoPurge: boolean;      // 默认 true
+  quarantineRetentionDays: number;   // 默认 14；范围 7–30 尚未在 UI/clamp 落地（R32-3）
+  quarantineAutoPurge: boolean;      // 默认 true；当前行为恒自动清除（设置未接线，R32-3）
   updateOptIn: boolean;              // 默认 false（R22）
   crashUploadOptIn: boolean;         // 默认 false（R24）
   expertMode: boolean;               // 默认 false（解锁 🔴）
@@ -189,6 +191,11 @@ export interface AppSettings {
 | `uninstall_list` | — → `InstalledApp[]` | R27 只读枚举（§6.7；R30 展示字段防御解码，乱码见 §6.7） |
 | `shell_reveal` | `path: string` → `null` | R30 只读：资源管理器定位并选中（大文件审阅页；绝对/现存/非卷根，否则 Err） |
 | `uninstall_app_icons` | `appIds: string[]` → `Record<string,string>` | R30 只读批量（≤200）：程序图标 PNG data URL map；缺失/失败 id 不在 map |
+| `uninstall_run` | `appId: string` → `txId: string` | R27 拉起**官方卸载器**（不接管删除、不强行杀进程）；进度/结论走事件 |
+| `uninstall_cancel` | `txId: string` → `boolean` | 取消等待（不杀卸载器进程） |
+| `uninstall_residue_scan` | — → `ResidueCandidate[]` | R27-3 卸载完成后**后端上下文内**的残留只读枚举（不做无上下文全局孤儿扫描） |
+| `uninstall_residue_clean` | `{selections: ResidueSelectionParams[], confirmToken?: string}` → `txId: string` | 含 `direct` 选择须专家模式 + 一次性令牌；默认 quarantine |
+| `disk_usage` | — → `DiskUsageInfo[]` | v0.1.2 加性：固定磁盘容量（首页磁盘条真实数据） |
 | `startup_toggle` | `id, enabled` → `boolean` | 禁用=备份后移除启动项，不删源程序 |
 | `log_query` | `{from, to, op?}` → `LogEntry[]` | |
 | `log_export` | `path` → `boolean` | 导出指定范围 |
@@ -208,6 +215,9 @@ export interface AppSettings {
 | `scan_progress` | `{scanId, phase: 'walking'|'hashing'|'aggregating', percent, currentPath, foundBytes:{green,yellow,red}, elapsedMs}` | 屏 5 数据源，节流 200ms |
 | `scan_done` | `ScanResult` | |
 | `clean_progress` | `{txId, itemPath, disposition, doneBytes, totalBytes, state: 'ok'|'fail'|'skip'}` | 屏 6 数据源，逐项 |
+| `clean_done` | `CleanReport` | 事务完成汇总（含已释放/已隔离/失败明细） |
+| `uninstall_progress` | `{txId, message: string}` | R27 卸载阶段文案（单向推送） |
+| `uninstall_done` | `UninstallDoneEvent` | R27 卸载最终结论（result/exitCode/keyStillPresent/rebootPending…） |
 | `quarantine_expiry_warning` | `{ids: string[], daysLeft: 3}` | 到期前 3 天 |
 | `update_available` | `UpdateStatus` | opt-in 周查触发 |
 
@@ -221,9 +231,22 @@ export interface QuarantineEntry {
 }
 export interface StartupEntry {
   id: string; name: string; publisher?: string; command: string;
-  source: 'hkcu_run' | 'hklm_run' | 'startup_folder' | 'task_scheduler';
+  source: 'hkcu_run' | 'hklm_run' | 'startup_folder' | 'startup_folder_all_users' | 'task_scheduler' | 'active_setup';
   impact: 'high' | 'medium' | 'low'; enabled: boolean;
 }
+export interface ResidueCandidate {
+  id: string; kind: 'install_dir' | 'start_menu' | 'app_data'; appName: string;
+  rootPath: string; reason: string; sizeBytes: number; fileCount: number; items: ScanItem[];
+}
+export interface ResidueSelectionParams { candidateId: string; disposition: 'quarantine' | 'direct'; }
+export type UninstallResult = 'removed' | 'reboot_pending' | 'still_present' | 'cancelled' | 'timeout' | 'launch_failed';
+export interface UninstallProgressEvent { txId: string; message: string; }
+export interface UninstallDoneEvent {
+  txId: string; appId: string; name: string; result: UninstallResult;
+  exitCode?: number; keyStillPresent: boolean; installLocationStillPresent?: boolean;
+  rebootPending: boolean; detail: string; installLocation?: string;
+}
+export interface DiskUsageInfo { /* v0.1.2：卷符/总量/可用/文件系统，见 contract.rs:430 */ }
 export interface InstalledApp {
   id: string; name: string; publisher?: string; version?: string;
   installDate?: string; installLocation?: string; uninstallCommand: string;
@@ -280,6 +303,8 @@ journal 协议见 SAFETY §3。🟢 direct：`RemoveFile`（Windows API，绕过
 
 页面（vue-router）：`/`（Home 屏1）`/scan`（屏5）`/report`（屏2/7）`/files`（大文件）`/startup` `/privacy` `/apps`（R27 软件卸载）`/quarantine`（屏8）`/log`（屏4）`/settings`。
 
+**默认主流程（R31-6，两击）**：首页「一键清理」→ `/scan?auto=1&intent=clean`（快速维度自动扫描）→ 扫描完成自动进 `/report?intent=clean`（简化结果卡：可释放 X / N 项安全项 / 另有 🟡🔴 Z 项需确认）→「立即清理 N 项」只提交 🟢 安全项（不弹 token，🟡/🔴 永不进入）→ `/executing`。简化卡可「查看明细并自定义」展开完整报告（总览/类目/方案 A=推荐清理、B=深度清理）；深度体检与完整报告仍从首页/侧栏进入，行为不变。
+
 设计 token（CSS variables，WCAG AA）：
 
 ```css
@@ -313,7 +338,7 @@ journal 协议见 SAFETY §3。🟢 direct：`RemoveFile`（Windows API，绕过
 | 层 | 工具 | 覆盖 |
 |----|------|------|
 | Rust 单测 | cargo test | rules 匹配/safety 判定/journal/quarantine manifest 优先 |
-| 前端 | vitest + mock 数据 | 页面渲染、分级交互、二次确认流 |
+| 前端 | vitest + mock 数据 | 纯函数模型（分组/排序/口径/文案/图标解析）；**无组件 DOM 测试**（未引入 @vue/test-utils/jsdom，页面交互靠 mock 走查 + 真机走查） |
 | 集成 | src-tauri/tests | scan→clean→restore 全链路（临时目录沙盒） |
 | 黄金文件集 | tests/golden + fixture 生成器 | M2 误删率分档度量（SAFETY §6.1） |
 | VM 回归 | tools/vm-regression.md + 微软开发版 VM 快照 | 清理后系统可启动、关键功能正常 |

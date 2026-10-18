@@ -181,6 +181,27 @@
 
 ---
 
+## 附加批次 · R31 审计收口与一键清理（2026-10-18）
+
+> 触发：2026-10-18 独立代码审计（[`AUDIT-2026-10-18.md`](AUDIT-2026-10-18.md)）。目标：先修破坏性信任链与
+> 误导性文档，再把默认入口改成普通用户习惯的「一键清理」（只清 🟢 安全项，两击闭环）。
+> 约束：零新 crate/npm；破坏性改动全部为"收紧"方向，新增唯一删除面是 SAFETY §2.1 已声明的
+> `%SystemRoot%\Temp` 🟢 例外；契约无破坏性变更。逐任务提交。
+
+| ID | 任务 | 依赖 | 产出 / DoD | 验证 |
+|----|------|------|-----------|------|
+| R31-1 | ✅ [DESTRUCTIVE] 隔离区 purge 信任链收口 | — | ✅ `store::inside_quarantine_root`（段级、拒 `..`/ADS/尾随点/短名、8.3 双形态）；`lifecycle::verify_purge_target`（根内+非 reparse+sha256）接入自动清除与手动清空；校验失败不删/不迁状态/写 fail 审计；restore 侧同步加固。评审文档 `docs/review/R31-1.md` | cargo test --lib quarantine:: 23 绿（新增 5 例：根外伪造/遍历/sha 不符/手动 purge/正常回归） |
+| R31-2 | ✅ 规则解析 fail-closed | — | ✅ `parse_disposition → Option`（缺失/非法丢类目）；`is_valid_config`：green 只准 direct/recycle、黄红只准 quarantine；`maxAgeDays`/`minSizeMB` 非法、`recursive` 非 true/false → Err；顺带清同文件生产 `expect`（红线 6） | cargo test 全绿（新增 4 例：非法/缺失 disposition、risk-disposition 不匹配、非法数值/recursive、合法配置不变） |
+| R31-3 | ✅ GBK 解码并列优先 936 | — | ✅ `reg_data_decode_display_with(raw, acp)` 可注入代码页；并列语义优先级 UTF-16 > GBK(936) > CP_ACP；修复非中文 Windows 老 ANSI 中文名乱码，同时保住合法 UTF-16 中文不被 GBK 伪解码抢走 | 新增 5 例（acp=1252 下 GBK 正解、UTF16 英文头+GBK 尾、纯 ASCII、合法 UTF-16、公开入口一致）；**推送后以 main CI run 全绿确认**（原 run 38686334077 的两条失败用例） |
+| R31-4 | ✅ `%SystemRoot%\Temp` 白名单例外 + 可重建缓存降级 | — | ✅ `is_safe_temp_exception`（仅该目录、仅 🟢 direct/recycle；`is_hard_protected` 不豁免，还原目标仍拦）；`is_excluded_from_scan`/`preflight` 两侧同口径；`expand_env` 支持 `%VAR%\子目录`；`temp.system` 改 `env %SystemRoot%\Temp` + direct；`temp.thumb` direct；`cache.browser` green/direct（微信缓存保持 🟡）。评审文档 `docs/review/R31-4.md` | whitelist 16 绿（新增绿色/隔离/System32/前缀不误放 1 例）；expand 复合 env 用例；全量 cargo test/clippy 绿 |
+| R31-5 | ✅ "立即释放"口径修正 | R31-6 | ✅ `reportModel.immediateBytes` 只计 green+direct（回收站项不立即释放空间）；新增 `confirmItems`/`confirmBytes`（🟡+🔴 供"需要你确认"提示）；新增 `safeCleanItems()`（只取 🟢 且排除 large.file）；方案名改为「推荐清理/深度清理」 | vitest **80 通过**（reportModel 10→15：recycle 不计 immediate、confirm 计数、safeCleanItems 排除审阅型等 5 例；未删旧断言） |
+| R31-6 | ✅ 一键清理 UX（两击闭环） | R31-4 | ✅ 首页主 CTA「一键清理」→ `/scan?auto=1&intent=clean`（快速维度自动开扫）→ 完成自动进简化结果页（可释放 X / N 项安全项 / 另有 Z 项需确认）→「立即清理 N 项」只提交 🟢 安全项；🟡/🔴 不进一键流程；深度体检/完整报告保留；方案 A/B 改「推荐清理 / 深度清理」；无安全项独占提示；取消扫描不跳转。`formatBytes` 修 16MB 显示 0.0GB | pnpm typecheck 0 错误 / vitest 80 / build 成功（index gzip 45.03KB 持平，Report chunk gzip 4.66KB）；mock 走查 11 项→2 项安全项 16.0MB→一键提交 id 合法→/executing→完成页可达。**真机 GUI 走查待人类** |
+| R31-7 | ✅ 审计记录与文档按实修正 | R31-1..6 | ✅ 新增 `docs/dev/AUDIT-2026-10-18.md`（24 条问题：6 已修 / 文档修正 / 15 条 R32 待办 / 设计边界 + 实证记录 + 验证结果）；README 撤不实宣称（7–30 可配、运行中进程句柄、证据可复现性）并补一键清理说明；SECURITY 指向审计记录、删除不可兑现发布承诺；SAFETY §2.5 标注未实现、§1/§2.1/§4.4 更新；SPEC §5 补齐 5 命令/3 事件/2 个 StartupSource 及残留/卸载类型、§7 补一键流程、§8 修正前端测试口径；CHANGELOG 记 R31 批次 + v0.1.5 未发版；SESSIONS/LESSONS 同步 | 文档与代码交叉核对（命令/事件/类型/分级/白名单口径逐项对照）；提交链 R31-1..7 逐任务独立 |
+
+> **R32 待办（审计遗留，详见 AUDIT §3）**：R32-1 扫描 single-flight + clean_execute 去重；R32-2 MFT 会话按卷复用 + dup 维度收紧 + mft UB/取消；R32-3 autoPurge/retention 接线与 clamp + restore 审计 + journal/manifest/audit fsync/轮转；R32-4 更新通道签名 + rulesVersion + runas 来源校验；R32-5 崩溃恢复终态行语义 + 白名单字面兜底/加载时序 + mock 契约对齐。
+
+---
+
 ## 附：裁剪预案（校准点触发，人类决策）
 
 | 触发 | 动作 | 影响 |
