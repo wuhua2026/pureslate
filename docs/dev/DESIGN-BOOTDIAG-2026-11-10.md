@@ -706,6 +706,20 @@ Get-ItemProperty 'HKLM:\SYSTEM\CurrentControlSet\Control\Session Manager\Power' 
 - [ ] 日志中不出现完整用户路径/卸载命令行（隐私）
 - [ ] CHANGELOG / SESSIONS / LESSONS 已更新
 
+### 7.5 差分测试记录（2026-11-10，非提权实跑）
+
+| 项 | 参考（oracle） | 本实现 | 结论 |
+|---|---|---|---|
+| 启动项 | `Get-CimInstance Win32_StartupCommand` = **4** | `startup_sources::collect()` = **4** | ✅ 集合一致。边界：本实现把 `%windir%` 展开为绝对路径；启动文件夹的 `command` 是完整路径，oracle 只给文件名 |
+| 自动服务 | `Win32_Service StartMode='Auto'` = **111** | SCM `QueryServiceConfig.START_TYPE` = **112** | ✅ 差集仅 `LSM`：`sc qc LSM` 明确 `AUTO_START`，WMI 对受保护服务报 `StartMode=Unknown`（oracle 盲区，见 LESSONS §①） |
+| Boot/Logon 计划任务 | `Get-ScheduledTask`（COM）= **49** | 文件读取 = **0** + `tasks_dir_empty_or_denied` | ⚠️ 非提权 ACL 边界。状态显式标注，不伪装成"0 条正常"；文件读取与 COM 是两条权限通道 |
+| 卸载条目 | 注册表 276 键 → 同口径过滤/去重 = **112** | `uninstall::list_apps` = **112** | ✅ 完全一致；`residue=0`、`unknown=64` |
+| MSI 产品 | `MsiEnumProductsExW` = **167** | 同 = **167** | ✅ 同一 API，作回归基线 |
+| 电源 | 注册表 `HiberbootEnabled=1`；`powercfg /a`：休眠未启用、S0 低电量待机 | `fast_startup=true`、`HiberFilePresent=false`、`SystemS4=true`、`AoAc=true` | ✅ 配置意图与能力分离，矛盾按设计呈现 |
+| 开机事件 | 事件查看器 / `Get-WinEvent` | 非提权 `Denied` | ⛔ 与 oracle 同受 ACL 阻挡，未取得提权样本；按评审决定不做提权入口 |
+
+口径说明：差分脚本只在开发机执行、不进入产品（§7.3）；服务以 SCM 为准、WMI 仅旁证；"未做成"的项按权限边界记录，不折算成"通过"。
+
 ---
 
 ## 8. 任务拆分与风险

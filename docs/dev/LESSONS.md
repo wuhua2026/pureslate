@@ -6,6 +6,12 @@
 
 ## ① 踩坑记录
 
+### 差分测试要先验证 oracle：WMI 把受保护服务报成 `StartMode=Unknown`，而非提权 `Get-ScheduledTask` 却能看全（2026-11-10，B1-09）
+- 现象：服务差分自家 112 条 vs `Get-CimInstance Win32_Service -Filter "StartMode='Auto'"` 111 条，差集只有 `LSM`；`sc qc LSM` 明确 `START_TYPE=2 AUTO_START`，WMI 却返回 `StartMode=Unknown`。同一台机、同一非提权账户，计划任务差分自家 0 条 vs `Get-ScheduledTask` 49 条（Boot/Logon 触发器）。
+- 根因：①WMI 的 `Win32_Service.StartMode` 对部分受保护/内核支撑服务映射失败，并不等于 SCM 的真实启动类型；②`System32\Tasks` 目录 ACL 拒非提权读取，但 Task Scheduler COM（`Get-ScheduledTask`）经服务端代理仍能枚举——"读文件"与"走 COM"是两条权限边界不同的通道。
+- 修复/口径：服务以 SCM `QueryServiceConfig.START_TYPE` 为准，WMI 只作旁证；计划任务明确记录"非提权文件读取 0 条是权限边界，不等于系统没有任务"，`failed_sources` 必须保留 `tasks_dir_empty_or_denied`。
+- 复利结论：①oracle 也会错——差集要逐条落回原始 API 复核，别把参考工具当真理；②同一数据可能有多种访问通道（文件 / COM / 服务端代理），权限边界不同，选型时要写清"为什么不用另一条"；③差分记录必须写"哪些没做成、为什么"，否则下个会话会把权限边界误判成 bug。
+
 ### 浏览器走查别只信 accessibility 快照：正文文案可能被裁剪，须用 `innerText` 复核（2026-11-10，B1-08）
 - 现象：首次用 browser agent 回读 Startup 页时，快照里找不到「只读诊断，不提供清理入口」，差点误判为文案缺失；同页四张卡片与状态徽标均正常。
 - 根因：accessibility 快照按角色/可访问名裁剪，无 role 的长段落与纯文本节点不保证出现在快照里——这是提取方式的问题，不是页面缺陷。
@@ -326,11 +332,13 @@
 - 探针工具：`src-tauri/src/bin/probe-mft.rs`（提权/完整性/MFT 打开诊断）、`probe-fsctl.rs`（卷打开方式矩阵测试）。
 - 本地裸 debug exe 8.36MB；安装包体积门禁由 CI 产物断言 <20MB（WiX 下载受限，不走本地打包验证）。
 - 本机电源（2026-11-10，B1-07 实测）：`HiberbootEnabled=1`，但 `SystemPowerCapabilities` 返回 `SystemS4=true / HiberFilePresent=false / Hiberboot=false / AoAc=true`（Modern Standby）。即**注册表开关开着、快速启动实际未生效**——UI 必须把"配置意图"与"能力"分开呈现，禁止只凭注册表说"已启用"。
+- 本机 B1 差分基准（2026-11-10，非提权）：启动项 **4**（HKCU Run 1 + HKLM Run 2 + 用户启动文件夹 1，与 `Win32_StartupCommand` 集合一致，仅 `%windir%` 展开差异）；自动服务 **112**（SCM 口径；WMI `StartMode='Auto'` 111，差 `LSM` 因 WMI 报 `Unknown`）；Boot/Logon 计划任务 **0**（文件读取被 ACL 拒；`Get-ScheduledTask` 同机 49 条，见 §①）；Uninstall 原始 276 键 → 过滤/去重后 **112**（与 `list_apps` 完全一致）；MSI 产品 **167**；卸载残留 **0**、信息不足 **64**。
 
 ## ④ 门禁/基准趋势
 
 | 日期 | 指标 | 数值 | 门禁 | 状态 |
 |---|---|---|---|---|
+| 2026-11-10 | **B1 开机诊断（只读）** | cargo **286 lib passed**（8 ignored）+ **27 集成**；vitest **96**（12 文件）；clippy `-D warnings` 0；NSIS **2.87 MiB**（3,008,226 B，较 v0.2.1 +58 KiB / +2.0%）、MSI **4.89 MiB** | <20MB | ✅ 零新依赖；提权侧（事件日志/计划任务）未验，见交付说明 |
 | 2026-10-19 | **R32-0 真机误删复盘热修**（清理面收窄 + 长路径删除 + 扫描审计） | cargo **252 lib**（2 ignored）+ **27 集成**（合计 279）；vitest **80**；clippy `-D warnings` 0 | 全绿 | ✅ +2 cargo（extended_path/长路径删除）；规则回归测试扩展（thumb 收紧、temp.user 单一 target） |
 | 2026-10-19 | **R31 审计收口批次**（破坏面收紧 + 规则 fail-closed + 一键清理 UX + restore 审计） | cargo **250 lib**（2 ignored）+ **27 集成**（合计 277）；vitest **80**（11 文件）；clippy `-D warnings` 0；前端 index gzip 45.03KB 持平 | 全绿 | ✅ +9 cargo（含 acp=1252 注入用例）/ +5 vitest。安装包体积待下次打包复测 |
 | 2026-10-15 | **v0.2.1 发布** NSIS 安装包（shell reveal + 图标提取/手写 PNG，零新依赖） | **2.81 MiB**（CI 产物 2,948,879 B；本地构建 2,946,042 B；较 v0.2.0 约 +12.3 KiB / +0.43%）；portable.zip 3.80 MiB | <20MB | ✅ Release run 全绿，四资产已发布 |
