@@ -5,6 +5,15 @@
 > 维护（AGENTS.md §9）：任务完成时 agent 自动追加/更新当前会话条目，随任务同一提交。格式：`## YYYY-MM-DD | 主题`。
 > 本初版由历史会话记忆回溯整理（截至 2026-09-29），细节以 git 历史与 TASKS.md 为准。
 
+## 2026-11-11 | v0.2.2 发布（R32-0 误删修复 + R31 安全批次 + B1 开机诊断）
+
+- **发布**：annotated tag `v0.2.2` → `ea9dbf7`；Release <https://github.com/wuhua2026/pureslate/releases/tag/v0.2.2>（标题 `PureSlate v0.2.2`）；workflow run [42783485482](https://github.com/wuhua2026/pureslate/actions/runs/42783485482) 全绿（8m20s）。正文 `.github/release-notes/v0.2.2.md`，主线写明 R32-0 数据盘 `tmp` 误删修复，并列 R31 四项安全收口、开机诊断（只读）、启动项读取失败可见。
+- **资产**：NSIS `PureSlate_0.2.2_x64-setup.exe` 3,002,258 B ≈ **2.86 MiB** sha256 `6047263d…`；portable zip 4,055,046 B sha256 `428e5a36…`；rules pack 5,761 B sha256 `c7c55e72…`；build-hashes 367 B。MSI 按决策不补传（本地实测 5,115,904 B ≈ 4.88 MiB）。
+- **manifest**：bot 回推 `f15c18a`；`appVersion`/`rulesVersion` = 0.2.2，`appSha256`/`rulesSha256` 与 Release 资产 digest 一致；本地 rebase 到 `f15c18a` 后复核一致（本地构建 NSIS sha256 `b10485bd…` 与 CI 不同，属重建时间戳差异）。
+- **验证**：cargo fmt/clippy 0 告警；**290 lib passed + 9 ignored + 27 集成**；vitest **99**；`pnpm build` 成功；体积门禁对当前 HEAD 实测 PASS。
+- **门禁时效**：性能（`bench-scan.json` 2026-09-29）、误删率（`golden-misdelete.json` 2026-10-04）、还原率（`restore-1000.json` 2026-10-04）**本轮未重跑，证据早于当前 HEAD**，不作为 v0.2.2 达标依据，也不阻塞发布。
+- **下一步**：发布闭环完成。性能/误删/还原三类门禁按 TASKS P5-01 统一补测；发布后 `github.com:443` 短暂连接重置导致一次 fetch 失败，恢复后 rebase 成功，无残留改动。
+
 ## 2026-11-10 | B1-10 修复启动项计划任务静默失败
 
 - **改动**：`startup/tasks.rs` 的 `enumerate_logon_tasks` → `collect() -> (Vec<TaskEntry>, Vec<String>)`，失败码与 `bootdiag/tasks.rs` 完全一致；walkdir 错误不再被 `filter_map(ok)` 吞掉；任务 XML 改走 `bootdiag::tasks::decode_task_xml`（UTF-16LE）——原 `read_to_string` 对 UTF-16 任务 XML 必然失败，即使提权也读不到。

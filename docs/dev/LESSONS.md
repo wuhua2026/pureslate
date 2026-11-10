@@ -345,6 +345,7 @@
 
 | 日期 | 指标 | 数值 | 门禁 | 状态 |
 |---|---|---|---|---|
+| 2026-11-10 | **v0.2.2 发布**（R32-0 误删修复 + R31 安全批次 + B1 开机诊断） | CI NSIS **3,002,258 B ≈ 2.86 MiB**（较 v0.2.1 2,948,879 B **+53,379 B / +1.81%**）；本地构建 2,991,576 B；MSI 本地 5,115,904 B ≈ 4.88 MiB；cargo **290 lib**（9 ignored）+ **27 集成**；vitest **99**；clippy 0。性能/误删/还原未在本轮重跑（证据早于当前 HEAD） | <20MB | ✅ Release run 42783485482 全绿，四资产已发布 |
 | 2026-11-10 | **B1 开机诊断（只读）** | cargo **286 lib passed**（8 ignored）+ **27 集成**；vitest **96**（12 文件）；clippy `-D warnings` 0；NSIS **2.87 MiB**（3,008,226 B，较 v0.2.1 +58 KiB / +2.0%）、MSI **4.89 MiB** | <20MB | ✅ 零新依赖；提权侧（事件日志/计划任务）未验，见交付说明 |
 | 2026-10-19 | **R32-0 真机误删复盘热修**（清理面收窄 + 长路径删除 + 扫描审计） | cargo **252 lib**（2 ignored）+ **27 集成**（合计 279）；vitest **80**；clippy `-D warnings` 0 | 全绿 | ✅ +2 cargo（extended_path/长路径删除）；规则回归测试扩展（thumb 收紧、temp.user 单一 target） |
 | 2026-10-19 | **R31 审计收口批次**（破坏面收紧 + 规则 fail-closed + 一键清理 UX + restore 审计） | cargo **250 lib**（2 ignored）+ **27 集成**（合计 277）；vitest **80**（11 文件）；clippy `-D warnings` 0；前端 index gzip 45.03KB 持平 | 全绿 | ✅ +9 cargo（含 acp=1252 注入用例）/ +5 vitest。安装包体积待下次打包复测 |

@@ -11,7 +11,7 @@
 - 体积门禁（当前 HEAD 实测）：NSIS `PureSlate_0.2.2_x64-setup.exe` **2,991,576 B ≈ 2.85 MiB**（sha256 `b10485bd8e4afb24cc53e214536cc7455afad7db5a53bd3bbe5ecd325837ad8f`）；MSI `PureSlate_0.2.2_x64_en-US.msi` **5,115,904 B ≈ 4.88 MiB**；`tools/check-size.ps1` **PASS**（<20MB）。CI 会重新构建，Release 资产哈希以 CI 产物为准。
 - **另外三类门禁的证据时效（如实标注）**：性能（`docs/verify/bench-scan.json`，2026-09-29）、误删率（`docs/verify/golden-misdelete.json`，2026-10-04）、还原率（`docs/verify/restore-1000.json`，2026-10-04）**本轮未重跑，证据早于当前 HEAD**；不作为 v0.2.2 达标依据，也不阻塞本次发布。重跑计划：发布后按 TASKS P5-01 全量门禁核验统一补测。
 - 验证：cargo fmt --check / clippy `-D warnings` 零告警；`cargo test` **290 lib passed + 9 ignored + 27 集成全绿**；`pnpm typecheck` / **99 vitest（12 文件）** / `pnpm build` 全绿；零新增 crate/npm。
-- Release run、四资产实际哈希与 manifest 回推 commit：待发布完成后回填。
+- Release：[v0.2.2](https://github.com/wuhua2026/pureslate/releases/tag/v0.2.2) 已发布；workflow run [42783485482](https://github.com/wuhua2026/pureslate/actions/runs/42783485482) 全绿（8m20s）。四资产：`PureSlate_0.2.2_x64-setup.exe` **3,002,258 B ≈ 2.86 MiB** sha256 `6047263d…`、`PureSlate-0.2.2-portable.zip` 4,055,046 B sha256 `428e5a36…`、`pureslate-rules-0.2.2.json` 5,761 B sha256 `c7c55e72…`、`build-hashes.json` 367 B sha256 `e9aeb1a5…`。manifest 由 bot 回推 main（`f15c18a`）：`appVersion`/`rulesVersion` = 0.2.2，`appSha256`/`rulesSha256` 与上述 NSIS/规则包 digest 一致。MSI 按决策不补传（本地实测 5,115,904 B ≈ 4.88 MiB）。
 
 ### 2026-11-10 · 启动项来源失败可见（v0.2.2，加性契约）
 
