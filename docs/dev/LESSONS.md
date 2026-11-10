@@ -6,6 +6,12 @@
 
 ## ① 踩坑记录
 
+### GUID 形态的 Uninstall 子键 ≠ MSI 产品：Burn bundle 会被 `is_msi` 启发式误判（2026-11-10，B1-06）
+- 现象：残留判定首版把 21 条正常安装（VC++ 2012/2013 Redistributable、ASP.NET Core 8.0 Shared Framework）判成"MSI 产品码已不在系统登记中"。
+- 根因：`uninstall::is_msi = WindowsInstaller!=0 || is_msi_guid_key(key_name)`。WiX Burn bundle 的子键也是 GUID 形态，但 `WindowsInstaller` 缺失、卸载串指向 `C:\ProgramData\Package Cache\{guid}\xxx.exe`，于是 `MsiEnumProductsExW`/`MsiGetProductInfoExW` 全部返回 1605（ERROR_UNKNOWN_PRODUCT）——它在 MSI 眼里根本不存在。
+- 修复：不在自家模块里沿用 `is_msi`；判定"是不是 MSI"改用**事实**——产品码能在 MSI 枚举里查到才算。查不到时若卸载串指向非 msiexec 的外部 EXE（bundle 特征）→ 退回普通条目双条件判定；否则才判"产品码已注销"。误报 21 → 0。
+- 复利结论：①任何 `is_*` 启发式都可能在边界样本上翻转，跨模块复用时先看它**怎么算出来的**，别当契约；②"某某 API 查不到"只证明"该 API 的命名空间里没有它"，不证明"系统里没有它"——多套注册体系（MSI / Burn / 自写安装器）并存时，消失条件必须由多源交叉印证；③本机 112 条可管理应用中 64 条信息不足（无 InstallLocation / MSI 未记录安装位置），所以"信息不足"必须是一等状态，不能折叠成"正常"或"残留"。
+
 ### 无 BOM 的 UTF-16LE 文本也是合法 UTF-8：先试 `from_utf8` 会把整份 XML 解成夹 NUL 的乱码（2026-11-10，B1-05）
 - 现象：`decode_task_xml` 对无 BOM 的 UTF-16LE 任务 XML 返回的字符串里每个字符间夹 `\0`，`parse_task_xml` 因此一个触发器都识别不到（单测 `decodes_utf8_and_bomless_utf16` 直接红）。
 - 根因：UTF-16LE 的纯 ASCII 内容（如 `<Triggers><TimeTrigger/>`）字节形如 `3C 00 54 00…`，而 **NUL 是合法 UTF-8 字节**，`std::str::from_utf8` 会成功返回——零字节启发式排在它后面永远轮不到。
