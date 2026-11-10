@@ -2,6 +2,7 @@
 import { computed, onMounted, ref } from "vue";
 import { startup_list, startup_toggle } from "../api/commands";
 import type { StartupEntry } from "../types/ipc";
+import BootDiagnosisPanel from "../components/BootDiagnosisPanel.vue";
 import {
   disableRiskText,
   impactLabel,
@@ -68,6 +69,9 @@ async function restore(item: StartupEntry): Promise<void> {
       <h1>启动项</h1>
       <p class="sub">开机自动运行的程序与任务——禁用只做备份后移除，不删除程序本身，可随时恢复</p>
     </header>
+
+    <!-- 开机诊断（只读）：放在启动项列表之上，列表仍是唯一可操作入口 -->
+    <BootDiagnosisPanel />
 
     <p v-if="!loaded" class="empty-list">加载中…</p>
     <p v-else-if="entries.length === 0" class="empty-list">未发现启动项</p>

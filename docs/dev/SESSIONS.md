@@ -8,9 +8,9 @@
 ## 2026-11-10 | B1 开机诊断（只读）实现
 
 - **背景**：设计稿 `DESIGN-BOOTDIAG-2026-11-10.md` 评审通过，按 B1-00..B1-09 依次实现。评审对三个未决项取保守解：事件日志通道不实现开启、HKLM StartupApproved 本轮不补、卸载命令不在 UI 展示。零新 crate/npm。
-- **进度**：B1-00 取证 ✅（非提权真机：通道 ACL 无 IU、`wevtutil qe` 退出码 5；`System32\Tasks` 非提权 0 文件；`schtasks /xml` 为 CP936；`HiberbootEnabled=1` 但 hiberfil.sys 不存在；Uninstall 276 条中 210 条无 InstallLocation）；B1-01 契约双端 ✅（1 命令 + 17 类型，`pnpm typecheck` 与 cargo 全绿）；B1-02 注册表源 ✅（Run/RunOnce 双视图 + 启动文件夹 + HKCU StartupApproved，262 例）；B1-03 事件日志 ✅（wevtapi FFI + XML 解析 + XPath 降级，非提权实测 `Denied` 且不带 data，269 例）；B1-04 服务 ✅（SCM 枚举 + 延迟启动，真机 112 条，273 例）；B1-05 计划任务 ✅（Tasks XML + 编码嗅探 + Boot/Logon 触发器，真机非提权 0 条 + `tasks_dir_empty_or_denied`，279 例）；B1-06 卸载残留 ✅（MSI 产品码核对 + 双条件 + UNC 守卫，真机 apps=112/residue=0/unknown=64/279ms，284 例）；B1-07 电源 ✅（powrprof 能力位 + HiberbootEnabled，真机 1/支持/false/false/true，286 例）。
+- **进度**：B1-00 取证 ✅（非提权真机：通道 ACL 无 IU、`wevtutil qe` 退出码 5；`System32\Tasks` 非提权 0 文件；`schtasks /xml` 为 CP936；`HiberbootEnabled=1` 但 hiberfil.sys 不存在；Uninstall 276 条中 210 条无 InstallLocation）；B1-01 契约双端 ✅（1 命令 + 17 类型，`pnpm typecheck` 与 cargo 全绿）；B1-02 注册表源 ✅（Run/RunOnce 双视图 + 启动文件夹 + HKCU StartupApproved，262 例）；B1-03 事件日志 ✅（wevtapi FFI + XML 解析 + XPath 降级，非提权实测 `Denied` 且不带 data，269 例）；B1-04 服务 ✅（SCM 枚举 + 延迟启动，真机 112 条，273 例）；B1-05 计划任务 ✅（Tasks XML + 编码嗅探 + Boot/Logon 触发器，真机非提权 0 条 + `tasks_dir_empty_or_denied`，279 例）；B1-06 卸载残留 ✅（MSI 产品码核对 + 双条件 + UNC 守卫，真机 apps=112/residue=0/unknown=64/279ms，284 例）；B1-07 电源 ✅（powrprof 能力位 + HiberbootEnabled，真机 1/支持/false/false/true，286 例）；B1-08 UI ✅（面板默认不执行 + 6 组件 + 纯函数模型 16 例；`uninstallCommand` 不进 UI、系统任务默认折叠；`pnpm test` 96 passed，build 成功）。
 - **已知缺陷（本轮不修）**：`startup/tasks.rs` 非提权枚举 `System32\Tasks` 为空时静默 `continue`，把"读不到"伪装成"没有"；新模块用 `failed_sources` 显式区分。
-- **下一步**：B1-08 UI → B1-09 收尾。
+- **下一步**：B1-09 收尾（差分测试记录、体积复测、交付说明记录既有缺陷）。
 
 ## 2026-10-19 | R32-0 真机误删复盘热修（E:\tmp 文件区被一键清理永久删除）
 

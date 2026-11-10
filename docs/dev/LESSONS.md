@@ -6,6 +6,12 @@
 
 ## ① 踩坑记录
 
+### 浏览器走查别只信 accessibility 快照：正文文案可能被裁剪，须用 `innerText` 复核（2026-11-10，B1-08）
+- 现象：首次用 browser agent 回读 Startup 页时，快照里找不到「只读诊断，不提供清理入口」，差点误判为文案缺失；同页四张卡片与状态徽标均正常。
+- 根因：accessibility 快照按角色/可访问名裁剪，无 role 的长段落与纯文本节点不保证出现在快照里——这是提取方式的问题，不是页面缺陷。
+- 修复/做法：对"必须存在/必须不存在"的文案，用 `browser_evaluate` 取 `document.body.innerText.includes(...)` 判定；对禁展示项（`msiexec`/`.exe`）用同样方法断言为 false。
+- 复利结论：①UI 验收断言分两类——结构看快照、文本看 `innerText`，别拿快照当 DOM 全量；②mock 数据缺某类条目时相关按钮不出现是**正确行为**，验收前先确认 mock 覆盖范围；③截图工具不可用不应阻塞走查，文本断言 + 结构断言双证即可。
+
 ### GUID 形态的 Uninstall 子键 ≠ MSI 产品：Burn bundle 会被 `is_msi` 启发式误判（2026-11-10，B1-06）
 - 现象：残留判定首版把 21 条正常安装（VC++ 2012/2013 Redistributable、ASP.NET Core 8.0 Shared Framework）判成"MSI 产品码已不在系统登记中"。
 - 根因：`uninstall::is_msi = WindowsInstaller!=0 || is_msi_guid_key(key_name)`。WiX Burn bundle 的子键也是 GUID 形态，但 `WindowsInstaller` 缺失、卸载串指向 `C:\ProgramData\Package Cache\{guid}\xxx.exe`，于是 `MsiEnumProductsExW`/`MsiGetProductInfoExW` 全部返回 1605（ERROR_UNKNOWN_PRODUCT）——它在 MSI 眼里根本不存在。
