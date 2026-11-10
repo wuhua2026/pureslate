@@ -6,6 +6,7 @@
 import type {
   AppMeta,
   AppSettings,
+  BootDiagnosisReport,
   CleanExecuteParams,
   CrashDumpInfo,
   CrashDumpPreview,
@@ -120,6 +121,140 @@ export const mockCommands = {
   },
 
   startup_list: (): Promise<StartupEntry[]> => Promise.resolve(StartupListStub),
+
+  // 开机诊断 mock：覆盖 ok / partial / denied 三种状态，供 UI 走查。
+  boot_diagnose: (): Promise<BootDiagnosisReport> =>
+    Promise.resolve({
+      collectedAt: new Date().toISOString().replace(/\.\d{3}Z$/, "Z"),
+      isElevated: false,
+      timing: {
+        status: "partial",
+        reason: "事件日志通道未启用，以下为历史记录",
+        data: {
+          channelEnabled: false,
+          truncated: false,
+          samples: [
+            {
+              bootedAt: "2026-11-08T23:12:05Z",
+              bootTimeMs: 34857,
+              mainPathBootTimeMs: 12657,
+              postBootTimeMs: 22200,
+              degradationDeltaMs: 0,
+              isDegradation: false,
+              startupAppCount: 18,
+              phases: {
+                kernelInitMs: 4210,
+                driverInitMs: 5120,
+                devicesInitMs: 1880,
+                prefetchInitMs: 940,
+                smssInitMs: 210,
+                criticalServicesInitMs: 2600,
+                userProfileMs: 3400,
+                machineProfileMs: 1200,
+                explorerInitMs: 1700,
+              },
+            },
+            {
+              bootedAt: "2026-11-09T10:02:41Z",
+              bootTimeMs: 41230,
+              mainPathBootTimeMs: 14200,
+              postBootTimeMs: 27030,
+              degradationDeltaMs: 6373,
+              isDegradation: true,
+              startupAppCount: 20,
+            },
+          ],
+          issues: [
+            {
+              eventId: 101,
+              kind: "application",
+              name: "OneDrive.exe",
+              friendlyName: "Microsoft OneDrive",
+              version: "24.1.0.0",
+              totalTimeMs: 3200,
+              degradationTimeMs: 2100,
+              at: "2026-11-09T10:02:41Z",
+            },
+            {
+              eventId: 102,
+              kind: "driver",
+              name: "\\SystemRoot\\System32\\drivers\\nvlddmkm.sys",
+              friendlyName: "NVIDIA Windows Kernel Mode Driver",
+              version: "32.0.15.6094",
+              totalTimeMs: 2600,
+              at: "2026-11-09T10:02:41Z",
+            },
+          ],
+        },
+      },
+      startup: {
+        status: "partial",
+        reason: "1 个子源读取失败：tasks_dir_denied",
+        data: {
+          failedSources: ["tasks_dir_denied"],
+          entries: [
+            {
+              id: "mock-run-hkcu-onedrive",
+              name: "OneDrive",
+              command: "C:\\Users\\me\\AppData\\Local\\Microsoft\\OneDrive\\OneDrive.exe /background",
+              kind: "run",
+              scope: "user",
+              enabled: true,
+              approvedState: "enabled",
+            },
+            {
+              id: "mock-svc-autostart",
+              name: "Windows Update",
+              command: "C:\\WINDOWS\\system32\\svchost.exe -k netsvcs -p",
+              kind: "service_auto",
+              scope: "machine",
+              enabled: true,
+              delayedAutoStart: false,
+              detail: "wuauserv",
+            },
+            {
+              id: "mock-task-logon",
+              name: "Vendor\\Updater",
+              command: "C:\\Program Files\\Vendor\\updater.exe /silent",
+              kind: "scheduled_task_logon",
+              scope: "machine",
+            },
+          ],
+        },
+      },
+      residue: {
+        status: "ok",
+        data: {
+          unknownCount: 3,
+          entries: [
+            {
+              id: "mock-residue-1",
+              name: "OldTool 2.1",
+              publisher: "Example Corp",
+              version: "2.1.0",
+              scope: "machine",
+              arch: "x64",
+              isMsi: false,
+              installLocation: "C:\\Program Files\\OldTool",
+              missingInstallDir: true,
+              missingUninstaller: true,
+              reason: "安装目录与卸载程序均不存在",
+            },
+          ],
+        },
+      },
+      power: {
+        status: "ok",
+        data: {
+          fastStartupEnabled: true,
+          fastStartupRegistryPresent: true,
+          hibernateSupported: true,
+          hiberFilePresent: false,
+          hiberbootCapability: true,
+          modernStandby: false,
+        },
+      },
+    }),
 
   uninstall_list: (): Promise<InstalledApp[]> => Promise.resolve(InstalledAppStub),
 

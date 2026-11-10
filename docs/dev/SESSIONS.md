@@ -5,6 +5,13 @@
 > 维护（AGENTS.md §9）：任务完成时 agent 自动追加/更新当前会话条目，随任务同一提交。格式：`## YYYY-MM-DD | 主题`。
 > 本初版由历史会话记忆回溯整理（截至 2026-09-29），细节以 git 历史与 TASKS.md 为准。
 
+## 2026-11-10 | B1 开机诊断（只读）实现
+
+- **背景**：设计稿 `DESIGN-BOOTDIAG-2026-11-10.md` 评审通过，按 B1-00..B1-09 依次实现。评审对三个未决项取保守解：事件日志通道不实现开启、HKLM StartupApproved 本轮不补、卸载命令不在 UI 展示。零新 crate/npm。
+- **进度**：B1-00 取证 ✅（非提权真机：通道 ACL 无 IU、`wevtutil qe` 退出码 5；`System32\Tasks` 非提权 0 文件；`schtasks /xml` 为 CP936；`HiberbootEnabled=1` 但 hiberfil.sys 不存在；Uninstall 276 条中 210 条无 InstallLocation）；B1-01 契约双端 ✅（1 命令 + 17 类型，`pnpm typecheck` 与 cargo 全绿）。
+- **已知缺陷（本轮不修）**：`startup/tasks.rs` 非提权枚举 `System32\Tasks` 为空时静默 `continue`，把"读不到"伪装成"没有"；新模块用 `failed_sources` 显式区分。
+- **下一步**：B1-02 注册表源 → B1-03 事件日志 → B1-04 服务 → B1-05 计划任务 → B1-06 残留 → B1-07 电源 → B1-08 UI → B1-09 收尾。
+
 ## 2026-10-19 | R32-0 真机误删复盘热修（E:\tmp 文件区被一键清理永久删除）
 
 - **事件**：作者真机试用 R31-6 一键清理后，`E:\tmp`（作者的文件区：ArcGIS 安装包/素材）被整体清空。审计导出 `exports\pureslate-audit-export-1792341541446.jsonl` 实证：单事务 `clean-000018dfad1b57c0d808`，176 项、**9.55 GiB、100% direct 永久删除**；其中 `E:\tmp` 68 项 9.46 GiB（ArcGIS Pro 3.4.2.rar 4.7GiB、SetupFiles/*.cab 2.8GiB、FME扩展包 DataInteropPro.cab 1.83GiB…），事后 0 项存在、不可恢复。

@@ -4,6 +4,15 @@
 
 ## [Unreleased]
 
+### 2026-11-10 · 开机诊断（只读，加性契约）
+
+- **新增 IPC 命令** `boot_diagnose`（无参数，只读；不写注册表 / 不删文件 / 不改电源配置 / 不启停服务）。
+- **新增类型**：`BootDiagnosisReport`、`BootSection<T>`、`BootSectionStatus`、`BootTimingData`、`BootTimingSample`、`BootPhaseBreakdown`、`BootIssue`、`BootIssueKind`、`BootStartupData`、`BootStartupEntry`、`BootStartupKind`、`BootStartupScope`、`BootApprovedState`、`BootResidueData`、`BootResidueEntry`、`BootPowerData`。
+- `contract.rs` 与 `ipc.ts` 双端同步；**未修改任何既有命令签名或既有字段**，旧前端调用不受影响。
+- 语义约定：每段数据用 `BootSection.status`（`ok / partial / unavailable / denied`）表达可得性，"拿不到"不是错误、不抛异常。
+- 评审决定：事件日志通道开启的写操作**不实现**；HKLM StartupApproved 本轮不补；卸载命令只参与判定、不在 UI 展示。
+- 设计稿：`docs/dev/DESIGN-BOOTDIAG-2026-11-10.md`。
+
 ### R32-0 真机误删复盘热修（2026-10-19）
 
 > 触发：作者真机试用一键清理后 `E:\tmp` 被整体清空（审计实证 68 项 / 9.46 GiB，direct 永久删除；

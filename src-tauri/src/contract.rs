@@ -561,9 +561,296 @@ pub mod events {
     pub const UNINSTALL_DONE: &str = "uninstall_done";
 }
 
+// ---- 开机诊断（v0.2.x 加性 · 只读）----
+// 设计稿：docs/dev/DESIGN-BOOTDIAG-2026-11-10.md §4。只新增类型与命令，
+// 不改动既有契约；所有"拿不到"都通过 BootSection 状态表达，而非报错。
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum BootSectionStatus {
+    Ok,
+    Partial,
+    Unavailable,
+    Denied,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BootSection<T> {
+    pub status: BootSectionStatus,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub reason: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub data: Option<T>,
+}
+
+impl<T> BootSection<T> {
+    pub fn ok(data: T) -> Self {
+        Self {
+            status: BootSectionStatus::Ok,
+            reason: None,
+            data: Some(data),
+        }
+    }
+
+    pub fn with_reason(
+        status: BootSectionStatus,
+        reason: impl Into<String>,
+        data: Option<T>,
+    ) -> Self {
+        Self {
+            status,
+            reason: Some(reason.into()),
+            data,
+        }
+    }
+}
+
+impl<T> Default for BootSection<T> {
+    fn default() -> Self {
+        Self {
+            status: BootSectionStatus::Unavailable,
+            reason: None,
+            data: None,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BootTimingData {
+    pub channel_enabled: bool,
+    pub samples: Vec<BootTimingSample>,
+    pub issues: Vec<BootIssue>,
+    pub truncated: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BootTimingSample {
+    /// RFC3339，来自事件 100 的 TimeCreated。
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub booted_at: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub boot_time_ms: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub main_path_boot_time_ms: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub post_boot_time_ms: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub degradation_delta_ms: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub is_degradation: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub startup_app_count: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub phases: Option<BootPhaseBreakdown>,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BootPhaseBreakdown {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub kernel_init_ms: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub driver_init_ms: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub devices_init_ms: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub prefetch_init_ms: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub smss_init_ms: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub critical_services_init_ms: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub user_profile_ms: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub machine_profile_ms: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub explorer_init_ms: Option<u64>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum BootIssueKind {
+    Application,
+    Driver,
+    Service,
+    Device,
+    MachinePolicy,
+    UserPolicy,
+    BackgroundOptimization,
+    SessionManager,
+    Unknown,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BootIssue {
+    pub event_id: u16,
+    pub kind: BootIssueKind,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub friendly_name: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub version: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub total_time_ms: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub degradation_time_ms: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub at: Option<String>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum BootStartupKind {
+    Run,
+    RunOnce,
+    StartupFolder,
+    ServiceAuto,
+    ScheduledTaskBoot,
+    ScheduledTaskLogon,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum BootStartupScope {
+    User,
+    Machine,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum BootApprovedState {
+    Enabled,
+    Disabled,
+    Unknown,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BootStartupEntry {
+    pub id: String,
+    pub name: String,
+    pub command: String,
+    pub kind: BootStartupKind,
+    pub scope: BootStartupScope,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub enabled: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub approved_state: Option<BootApprovedState>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub delayed_auto_start: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub detail: Option<String>,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BootStartupData {
+    pub entries: Vec<BootStartupEntry>,
+    /// 枚举失败的子源（如 tasks_dir_denied），用于把"0 项"与"读不到"区分开。
+    pub failed_sources: Vec<String>,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BootResidueData {
+    pub entries: Vec<BootResidueEntry>,
+    /// 因信息不足（如 MSI 安装位置未知）而无法判定的条目数，不冒充残留。
+    pub unknown_count: u32,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BootResidueEntry {
+    pub id: String,
+    pub name: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub publisher: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub version: Option<String>,
+    pub scope: BootStartupScope,
+    /// "x64" / "x86"
+    pub arch: String,
+    pub is_msi: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub msi_product_code: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub install_location: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub uninstall_command: Option<String>,
+    pub missing_install_dir: bool,
+    pub missing_uninstaller: bool,
+    pub reason: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BootPowerData {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub fast_startup_enabled: Option<bool>,
+    pub fast_startup_registry_present: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub hibernate_supported: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub hiber_file_present: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub hiberboot_capability: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub modern_standby: Option<bool>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BootDiagnosisReport {
+    pub collected_at: String,
+    pub is_elevated: bool,
+    pub timing: BootSection<BootTimingData>,
+    pub startup: BootSection<BootStartupData>,
+    pub residue: BootSection<BootResidueData>,
+    pub power: BootSection<BootPowerData>,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn boot_diagnosis_serializes_camel_case_and_omits_none() {
+        // 状态/字段命名与 ipc.ts 镜像一致；None 字段不出现在 JSON 中。
+        let report = BootDiagnosisReport {
+            collected_at: "2026-11-10T00:00:00Z".into(),
+            is_elevated: false,
+            timing: BootSection::with_reason(BootSectionStatus::Denied, "事件日志访问被拒绝", None),
+            startup: BootSection::ok(BootStartupData::default()),
+            residue: BootSection::ok(BootResidueData::default()),
+            power: BootSection::ok(BootPowerData {
+                fast_startup_enabled: Some(true),
+                fast_startup_registry_present: true,
+                hibernate_supported: Some(true),
+                hiber_file_present: Some(false),
+                hiberboot_capability: Some(true),
+                modern_standby: Some(false),
+            }),
+        };
+        let json = serde_json::to_string(&report).unwrap();
+        assert!(json.contains("\"collectedAt\""));
+        assert!(json.contains("\"status\":\"denied\""));
+        assert!(json.contains("\"fastStartupEnabled\":true"));
+        assert!(json.contains("\"entries\":[]"));
+        assert!(!json.contains("\"data\":null"));
+    }
+
+    #[test]
+    fn boot_startup_kind_uses_snake_case() {
+        let json = serde_json::to_string(&BootStartupKind::ScheduledTaskLogon).unwrap();
+        assert_eq!(json, "\"scheduled_task_logon\"");
+        let json = serde_json::to_string(&BootStartupKind::Run).unwrap();
+        assert_eq!(json, "\"run\"");
+    }
 
     #[test]
     fn app_meta_serializes_camel_case() {

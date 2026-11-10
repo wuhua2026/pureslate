@@ -5,6 +5,7 @@
 import type {
   AppMeta,
   AppSettings,
+  BootDiagnosisReport,
   CleanExecuteParams,
   CrashDumpInfo,
   CrashDumpPreview,
@@ -83,8 +84,15 @@ export const quarantine_status = () =>
     ? mockCommands.quarantine_status()
     : invokeApp<QuarantineStatus>("quarantine_status");
 
+/** 启动项列表（R07）：活动项 + 已禁用备份项，按影响降序。 */
 export const startup_list = () =>
   useMock() ? mockCommands.startup_list() : invokeApp<StartupEntry[]>("startup_list");
+
+/** 开机诊断（只读，无参数；DESIGN-BOOTDIAG-2026-11-10）。 */
+export const boot_diagnose = () =>
+  useMock()
+    ? mockCommands.boot_diagnose()
+    : invokeApp<BootDiagnosisReport>("boot_diagnose");
 
 /** R27-1：已安装程序只读列表（SPEC §6.7）。 */
 export const uninstall_list = () =>

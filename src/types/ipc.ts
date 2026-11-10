@@ -327,6 +327,137 @@ export interface CleanDoneEvent {
   skip: number;
 }
 
+// ---- 开机诊断（只读，v0.2.x 加性；设计稿 docs/dev/DESIGN-BOOTDIAG-2026-11-10.md）----
+// 全部为新增类型，不改动既有契约；"拿不到"由 status + reason 表达。
+
+export type BootSectionStatus = "ok" | "partial" | "unavailable" | "denied";
+
+export interface BootSection<T> {
+  status: BootSectionStatus;
+  reason?: string;
+  data?: T;
+}
+
+export interface BootTimingSample {
+  bootedAt?: string;
+  bootTimeMs?: number;
+  mainPathBootTimeMs?: number;
+  postBootTimeMs?: number;
+  degradationDeltaMs?: number;
+  isDegradation?: boolean;
+  startupAppCount?: number;
+  phases?: BootPhaseBreakdown;
+}
+
+export interface BootPhaseBreakdown {
+  kernelInitMs?: number;
+  driverInitMs?: number;
+  devicesInitMs?: number;
+  prefetchInitMs?: number;
+  smssInitMs?: number;
+  criticalServicesInitMs?: number;
+  userProfileMs?: number;
+  machineProfileMs?: number;
+  explorerInitMs?: number;
+}
+
+export type BootIssueKind =
+  | "application"
+  | "driver"
+  | "service"
+  | "device"
+  | "machinePolicy"
+  | "userPolicy"
+  | "backgroundOptimization"
+  | "sessionManager"
+  | "unknown";
+
+export interface BootIssue {
+  eventId: number;
+  kind: BootIssueKind;
+  name?: string;
+  friendlyName?: string;
+  version?: string;
+  totalTimeMs?: number;
+  degradationTimeMs?: number;
+  at?: string;
+}
+
+export interface BootTimingData {
+  channelEnabled: boolean;
+  samples: BootTimingSample[];
+  issues: BootIssue[];
+  truncated: boolean;
+}
+
+export type BootStartupKind =
+  | "run"
+  | "run_once"
+  | "startup_folder"
+  | "service_auto"
+  | "scheduled_task_boot"
+  | "scheduled_task_logon";
+
+export type BootStartupScope = "user" | "machine";
+
+export type BootApprovedState = "enabled" | "disabled" | "unknown";
+
+export interface BootStartupEntry {
+  id: string;
+  name: string;
+  command: string;
+  kind: BootStartupKind;
+  scope: BootStartupScope;
+  enabled?: boolean;
+  approvedState?: BootApprovedState;
+  delayedAutoStart?: boolean;
+  detail?: string;
+}
+
+export interface BootStartupData {
+  entries: BootStartupEntry[];
+  failedSources: string[];
+}
+
+export interface BootResidueEntry {
+  id: string;
+  name: string;
+  publisher?: string;
+  version?: string;
+  scope: BootStartupScope;
+  arch: string;
+  isMsi: boolean;
+  msiProductCode?: string;
+  installLocation?: string;
+  uninstallCommand?: string;
+  missingInstallDir: boolean;
+  missingUninstaller: boolean;
+  reason: string;
+}
+
+export interface BootResidueData {
+  entries: BootResidueEntry[];
+  unknownCount: number;
+}
+
+export interface BootPowerData {
+  fastStartupEnabled?: boolean;
+  fastStartupRegistryPresent: boolean;
+  hibernateSupported?: boolean;
+  hiberFilePresent?: boolean;
+  hiberbootCapability?: boolean;
+  modernStandby?: boolean;
+}
+
+export interface BootDiagnosisReport {
+  collectedAt: string;
+  isElevated: boolean;
+  timing: BootSection<BootTimingData>;
+  startup: BootSection<BootStartupData>;
+  residue: BootSection<BootResidueData>;
+  power: BootSection<BootPowerData>;
+}
+
 // ---- 命令参数（IPC 命令用 snake_case，TS 端参数对象用 camelCase，由 api 层转换）----
 export interface ScanGetItemsParams {
   scanId: string;

@@ -1,5 +1,6 @@
 // PureSlate 内核入口。M0 阶段：注册 IPC 契约 stub 与共享状态。
 
+pub mod bootdiag;
 pub mod cleaner;
 pub mod contract;
 pub mod crash;
@@ -105,6 +106,7 @@ pub fn run() {
             ipc::commands::quarantine_purge,
             ipc::commands::quarantine_status,
             ipc::commands::startup_list,
+            ipc::commands::boot_diagnose,
             ipc::commands::uninstall_list,
             ipc::commands::shell_reveal,
             ipc::commands::uninstall_app_icons,

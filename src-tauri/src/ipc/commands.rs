@@ -660,6 +660,15 @@ pub fn startup_list(_state: State<AppState>) -> Vec<StartupEntry> {
     crate::startup::list()
 }
 
+/// 开机诊断（只读，无参数）。重活放 spawn_blocking，避免阻塞 UI 线程。
+/// 设计稿：docs/dev/DESIGN-BOOTDIAG-2026-11-10.md。
+#[tauri::command]
+pub async fn boot_diagnose() -> Result<crate::contract::BootDiagnosisReport, String> {
+    tauri::async_runtime::spawn_blocking(crate::bootdiag::diagnose)
+        .await
+        .map_err(|e| format!("开机诊断任务执行失败: {e}"))
+}
+
 /// 已安装程序列表（R27-1，只读枚举 Uninstall 四视图，SPEC §6.7）。
 #[tauri::command]
 pub fn uninstall_list() -> Vec<InstalledApp> {
