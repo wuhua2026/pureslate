@@ -4,6 +4,15 @@
 
 ## [Unreleased]
 
+### v0.2.2（发布）
+
+- 2026-11-10 发布：tag `v0.2.2`（annotated；工作流校验 tag 与 `tauri.conf.json` 版本一致）；Release 正文 `.github/release-notes/v0.2.2.md`；内容主线为 R32-0 数据盘 `tmp` 误删修复，附带 R31 安全批次、B1 开机诊断（只读）、B1-10 启动项失败可见。
+- 版本同步：`src-tauri/tauri.conf.json` / `src-tauri/Cargo.toml` / `src-tauri/Cargo.lock`；`package.json` 沿用 v0.2.1 约定历史恒 `0.1.0` 不动；README 下载链接与文件名同步 `v0.2.2`。
+- 体积门禁（当前 HEAD 实测）：NSIS `PureSlate_0.2.2_x64-setup.exe` **2,991,576 B ≈ 2.85 MiB**（sha256 `b10485bd8e4afb24cc53e214536cc7455afad7db5a53bd3bbe5ecd325837ad8f`）；MSI `PureSlate_0.2.2_x64_en-US.msi` **5,115,904 B ≈ 4.88 MiB**；`tools/check-size.ps1` **PASS**（<20MB）。CI 会重新构建，Release 资产哈希以 CI 产物为准。
+- **另外三类门禁的证据时效（如实标注）**：性能（`docs/verify/bench-scan.json`，2026-09-29）、误删率（`docs/verify/golden-misdelete.json`，2026-10-04）、还原率（`docs/verify/restore-1000.json`，2026-10-04）**本轮未重跑，证据早于当前 HEAD**；不作为 v0.2.2 达标依据，也不阻塞本次发布。重跑计划：发布后按 TASKS P5-01 全量门禁核验统一补测。
+- 验证：cargo fmt --check / clippy `-D warnings` 零告警；`cargo test` **290 lib passed + 9 ignored + 27 集成全绿**；`pnpm typecheck` / **99 vitest（12 文件）** / `pnpm build` 全绿；零新增 crate/npm。
+- Release run、四资产实际哈希与 manifest 回推 commit：待发布完成后回填。
+
 ### 2026-11-10 · 启动项来源失败可见（v0.2.2，加性契约）
 
 - **新增 IPC 命令** `startup_list_report`（无参数，只读）：返回 `StartupListReport`，在原有列表之外带上来源级失败。

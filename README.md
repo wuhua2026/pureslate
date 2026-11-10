@@ -2,11 +2,11 @@
 
 **Windows 开源（MIT）PC 清理工具。** 只读扫描 → 安全分级（🟢🟡🔴）→ 一键清理（仅 🟢 安全项）/ 人工确认（🟡🔴）→ 分级去向（🟢直清/回收站、🟡🔴隔离区 14 天可还原）→ 全程结构化审计日志。
 
-技术栈：Tauri 2（Rust 内核）+ Vue 3 + TypeScript(strict)，安装包约 2.8MB，零广告/零捆绑/默认零数据外传。
+技术栈：Tauri 2（Rust 内核）+ Vue 3 + TypeScript(strict)，安装包约 2.9MB，零广告/零捆绑/默认零数据外传。
 
 ## 下载安装
 
-最新版本：**[v0.2.1](https://github.com/wuhua2026/pureslate/releases/tag/v0.2.1)**（从 [**GitHub Releases**](https://github.com/wuhua2026/pureslate/releases/latest) 始终获取最新版），下载 `PureSlate_0.2.1_x64-setup.exe`：
+最新版本：**[v0.2.2](https://github.com/wuhua2026/pureslate/releases/tag/v0.2.2)**（从 [**GitHub Releases**](https://github.com/wuhua2026/pureslate/releases/latest) 始终获取最新版），下载 `PureSlate_0.2.2_x64-setup.exe`：
 
 - 系统要求：Windows 10 / 11（x64）；
 - 安装包 sha256 见 Release 页附件与 `update-manifest.json`；
