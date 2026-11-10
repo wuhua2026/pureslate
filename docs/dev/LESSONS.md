@@ -6,6 +6,12 @@
 
 ## ① 踩坑记录
 
+### 事件日志非提权连"通道是否启用"都读不到；事件 100 也没有 `BootDegradationTime`（2026-11-10，B1-03）
+- 现象：`EvtOpenChannelConfig` + `EvtGetChannelConfigProperty(EvtChannelConfigEnabled)` 在标准用户下也拿不到值（`EvtQuery` 返回 code 5）；若把配置读取失败默认成 `enabled=false`，就等于把"未知"报成"已关闭"。
+- 根因：`Diagnostics-Performance/Operational` 的通道 ACL 只给 BA/SY/LS/NS/SU，没有交互用户 ACE；配置与查询同属该通道的受控面。另：微软未发布事件 100 的正式 schema，任务描述中的 `BootDegradationTime` 并不存在，真实字段是 `BootDegradationDelta`（多数样本为 0）。
+- 修复：非提权一律 `Denied` 且**不携带 data**（不臆造 `channel_enabled`）；字段按真实 XML 的 `Data@Name` 建映射，全字段 `Option`，缺失即 `None` 不补 0。
+- 复利结论：①"读不到"与"值为假"必须用不同状态表达，布尔字段没有"未知"位时宁可不返回；②微软事件 schema 以真实 XML 为准，写解析器前先抓一条真事件；③事件 100 不保证每次开机都有（阈值 + DPS 策略 + 通道状态），空结果不是错误。
+
 ### 目录名叫 `tmp` 不等于临时文件：一次真机一键清理永久删除了 9.46 GiB 文件区（2026-10-19，R32-0）
 - 现象：作者真机试用一键清理后 `E:\tmp` 被清空。审计导出实证：单事务 176 项 / 9.55 GiB / 100% direct 永久删除，`E:\tmp` 占 68 项 9.46 GiB（ArcGIS 安装包、SetupFiles cab、FME 扩展包…），0 项可恢复；而 `E:\tmp` 实际是作者的文件区。
 - 根因：v0.1.5「反馈 1b」把**非系统固定盘根**下的 `Temp`/`tmp`/`_scratch` 追加为 `temp.user` 扫描根（`multi_drive_temp_roots`），`E:\tmp` 名字命中；`temp.user` 是 green/direct + maxAgeDays=7 → 7 天前文件直接 `DeleteFileW`。R31-6 的一键清理把它变成两次点击可达，文案还写着"可安全重建、不影响文档/照片"。

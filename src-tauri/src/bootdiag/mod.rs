@@ -10,6 +10,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use crate::contract::{BootDiagnosisReport, BootSection, BootSectionStatus, BootStartupData};
 
+mod eventlog;
 mod startup_sources;
 
 /// 采集整份只读诊断报告。
@@ -17,8 +18,8 @@ pub fn diagnose() -> BootDiagnosisReport {
     BootDiagnosisReport {
         collected_at: now_rfc3339(),
         is_elevated: crate::scanner::mft::is_admin(),
-        // B1-03..B1-07 逐步填充；未接入前保持"不可用"，避免把空数据当事实。
-        timing: unavailable("开机耗时采集尚未实现"),
+        // B1-04..B1-07 逐步填充；未接入前保持"不可用"，避免把空数据当事实。
+        timing: eventlog::collect(),
         startup: assemble_startup(),
         residue: unavailable("卸载残留采集尚未实现"),
         power: unavailable("电源状态采集尚未实现"),
@@ -102,7 +103,7 @@ mod tests {
     fn diagnose_returns_all_sections() {
         let r = diagnose();
         assert!(!r.collected_at.is_empty());
-        assert_eq!(r.timing.status, BootSectionStatus::Unavailable);
+        // 真机状态取决于提权与系统配置，只断言"有明确结论"，不假设具体状态。
         assert!(matches!(
             r.startup.status,
             BootSectionStatus::Ok | BootSectionStatus::Partial
