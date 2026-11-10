@@ -262,7 +262,13 @@ pub(crate) fn make_entry(
 }
 
 /// 稳定 ID：kind + scope + name + command 的 SHA-256 前 12 个十六进制字符。
-fn entry_id(kind: BootStartupKind, scope: BootStartupScope, name: &str, command: &str) -> String {
+/// 服务/计划任务复用同一算法，保证跨来源不撞车。
+pub(crate) fn entry_id(
+    kind: BootStartupKind,
+    scope: BootStartupScope,
+    name: &str,
+    command: &str,
+) -> String {
     let mut h = Sha256::new();
     h.update(format!("{kind:?}|{scope:?}|").as_bytes());
     h.update(name.as_bytes());

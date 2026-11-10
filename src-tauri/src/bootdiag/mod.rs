@@ -11,6 +11,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use crate::contract::{BootDiagnosisReport, BootSection, BootSectionStatus, BootStartupData};
 
 mod eventlog;
+mod services;
 mod startup_sources;
 
 /// 采集整份只读诊断报告。
@@ -26,9 +27,12 @@ pub fn diagnose() -> BootDiagnosisReport {
     }
 }
 
-/// 启动项：注册表类来源（B1-02）；服务与计划任务在 B1-04 / B1-05 接入。
+/// 启动项：注册表类（B1-02）+ 自动服务（B1-04）；计划任务在 B1-05 接入。
 fn assemble_startup() -> BootSection<BootStartupData> {
-    let (entries, failed) = startup_sources::collect();
+    let (mut entries, mut failed) = startup_sources::collect();
+    let (service_entries, service_failures) = services::collect();
+    entries.extend(service_entries);
+    failed.extend(service_failures);
     BootSection::with_reason(
         if failed.is_empty() {
             BootSectionStatus::Ok

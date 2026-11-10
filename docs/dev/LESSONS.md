@@ -6,6 +6,12 @@
 
 ## ① 踩坑记录
 
+### `EnumServicesStatusExW` 成功时 resume 句柄保持 0：只等 `ERROR_NO_MORE_ITEMS` 会无限重复同一批（2026-11-10，B1-04）
+- 现象：`cargo test` 挂死超过 60 秒；插桩显示同一批 `returned=320 resume=0` 无限循环（缓冲区 128KB 一次装得下全部服务）。
+- 根因：当缓冲区足够容纳全部服务时，API 一次返回并**不推进** `lpResumeHandle`（保持 0），下一轮从头再来；退出条件只有 `ERROR_NO_MORE_ITEMS`，永远等不到。
+- 修复：按"缓冲区是否被填满"判定结束——`returned < capacity`（`capacity = buf_bytes / sizeof(ENUM_SERVICE_STATUS_PROCESSW)`）即已取完；另加 1000 轮防御上限。本机结果 112 条自动服务（与 `Get-Service` 口径 111 + 1 条查询失败吻合）。
+- 复利结论：①Win32 枚举型 API 的"结束"不一定靠返回码，缓冲区未填满往往才是真正的尾批信号；②任何 `loop` 包 Win32 调用都要有轮次上限，否则真机一挂就是 5 分钟超时；③逐条 `OpenService` 的失败要计数上报（本次 1 条受保护服务），不能静默 `continue`。
+
 ### 事件日志非提权连"通道是否启用"都读不到；事件 100 也没有 `BootDegradationTime`（2026-11-10，B1-03）
 - 现象：`EvtOpenChannelConfig` + `EvtGetChannelConfigProperty(EvtChannelConfigEnabled)` 在标准用户下也拿不到值（`EvtQuery` 返回 code 5）；若把配置读取失败默认成 `enabled=false`，就等于把"未知"报成"已关闭"。
 - 根因：`Diagnostics-Performance/Operational` 的通道 ACL 只给 BA/SY/LS/NS/SU，没有交互用户 ACE；配置与查询同属该通道的受控面。另：微软未发布事件 100 的正式 schema，任务描述中的 `BootDegradationTime` 并不存在，真实字段是 `BootDegradationDelta`（多数样本为 0）。

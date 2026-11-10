@@ -228,7 +228,7 @@
 | B1-01 | 契约双端 + 命令占位 | B1-00 | ✅ `contract.rs` 新增 17 类型 + `BootSection<T>` 状态封装；`ipc.ts` 镜像；`boot_diagnose` 命令（spawn_blocking）+ 注册 + mock；CHANGELOG 加性记录 | `pnpm typecheck` 0 错；cargo fmt/clippy `-D warnings`/test 全绿（**256 lib 通过**，新增 4 例） |
 | B1-02 | 注册表源 | B1-01 | ✅ Run/RunOnce（HKCU + HKLM 64/32 逻辑视图）、两个启动文件夹、HKCU StartupApproved；失败子源计数；纯函数单测。备注：按评审决定**未**读 HKLM StartupApproved，机器级条目 `approvedState` 缺省（与既有 startup 模块一致） | cargo clippy `-D warnings` / test 全绿（**262 通过**，+6 例） |
 | B1-03 | 事件日志 | B1-01 | ✅ wevtapi FFI（EvtOpenChannelConfig/EvtQuery/EvtNext/EvtRender/EvtClose）+ 通道状态 + XML 解析 + XPath 降级 + 句柄 RAII + fixture 单测。备注：非提权实测 `Denied`，且通道配置也读不到 → denied 分支**不携带 data**，不把"未知"报成 `enabled=false`；字段用真实 `BootDegradationDelta`（无 `BootDegradationTime`） | cargo clippy `-D warnings` / test 全绿（**269 通过**，+7 例）；`live_collect_prints_section` 真机非提权 = denied |
-| B1-04 | 服务 | B1-01 | SCM 枚举 + QueryServiceConfig/2（延迟启动）+ 失败计数 | 与 `services.msc` 集合对照 |
+| B1-04 | 服务 | B1-01 | ✅ SCM 枚举 + QueryServiceConfig/2（延迟启动）+ 失败计数。备注：踩到 `EnumServicesStatusExW` 成功时 resume 恒 0 → 改为"缓冲区未填满即结束"，另加 1000 轮防御上限；本机 112 条自动服务、1 条受保护服务查询失败（已计入 `failedSources`） | cargo clippy `-D warnings` / test 全绿；`live_services_prints_count` 真机 = 112 条 |
 | B1-05 | 计划任务 | B1-01 | 读 `System32\Tasks` XML（BOM/编码判定）、Boot/Logon 触发器、失败计数；不沿用静默 `continue` | 与 `Get-ScheduledTask` 对照（手工清单） |
 | B1-06 | 卸载残留 | B1-01 | 复用 `uninstall::list_apps` + `MsiEnumProductsExW`/`MsiGetProductInfoExW`；安装目录与卸载程序双条件；UNC/相对路径守卫；禁止名称模糊匹配 | 人工复核 20 条（手工清单） |
 | B1-07 | 电源 | B1-01 | `CallNtPowerInformation(SystemPowerCapabilities)` + `HiberbootEnabled`；`#[repr(C)]` 布局 + `offset_of!` 测试 | 开关切换对照（手工清单） |
