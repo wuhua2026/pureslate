@@ -11,6 +11,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use crate::contract::{BootDiagnosisReport, BootSection, BootSectionStatus, BootStartupData};
 
 mod eventlog;
+mod power;
 mod residue;
 mod services;
 mod startup_sources;
@@ -21,11 +22,11 @@ pub fn diagnose() -> BootDiagnosisReport {
     BootDiagnosisReport {
         collected_at: now_rfc3339(),
         is_elevated: crate::scanner::mft::is_admin(),
-        // B1-04..B1-07 逐步填充；未接入前保持"不可用"，避免把空数据当事实。
+        // 四段各自带 status，读不到即显式降级，不把空数据当事实。
         timing: eventlog::collect(),
         startup: assemble_startup(),
         residue: residue::collect(),
-        power: unavailable("电源状态采集尚未实现"),
+        power: power::collect(),
     }
 }
 
@@ -59,10 +60,6 @@ pub(crate) fn failed_reason(failed: &[String]) -> String {
     } else {
         format!("{} 个子源读取失败：{}", failed.len(), failed.join(", "))
     }
-}
-
-fn unavailable<T>(reason: &str) -> BootSection<T> {
-    BootSection::with_reason(BootSectionStatus::Unavailable, reason, None)
 }
 
 /// 当前时间 → UTC RFC3339（秒精度），不引入时间库。
@@ -123,6 +120,10 @@ mod tests {
             BootSectionStatus::Ok | BootSectionStatus::Partial
         ));
         assert!(r.residue.data.is_some());
-        assert_eq!(r.power.status, BootSectionStatus::Unavailable);
+        assert!(matches!(
+            r.power.status,
+            BootSectionStatus::Ok | BootSectionStatus::Partial
+        ));
+        assert!(r.power.data.is_some());
     }
 }

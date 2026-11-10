@@ -319,6 +319,7 @@
 - 提权排障既定模式：`tools/diag/` 下 ASCII runner 脚本（`.probe-elevate.ps1` / `.fsctl-elevate.ps1` / `.bench-elevate.ps1`）+ 输出落盘 `*-out.txt`（已 gitignore）。
 - 探针工具：`src-tauri/src/bin/probe-mft.rs`（提权/完整性/MFT 打开诊断）、`probe-fsctl.rs`（卷打开方式矩阵测试）。
 - 本地裸 debug exe 8.36MB；安装包体积门禁由 CI 产物断言 <20MB（WiX 下载受限，不走本地打包验证）。
+- 本机电源（2026-11-10，B1-07 实测）：`HiberbootEnabled=1`，但 `SystemPowerCapabilities` 返回 `SystemS4=true / HiberFilePresent=false / Hiberboot=false / AoAc=true`（Modern Standby）。即**注册表开关开着、快速启动实际未生效**——UI 必须把"配置意图"与"能力"分开呈现，禁止只凭注册表说"已启用"。
 
 ## ④ 门禁/基准趋势
 
