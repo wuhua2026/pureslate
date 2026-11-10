@@ -8,18 +8,46 @@
 
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use crate::contract::{BootDiagnosisReport, BootSection, BootSectionStatus};
+use crate::contract::{BootDiagnosisReport, BootSection, BootSectionStatus, BootStartupData};
+
+mod startup_sources;
 
 /// 采集整份只读诊断报告。
 pub fn diagnose() -> BootDiagnosisReport {
     BootDiagnosisReport {
         collected_at: now_rfc3339(),
         is_elevated: crate::scanner::mft::is_admin(),
-        // B1-02..B1-07 逐步填充；未接入前保持"不可用"，避免把空数据当事实。
+        // B1-03..B1-07 逐步填充；未接入前保持"不可用"，避免把空数据当事实。
         timing: unavailable("开机耗时采集尚未实现"),
-        startup: unavailable("启动项采集尚未实现"),
+        startup: assemble_startup(),
         residue: unavailable("卸载残留采集尚未实现"),
         power: unavailable("电源状态采集尚未实现"),
+    }
+}
+
+/// 启动项：注册表类来源（B1-02）；服务与计划任务在 B1-04 / B1-05 接入。
+fn assemble_startup() -> BootSection<BootStartupData> {
+    let (entries, failed) = startup_sources::collect();
+    BootSection::with_reason(
+        if failed.is_empty() {
+            BootSectionStatus::Ok
+        } else {
+            BootSectionStatus::Partial
+        },
+        failed_reason(&failed),
+        Some(BootStartupData {
+            entries,
+            failed_sources: failed,
+        }),
+    )
+}
+
+/// 失败子源 → 人类可读原因（空集合时返回空串，调用方只在 partial 时使用）。
+pub(crate) fn failed_reason(failed: &[String]) -> String {
+    if failed.is_empty() {
+        String::new()
+    } else {
+        format!("{} 个子源读取失败：{}", failed.len(), failed.join(", "))
     }
 }
 
@@ -75,7 +103,11 @@ mod tests {
         let r = diagnose();
         assert!(!r.collected_at.is_empty());
         assert_eq!(r.timing.status, BootSectionStatus::Unavailable);
-        assert_eq!(r.startup.status, BootSectionStatus::Unavailable);
+        assert!(matches!(
+            r.startup.status,
+            BootSectionStatus::Ok | BootSectionStatus::Partial
+        ));
+        assert!(r.startup.data.is_some());
         assert_eq!(r.residue.status, BootSectionStatus::Unavailable);
         assert_eq!(r.power.status, BootSectionStatus::Unavailable);
     }

@@ -598,9 +598,14 @@ impl<T> BootSection<T> {
         reason: impl Into<String>,
         data: Option<T>,
     ) -> Self {
+        let reason = reason.into();
         Self {
             status,
-            reason: Some(reason.into()),
+            reason: if reason.is_empty() {
+                None
+            } else {
+                Some(reason)
+            },
             data,
         }
     }

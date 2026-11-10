@@ -226,7 +226,7 @@
 |----|------|------|-----------|------|
 | B1-00 | ✅ 取证 | — | ✅ 非提权真机实测（Win11 26H2 build 26300）：事件通道 `enabled=true` 但 ACL 无 IU、`wevtutil qe` 退出码 5；`System32\Tasks` 非提权 0 文件；`schtasks /query /xml` 输出 GBK/CP936；`HiberbootEnabled=1` 但 `C:\hiberfil.sys` 不存在；Uninstall 276 条中 210 条无 InstallLocation；Auto 服务 111。提权侧行为以官方文档 + 手工验证清单补足 | 记录见设计稿附录 B 与 LESSONS |
 | B1-01 | 契约双端 + 命令占位 | B1-00 | ✅ `contract.rs` 新增 17 类型 + `BootSection<T>` 状态封装；`ipc.ts` 镜像；`boot_diagnose` 命令（spawn_blocking）+ 注册 + mock；CHANGELOG 加性记录 | `pnpm typecheck` 0 错；cargo fmt/clippy `-D warnings`/test 全绿（**256 lib 通过**，新增 4 例） |
-| B1-02 | 注册表源 | B1-01 | Run/RunOnce（HKCU + HKLM 64/32 视图）、两个启动文件夹、HKCU StartupApproved；失败子源计数；纯函数单测 | 与任务管理器逐项对照（手工清单） |
+| B1-02 | 注册表源 | B1-01 | ✅ Run/RunOnce（HKCU + HKLM 64/32 逻辑视图）、两个启动文件夹、HKCU StartupApproved；失败子源计数；纯函数单测。备注：按评审决定**未**读 HKLM StartupApproved，机器级条目 `approvedState` 缺省（与既有 startup 模块一致） | cargo clippy `-D warnings` / test 全绿（**262 通过**，+6 例） |
 | B1-03 | 事件日志 | B1-01 | wevtapi FFI（EvtOpenChannelConfig/EvtQuery/EvtNext/EvtRender/EvtClose）+ 通道状态 + XML 解析 + XPath 降级 + 句柄 RAII + fixture 单测 | 与事件查看器逐字段对照（手工清单） |
 | B1-04 | 服务 | B1-01 | SCM 枚举 + QueryServiceConfig/2（延迟启动）+ 失败计数 | 与 `services.msc` 集合对照 |
 | B1-05 | 计划任务 | B1-01 | 读 `System32\Tasks` XML（BOM/编码判定）、Boot/Logon 触发器、失败计数；不沿用静默 `continue` | 与 `Get-ScheduledTask` 对照（手工清单） |
