@@ -13,6 +13,7 @@ use crate::contract::{BootDiagnosisReport, BootSection, BootSectionStatus, BootS
 mod eventlog;
 mod services;
 mod startup_sources;
+mod tasks;
 
 /// 采集整份只读诊断报告。
 pub fn diagnose() -> BootDiagnosisReport {
@@ -27,12 +28,15 @@ pub fn diagnose() -> BootDiagnosisReport {
     }
 }
 
-/// 启动项：注册表类（B1-02）+ 自动服务（B1-04）；计划任务在 B1-05 接入。
+/// 启动项：注册表类（B1-02）+ 自动服务（B1-04）+ 计划任务（B1-05）。
 fn assemble_startup() -> BootSection<BootStartupData> {
     let (mut entries, mut failed) = startup_sources::collect();
     let (service_entries, service_failures) = services::collect();
     entries.extend(service_entries);
     failed.extend(service_failures);
+    let (task_entries, task_failures) = tasks::collect();
+    entries.extend(task_entries);
+    failed.extend(task_failures);
     BootSection::with_reason(
         if failed.is_empty() {
             BootSectionStatus::Ok

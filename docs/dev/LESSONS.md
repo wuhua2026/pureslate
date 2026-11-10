@@ -6,6 +6,12 @@
 
 ## ① 踩坑记录
 
+### 无 BOM 的 UTF-16LE 文本也是合法 UTF-8：先试 `from_utf8` 会把整份 XML 解成夹 NUL 的乱码（2026-11-10，B1-05）
+- 现象：`decode_task_xml` 对无 BOM 的 UTF-16LE 任务 XML 返回的字符串里每个字符间夹 `\0`，`parse_task_xml` 因此一个触发器都识别不到（单测 `decodes_utf8_and_bomless_utf16` 直接红）。
+- 根因：UTF-16LE 的纯 ASCII 内容（如 `<Triggers><TimeTrigger/>`）字节形如 `3C 00 54 00…`，而 **NUL 是合法 UTF-8 字节**，`std::str::from_utf8` 会成功返回——零字节启发式排在它后面永远轮不到。
+- 修复：判定顺序改为 BOM → **零字节启发式（`looks_utf16le`）** → `from_utf8` → lossy 兜底；UTF-8 XML 的零字节比例远低于 1/3，不会误判。
+- 复利结论：①"是不是合法 UTF-8"不等于"是不是 UTF-8 编码"，ASCII 兼容的宽字符编码都能骗过 `from_utf8`；②多编码嗅探必须按**判别力从强到弱**排序（BOM > 字节分布 > 解码成功），别按"最常用优先"；③`chunks_exact(2)` 在 Rust 1.98 起被 `clippy::chunks-exact-to-as-chunks` 拦，改用 `as_chunks::<2>()`（余数单独返回，顺带省掉奇数长度裁剪）。
+
 ### `EnumServicesStatusExW` 成功时 resume 句柄保持 0：只等 `ERROR_NO_MORE_ITEMS` 会无限重复同一批（2026-11-10，B1-04）
 - 现象：`cargo test` 挂死超过 60 秒；插桩显示同一批 `returned=320 resume=0` 无限循环（缓冲区 128KB 一次装得下全部服务）。
 - 根因：当缓冲区足够容纳全部服务时，API 一次返回并**不推进** `lpResumeHandle`（保持 0），下一轮从头再来；退出条件只有 `ERROR_NO_MORE_ITEMS`，永远等不到。
