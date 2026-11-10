@@ -122,6 +122,15 @@ export interface StartupEntry {
   systemDisabled?: boolean;
 }
 
+/**
+ * 启动项列表 + 来源级失败（v0.2.2 加性，`startup_list_report` 返回）。
+ * failedSources 与 bootdiag 的 failedSources 同一套语义；空数组 = 全部来源成功。
+ */
+export interface StartupListReport {
+  entries: StartupEntry[];
+  failedSources: string[];
+}
+
 /** R27 已安装程序（只读枚举；SPEC §6.7）。 */
 export interface InstalledApp {
   id: string;

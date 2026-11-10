@@ -106,6 +106,7 @@ pub fn run() {
             ipc::commands::quarantine_purge,
             ipc::commands::quarantine_status,
             ipc::commands::startup_list,
+            ipc::commands::startup_list_report,
             ipc::commands::boot_diagnose,
             ipc::commands::uninstall_list,
             ipc::commands::shell_reveal,

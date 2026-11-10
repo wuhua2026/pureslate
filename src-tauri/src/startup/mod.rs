@@ -208,8 +208,13 @@ fn active_setup_items(root_subkey: &str, out: &mut Vec<RawItem>) {
     }
 }
 
-/// 枚举全部活动启动项（只读）。
+/// 枚举全部活动启动项（只读）。不关心来源失败时用此包装。
 pub fn live_items() -> Vec<RawItem> {
+    live_items_with_sources().0
+}
+
+/// 枚举全部活动启动项 + 来源级失败（失败码与 `bootdiag` 一致）。
+fn live_items_with_sources() -> (Vec<RawItem>, Vec<String>) {
     let mut out = Vec::new();
     let approved = approved_disabled_names();
 
@@ -264,8 +269,9 @@ pub fn live_items() -> Vec<RawItem> {
     // Active Setup（v0.1.5 反馈 4）。
     active_setup_items(ACTIVE_SETUP_ROOT, &mut out);
 
-    // 登录触发计划任务。
-    for t in tasks::enumerate_logon_tasks() {
+    // 登录触发计划任务（权限不足时以 failed_sources 显式上报，不伪装成空列表）。
+    let (task_items, failed) = tasks::collect();
+    for t in task_items {
         let tag = format!("task|{}", t.name);
         out.push(RawItem {
             id: stable_id(&tag),
@@ -277,7 +283,7 @@ pub fn live_items() -> Vec<RawItem> {
         });
     }
 
-    out
+    (out, failed)
 }
 
 /// 组装对前端的 StartupEntry（发布者 + 影响估算）。
@@ -313,7 +319,12 @@ fn entry_from_record(rec: &backup::BackupRecord) -> StartupEntry {
 
 /// 启动项列表：活动项（enabled=true）+ 已禁用备份项（enabled=false），按影响降序。
 pub fn list() -> Vec<StartupEntry> {
-    let live = live_items();
+    list_with_sources().0
+}
+
+/// 启动项列表 + 来源级失败（计划任务目录不可读等）。
+pub fn list_with_sources() -> (Vec<StartupEntry>, Vec<String>) {
+    let (live, failed) = live_items_with_sources();
     let live_ids: HashSet<String> = live.iter().map(|it| it.id.clone()).collect();
 
     let mut entries: Vec<StartupEntry> = live.iter().map(to_entry).collect();
@@ -335,7 +346,7 @@ pub fn list() -> Vec<StartupEntry> {
             .cmp(&rank(b.impact))
             .then_with(|| a.name.cmp(&b.name))
     });
-    entries
+    (entries, failed)
 }
 
 /// 禁用单项：备份先行（红线"先日志后动手"），成功后落 manifest。

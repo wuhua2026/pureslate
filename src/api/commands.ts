@@ -26,6 +26,7 @@ import type {
   ScanItem,
   ScanProfile,
   StartupEntry,
+  StartupListReport,
   UpdateStatus,
   LogExportParams,
 } from "../types/ipc";
@@ -87,6 +88,12 @@ export const quarantine_status = () =>
 /** 启动项列表（R07）：活动项 + 已禁用备份项，按影响降序。 */
 export const startup_list = () =>
   useMock() ? mockCommands.startup_list() : invokeApp<StartupEntry[]>("startup_list");
+
+/** 启动项列表 + 来源级失败（v0.2.2）；非空 failedSources 表示列表可能不完整。 */
+export const startup_list_report = () =>
+  useMock()
+    ? mockCommands.startup_list_report()
+    : invokeApp<StartupListReport>("startup_list_report");
 
 /** 开机诊断（只读，无参数；DESIGN-BOOTDIAG-2026-11-10）。 */
 export const boot_diagnose = () =>

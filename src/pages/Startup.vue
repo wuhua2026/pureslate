@@ -1,10 +1,11 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from "vue";
-import { startup_list, startup_toggle } from "../api/commands";
+import { startup_list_report, startup_toggle } from "../api/commands";
 import type { StartupEntry } from "../types/ipc";
 import BootDiagnosisPanel from "../components/BootDiagnosisPanel.vue";
 import {
   disableRiskText,
+  failedSourcesNotice,
   impactLabel,
   isSystemDisabled,
   publisherLabel,
@@ -17,13 +18,16 @@ import {
 /** 屏：启动项（P3-03/R07）。影响降序；禁用=备份后移除（弹风险提示确认），
  *  已禁用区提供恢复入口。全程不删用户程序。 */
 const entries = ref<StartupEntry[]>([]);
+const failedSources = ref<string[]>([]);
 const loaded = ref(false);
 const pending = ref<StartupEntry | null>(null); // 待确认禁用项
 const busyId = ref<string | null>(null);
 const actionError = ref("");
 
 async function refresh(): Promise<void> {
-  entries.value = sortByImpactDesc(await startup_list());
+  const report = await startup_list_report();
+  entries.value = sortByImpactDesc(report.entries);
+  failedSources.value = report.failedSources;
 }
 
 onMounted(async () => {
@@ -73,8 +77,14 @@ async function restore(item: StartupEntry): Promise<void> {
     <!-- 开机诊断（只读）：放在启动项列表之上，列表仍是唯一可操作入口 -->
     <BootDiagnosisPanel />
 
+    <p v-if="failedSourcesNotice(failedSources)" class="source-warn" role="status">
+      {{ failedSourcesNotice(failedSources) }}
+    </p>
+
     <p v-if="!loaded" class="empty-list">加载中…</p>
-    <p v-else-if="entries.length === 0" class="empty-list">未发现启动项</p>
+    <p v-else-if="entries.length === 0" class="empty-list">
+      {{ failedSources.length ? "未读取到启动项（有来源读取失败，见上方说明）" : "未发现启动项" }}
+    </p>
     <template v-else>
       <div class="summary">
         <span>共 {{ entries.length }} 项</span>
@@ -220,6 +230,17 @@ async function restore(item: StartupEntry): Promise<void> {
   border-radius: 8px;
   background: var(--surface, #fff);
   color: var(--grade-red, #c4382e);
+  font-size: 0.85rem;
+}
+
+/* 来源读取不完整：黄色警示，明确"空列表 ≠ 没有启动项"。 */
+.source-warn {
+  margin: 0 0 12px;
+  padding: 8px 12px;
+  border: 1px solid var(--grade-yellow, #d9971c);
+  border-radius: 8px;
+  background: var(--surface, #fff);
+  color: var(--text, #1f2328);
   font-size: 0.85rem;
 }
 .section {

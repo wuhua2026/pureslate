@@ -6,6 +6,12 @@
 
 ## ① 踩坑记录
 
+### 枚举型来源必须返回失败子源：`0 条` 与"读不到"必须分开（2026-11-10，B1-10）
+- 现象：`startup/tasks.rs` 用 `filter_map(|e| e.ok())` + `read_to_string` + `continue`，非提权下返回空列表，UI 显示"未发现启动项"；同一台机 `Get-ScheduledTask` 有 **49** 条 Boot/Logon 任务。
+- 根因：①walkdir 的 `Err` 被 `filter_map(ok)` 丢弃；②`read_to_string` 对 UTF-16LE 任务 XML 必然失败（BOM `FF FE` 不是合法 UTF-8）——**即使提权也读不到**；③失败没有出口，调用方只能看到空数组。
+- 修复：`collect() -> (entries, failed_sources)`，失败码复用 `bootdiag` 那套；解码复用 `decode_task_xml`；调用方（Startup 页）用黄色警示 + 空态文案区分。
+- 复利结论：枚举函数要么返回"结果 + 失败列表"，要么返回错误；**禁止用空集合表达失败**。看到 `filter_map(ok)` / 裸 `continue` 先问一句"失败去哪了"。同一条数据可能有多种读取通道（文件 / COM / 服务端代理），权限边界不同。
+
 ### 差分测试要先验证 oracle：WMI 把受保护服务报成 `StartMode=Unknown`，而非提权 `Get-ScheduledTask` 却能看全（2026-11-10，B1-09）
 - 现象：服务差分自家 112 条 vs `Get-CimInstance Win32_Service -Filter "StartMode='Auto'"` 111 条，差集只有 `LSM`；`sc qc LSM` 明确 `START_TYPE=2 AUTO_START`，WMI 却返回 `StartMode=Unknown`。同一台机、同一非提权账户，计划任务差分自家 0 条 vs `Get-ScheduledTask` 49 条（Boot/Logon 触发器）。
 - 根因：①WMI 的 `Win32_Service.StartMode` 对部分受保护/内核支撑服务映射失败，并不等于 SCM 的真实启动类型；②`System32\Tasks` 目录 ACL 拒非提权读取，但 Task Scheduler COM（`Get-ScheduledTask`）经服务端代理仍能枚举——"读文件"与"走 COM"是两条权限边界不同的通道。
@@ -333,6 +339,7 @@
 - 本地裸 debug exe 8.36MB；安装包体积门禁由 CI 产物断言 <20MB（WiX 下载受限，不走本地打包验证）。
 - 本机电源（2026-11-10，B1-07 实测）：`HiberbootEnabled=1`，但 `SystemPowerCapabilities` 返回 `SystemS4=true / HiberFilePresent=false / Hiberboot=false / AoAc=true`（Modern Standby）。即**注册表开关开着、快速启动实际未生效**——UI 必须把"配置意图"与"能力"分开呈现，禁止只凭注册表说"已启用"。
 - 本机 B1 差分基准（2026-11-10，非提权）：启动项 **4**（HKCU Run 1 + HKLM Run 2 + 用户启动文件夹 1，与 `Win32_StartupCommand` 集合一致，仅 `%windir%` 展开差异）；自动服务 **112**（SCM 口径；WMI `StartMode='Auto'` 111，差 `LSM` 因 WMI 报 `Unknown`）；Boot/Logon 计划任务 **0**（文件读取被 ACL 拒；`Get-ScheduledTask` 同机 49 条，见 §①）；Uninstall 原始 276 键 → 过滤/去重后 **112**（与 `list_apps` 完全一致）；MSI 产品 **167**；卸载残留 **0**、信息不足 **64**。
+- 2026-11-10 偶发：`cargo test --lib` 全量并行时 `cleaner::dup::tests::duplicate_group_keeps_earliest_and_one_candidate` 断言失败一次；单跑与随后全量复跑均绿，未定位。若发布前复现，优先查测试间共享临时目录/固定文件名。
 
 ## ④ 门禁/基准趋势
 

@@ -8,13 +8,19 @@
 //!
 //! 已知局限（LESSONS 记录）：任务 XML 不含启用状态 → 未经本应用禁用的任务一律按
 //! "启用"显示；本应用自己禁用过的任务由 startup-backup manifest 标记 enabled=false。
+//!
+//! 失败边界（v0.2.2）：目录不可枚举 / 遍历出错 / XML 解析失败不再静默吞掉，
+//! 而是与 `bootdiag/tasks.rs` 同一套 `failed_sources` 语义返回给调用方——
+//! 非提权下 0 条必须能被区分成"读不到"，而不是"没有任务"。
 
 use std::fs;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 
 use quick_xml::events::Event;
 use quick_xml::Reader;
+
+const MAX_FILES: usize = 2_000;
 
 /// 一个登录触发任务。
 #[derive(Debug, Clone)]
@@ -106,29 +112,51 @@ fn system_tasks_root() -> Option<PathBuf> {
 }
 
 /// 枚举登录触发的第三方计划任务（排除 \Microsoft 系统命名空间）。
-pub fn enumerate_logon_tasks() -> Vec<TaskEntry> {
-    let Some(root) = system_tasks_root() else {
-        return vec![];
-    };
+///
+/// 返回 `(entries, failed_sources)`；失败码与 `bootdiag/tasks.rs` 完全一致：
+/// `tasks_root_missing` / `tasks_dir_empty_or_denied` / `tasks_walk_errors_N` /
+/// `tasks_parse_failed_N` / `tasks_truncated_2000`。
+pub fn collect() -> (Vec<TaskEntry>, Vec<String>) {
+    match system_tasks_root() {
+        Some(root) => collect_from_root(&root),
+        None => (Vec::new(), vec!["tasks_root_missing".to_string()]),
+    }
+}
+
+/// 从任务存储根枚举（沙箱可注入根目录）。
+pub(crate) fn collect_from_root(root: &Path) -> (Vec<TaskEntry>, Vec<String>) {
     let mut out = Vec::new();
-    for entry in walkdir::WalkDir::new(&root)
-        .max_depth(6)
-        .into_iter()
-        .filter_map(|e| e.ok())
-    {
+    let mut failed = Vec::new();
+    let mut xml_files = 0usize;
+    let mut walk_errors = 0usize;
+    let mut parse_failed = 0usize;
+
+    for entry in walkdir::WalkDir::new(root).max_depth(6) {
+        let entry = match entry {
+            Ok(e) => e,
+            Err(_) => {
+                walk_errors += 1;
+                continue;
+            }
+        };
         if !entry.file_type().is_file() {
             continue;
         }
         let path = entry.path();
-        let is_xml = path
+        if !path
             .extension()
-            .is_some_and(|e| e.eq_ignore_ascii_case("xml"));
-        if !is_xml {
+            .is_some_and(|e| e.eq_ignore_ascii_case("xml"))
+        {
             continue;
         }
-        let Ok(rel) = path.strip_prefix(&root) else {
+        let Ok(rel) = path.strip_prefix(root) else {
             continue;
         };
+        xml_files += 1;
+        if xml_files > MAX_FILES {
+            failed.push(format!("tasks_truncated_{MAX_FILES}"));
+            break;
+        }
         let rel_str = rel.to_string_lossy().replace('/', "\\");
         let name = rel_str
             .strip_suffix(".xml")
@@ -142,7 +170,12 @@ pub fn enumerate_logon_tasks() -> Vec<TaskEntry> {
         if name.starts_with("Microsoft\\") {
             continue; // 系统命名空间：不进用户启动项列表
         }
-        let Ok(xml) = fs::read_to_string(path) else {
+        let Ok(bytes) = fs::read(path) else {
+            parse_failed += 1;
+            continue;
+        };
+        let Some(xml) = crate::bootdiag::tasks::decode_task_xml(&bytes) else {
+            parse_failed += 1;
             continue;
         };
         let info = parse_task_xml(&xml);
@@ -154,7 +187,18 @@ pub fn enumerate_logon_tasks() -> Vec<TaskEntry> {
             command: info.command,
         });
     }
-    out
+
+    if xml_files == 0 {
+        // 非提权实测：目录可 stat 但枚举为空 —— 必须与"确实没有任务"区分。
+        failed.push("tasks_dir_empty_or_denied".to_string());
+    }
+    if walk_errors > 0 {
+        failed.push(format!("tasks_walk_errors_{walk_errors}"));
+    }
+    if parse_failed > 0 {
+        failed.push(format!("tasks_parse_failed_{parse_failed}"));
+    }
+    (out, failed)
 }
 
 /// 启/停计划任务（schtasks，系统工具；无窗口闪烁）。
@@ -174,43 +218,6 @@ pub fn set_task_enabled(task_name: &str, enabled: bool) -> bool {
         cmd.creation_flags(0x0800_0000);
     }
     cmd.status().map(|s| s.success()).unwrap_or(false)
-}
-
-/// 测试辅助：由任务存储根路径枚举（沙箱可注入）。
-#[cfg(test)]
-pub(crate) fn enumerate_from_root(root: &std::path::Path) -> Vec<TaskEntry> {
-    let mut out = Vec::new();
-    for entry in walkdir::WalkDir::new(root)
-        .max_depth(6)
-        .into_iter()
-        .filter_map(|e| e.ok())
-    {
-        let path = entry.path();
-        if !entry.file_type().is_file()
-            || !path
-                .extension()
-                .is_some_and(|e| e.eq_ignore_ascii_case("xml"))
-        {
-            continue;
-        }
-        let Ok(rel) = path.strip_prefix(root) else {
-            continue;
-        };
-        let name = rel.to_string_lossy().replace('/', "\\");
-        let name = name.strip_suffix(".xml").unwrap_or(&name).to_string();
-        let Ok(xml) = fs::read_to_string(path) else {
-            continue;
-        };
-        let info = parse_task_xml(&xml);
-        if !info.has_logon_trigger || name.starts_with("Microsoft\\") {
-            continue;
-        }
-        out.push(TaskEntry {
-            name,
-            command: info.command,
-        });
-    }
-    out
 }
 
 #[cfg(test)]
@@ -274,25 +281,103 @@ mod tests {
         assert_eq!(info.command, "D:\\svc\\run.cmd");
     }
 
-    #[test]
-    fn enumerate_from_root_filters_microsoft_and_non_logon() {
+    fn temp_dir(tag: &str) -> std::path::PathBuf {
         let dir = std::env::temp_dir().join(format!(
-            "pureslate-tasks-{}",
+            "pureslate-tasks-{tag}-{}",
             std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
                 .unwrap()
                 .as_nanos()
         ));
+        fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
+    fn utf16le_with_bom(s: &str) -> Vec<u8> {
+        let mut v = vec![0xFF, 0xFE];
+        for u in s.encode_utf16() {
+            v.extend_from_slice(&u.to_le_bytes());
+        }
+        v
+    }
+
+    #[test]
+    fn collect_from_root_filters_microsoft_and_non_logon() {
+        let dir = temp_dir("filter");
         fs::create_dir_all(dir.join("Microsoft\\Windows")).unwrap();
         fs::create_dir_all(dir.join("Vendor")).unwrap();
         fs::write(dir.join("Microsoft\\Windows\\SysTask.xml"), SAMPLE).unwrap();
         fs::write(dir.join("Vendor\\TimeOnly.xml"), NO_LOGON).unwrap();
         fs::write(dir.join("Vendor\\Logon.xml"), SAMPLE).unwrap();
 
-        let out = enumerate_from_root(&dir);
+        let (out, failed) = collect_from_root(&dir);
         assert_eq!(out.len(), 1);
         assert_eq!(out[0].name, "Vendor\\Logon");
+        assert!(failed.is_empty(), "正常目录不应产生失败子源: {failed:?}");
 
         let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn collect_from_root_reads_utf16_task_xml() {
+        let dir = temp_dir("utf16");
+        fs::create_dir_all(dir.join("Vendor")).unwrap();
+        fs::write(dir.join("Vendor\\Utf16.xml"), utf16le_with_bom(SAMPLE)).unwrap();
+
+        let (out, failed) = collect_from_root(&dir);
+        assert_eq!(out.len(), 1);
+        assert_eq!(out[0].name, "Vendor\\Utf16");
+        assert!(failed.is_empty(), "{failed:?}");
+
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn empty_dir_is_reported_as_unreadable_not_absent() {
+        let dir = temp_dir("empty");
+
+        let (out, failed) = collect_from_root(&dir);
+        assert!(out.is_empty());
+        assert_eq!(failed, vec!["tasks_dir_empty_or_denied"]);
+
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn nonexistent_root_surfaces_walk_error() {
+        let dir = std::env::temp_dir().join("pureslate-tasks-does-not-exist");
+        let (out, failed) = collect_from_root(&dir);
+        assert!(out.is_empty());
+        assert!(
+            failed.contains(&"tasks_dir_empty_or_denied".to_string()),
+            "{failed:?}"
+        );
+        assert!(
+            failed.iter().any(|f| f.starts_with("tasks_walk_errors_")),
+            "{failed:?}"
+        );
+    }
+
+    #[test]
+    fn unreadable_xml_counted_as_parse_failure() {
+        let dir = temp_dir("badxml");
+        fs::create_dir_all(dir.join("Vendor")).unwrap();
+        fs::write(dir.join("Vendor\\Broken.xml"), [0xEF, 0xBB, 0xBF, 0xFF]).unwrap();
+
+        let (out, failed) = collect_from_root(&dir);
+        assert!(out.is_empty());
+        assert!(
+            failed.contains(&"tasks_parse_failed_1".to_string()),
+            "{failed:?}"
+        );
+
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    #[ignore = "真机验证：打印非提权下的来源失败边界"]
+    fn live_collect_prints_sources() {
+        let (out, failed) = collect();
+        println!("LIVE_TASKS entries={} failed={failed:?}", out.len());
     }
 }

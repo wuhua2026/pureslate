@@ -3,6 +3,7 @@
  * P3-03/R07：影响排序 + 启用/禁用分组 + 展示格式化 + 禁用风险/失败文案。
  */
 import type { Impact, StartupEntry, StartupSource } from "../types/ipc";
+import { failedSourceLabel } from "./bootdiagModel";
 
 /** 影响档位排序权重（高→中→低）。 */
 export const IMPACT_RANK: Record<Impact, number> = { high: 0, medium: 1, low: 2 };
@@ -81,4 +82,14 @@ export function toggleFailText(e: StartupEntry): string {
   return e.source === "hklm_run"
     ? `「${e.name}」位于本机级注册表，禁用/恢复需要管理员权限，未执行`
     : `「${e.name}」操作失败，请稍后重试`;
+}
+
+/**
+ * 来源级失败提示（v0.2.2）：失败码与 bootdiag 同一套语义。
+ * 空数组返回空串；非空时必须让用户知道"空列表 ≠ 没有启动项"。
+ */
+export function failedSourcesNotice(sources: string[]): string {
+  if (sources.length === 0) return "";
+  const labels = sources.map(failedSourceLabel).join("；");
+  return `启动项可能不完整：${labels}。列表为空不代表没有启动项。`;
 }

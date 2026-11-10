@@ -4,6 +4,16 @@
 
 ## [Unreleased]
 
+### 2026-11-10 · 启动项来源失败可见（v0.2.2，加性契约）
+
+- **新增 IPC 命令** `startup_list_report`（无参数，只读）：返回 `StartupListReport`，在原有列表之外带上来源级失败。
+- **新增类型** `StartupListReport { entries, failedSources }`；`contract.rs` 与 `ipc.ts` 双端同步。
+- **未修改** `startup_list` 命令签名与 `StartupEntry` 字段，旧调用方不受影响。
+- 语义：`failedSources` 与 `boot_diagnose` 的 `BootStartupData.failedSources` **同一套失败码**
+  （`tasks_root_missing` / `tasks_dir_empty_or_denied` / `tasks_walk_errors_N` / `tasks_parse_failed_N` / `tasks_truncated_2000`）；
+  空数组表示来源全部读取成功。非提权下任务目录不可读时，调用方必须提示"列表可能不完整"，不得当成"没有启动项"。
+- 行为修正：任务 XML 改用 `bootdiag::tasks::decode_task_xml` 读取，兼容 UTF-16LE（原 `read_to_string` 对 UTF-16 必然失败）。
+
 ### 2026-11-10 · 开机诊断（只读，加性契约）
 
 - **新增 IPC 命令** `boot_diagnose`（无参数，只读；不写注册表 / 不删文件 / 不改电源配置 / 不启停服务）。

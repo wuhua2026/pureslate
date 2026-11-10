@@ -208,6 +208,18 @@ pub struct StartupEntry {
     pub system_disabled: Option<bool>,
 }
 
+/// 启动项列表 + 来源级失败（v0.2.2 加性新增，`startup_list_report` 返回）。
+///
+/// `failed_sources` 与 `BootStartupData.failed_sources` 同一套语义：
+/// `tasks_root_missing` / `tasks_dir_empty_or_denied` / `tasks_walk_errors_N` /
+/// `tasks_parse_failed_N` / `tasks_truncated_2000`。空数组 = 全部来源读取成功。
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct StartupListReport {
+    pub entries: Vec<StartupEntry>,
+    pub failed_sources: Vec<String>,
+}
+
 // ---- 卸载辅助（R27 · SPEC §6.7）----
 /// 已安装程序条目（只读枚举 Uninstall 注册表四视图）。
 #[derive(Debug, Clone, Serialize, Deserialize)]

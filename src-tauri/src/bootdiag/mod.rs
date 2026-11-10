@@ -15,7 +15,7 @@ mod power;
 mod residue;
 mod services;
 mod startup_sources;
-mod tasks;
+pub(crate) mod tasks;
 
 /// 采集整份只读诊断报告。
 pub fn diagnose() -> BootDiagnosisReport {

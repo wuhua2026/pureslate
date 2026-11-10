@@ -660,6 +660,17 @@ pub fn startup_list(_state: State<AppState>) -> Vec<StartupEntry> {
     crate::startup::list()
 }
 
+/// 启动项列表 + 来源级失败（v0.2.2 加性命令；失败码与 bootdiag 一致）。
+/// 调用方必须把非空 `failed_sources` 呈现为"列表可能不完整"，不得当成"没有启动项"。
+#[tauri::command]
+pub fn startup_list_report(_state: State<AppState>) -> crate::contract::StartupListReport {
+    let (entries, failed_sources) = crate::startup::list_with_sources();
+    crate::contract::StartupListReport {
+        entries,
+        failed_sources,
+    }
+}
+
 /// 开机诊断（只读，无参数）。重活放 spawn_blocking，避免阻塞 UI 线程。
 /// 设计稿：docs/dev/DESIGN-BOOTDIAG-2026-11-10.md。
 #[tauri::command]

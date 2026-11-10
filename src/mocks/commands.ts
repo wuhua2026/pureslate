@@ -27,6 +27,7 @@ import type {
   ScanItem,
   ScanProfile,
   StartupEntry,
+  StartupListReport,
   UpdateStatus,
   LogExportParams,
 } from "../types/ipc";
@@ -121,6 +122,13 @@ export const mockCommands = {
   },
 
   startup_list: (): Promise<StartupEntry[]> => Promise.resolve(StartupListStub),
+
+  // 模拟非提权真机：任务目录读不到 → 列表可能不完整，UI 必须显示边界提示。
+  startup_list_report: (): Promise<StartupListReport> =>
+    Promise.resolve({
+      entries: StartupListStub,
+      failedSources: ["tasks_dir_empty_or_denied", "tasks_walk_errors_1"],
+    }),
 
   // 开机诊断 mock：覆盖 ok / partial / denied 三种状态，供 UI 走查。
   boot_diagnose: (): Promise<BootDiagnosisReport> =>

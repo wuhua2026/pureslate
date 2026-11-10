@@ -5,12 +5,20 @@
 > 维护（AGENTS.md §9）：任务完成时 agent 自动追加/更新当前会话条目，随任务同一提交。格式：`## YYYY-MM-DD | 主题`。
 > 本初版由历史会话记忆回溯整理（截至 2026-09-29），细节以 git 历史与 TASKS.md 为准。
 
+## 2026-11-10 | B1-10 修复启动项计划任务静默失败
+
+- **改动**：`startup/tasks.rs` 的 `enumerate_logon_tasks` → `collect() -> (Vec<TaskEntry>, Vec<String>)`，失败码与 `bootdiag/tasks.rs` 完全一致；walkdir 错误不再被 `filter_map(ok)` 吞掉；任务 XML 改走 `bootdiag::tasks::decode_task_xml`（UTF-16LE）——原 `read_to_string` 对 UTF-16 任务 XML 必然失败，即使提权也读不到。
+- **契约（加性）**：新增 `startup_list_report` + `StartupListReport{entries,failedSources}`；`startup_list` 签名与 `StartupEntry` 字段未动；`contract.rs` / `ipc.ts` / CHANGELOG 双端同步。
+- **调用方**：Startup 页改用 `startup_list_report`，黄色警示 + 空列表文案区分"读不到"与"没有"；mock 覆盖 `tasks_dir_empty_or_denied` + `tasks_walk_errors_1`。
+- **验证**：真机非提权 `entries=0` + 两个失败码；Rust **290 lib passed + 9 ignored + 27 集成**；vitest **99 passed**；`pnpm build` 成功；mock 走查 PASS（三条警示文案 + 8 项列表）。全量首跑出现一次 `cleaner::dup` 并行偶发失败，单跑/复跑均绿。
+- **下一步**：工作区干净，交回发布流程（v0.2.2）。
+
 ## 2026-11-10 | B1 开机诊断（只读）实现
 
 - **背景**：设计稿 `DESIGN-BOOTDIAG-2026-11-10.md` 评审通过，按 B1-00..B1-09 依次实现。评审对三个未决项取保守解：事件日志通道不实现开启、HKLM StartupApproved 本轮不补、卸载命令不在 UI 展示。零新 crate/npm。
 - **进度**：B1-00 取证 ✅（非提权真机：通道 ACL 无 IU、`wevtutil qe` 退出码 5；`System32\Tasks` 非提权 0 文件；`schtasks /xml` 为 CP936；`HiberbootEnabled=1` 但 hiberfil.sys 不存在；Uninstall 276 条中 210 条无 InstallLocation）；B1-01 契约双端 ✅（1 命令 + 17 类型，`pnpm typecheck` 与 cargo 全绿）；B1-02 注册表源 ✅（Run/RunOnce 双视图 + 启动文件夹 + HKCU StartupApproved，262 例）；B1-03 事件日志 ✅（wevtapi FFI + XML 解析 + XPath 降级，非提权实测 `Denied` 且不带 data，269 例）；B1-04 服务 ✅（SCM 枚举 + 延迟启动，真机 112 条，273 例）；B1-05 计划任务 ✅（Tasks XML + 编码嗅探 + Boot/Logon 触发器，真机非提权 0 条 + `tasks_dir_empty_or_denied`，279 例）；B1-06 卸载残留 ✅（MSI 产品码核对 + 双条件 + UNC 守卫，真机 apps=112/residue=0/unknown=64/279ms，284 例）；B1-07 电源 ✅（powrprof 能力位 + HiberbootEnabled，真机 1/支持/false/false/true，286 例）；B1-08 UI ✅（面板默认不执行 + 6 组件 + 纯函数模型 16 例；`uninstallCommand` 不进 UI、系统任务默认折叠；`pnpm test` 96 passed，build 成功）；B1-09 收尾 ✅（差分 7 项记入设计稿 §7.5；NSIS 2.87 MiB / MSI 4.89 MiB；cargo 286 lib + 27 集成全绿，vitest 96）。
-- **已知缺陷（本轮不修）**：`startup/tasks.rs` 非提权枚举 `System32\Tasks` 为空时静默 `continue`，把"读不到"伪装成"没有"；新模块用 `failed_sources` 显式区分。
-- **下一步**：B1 批次完成（零新增依赖）。待人工在提权环境复验事件日志与 `System32\Tasks` 两项（非提权只能给 `denied` / 0 条 + 失败子源）；既有 `startup/tasks.rs` 静默缺口留待单独任务修。
+- **已知缺陷（B1-10 已修）**：`startup/tasks.rs` 非提权枚举 `System32\Tasks` 为空时静默 `continue`，把"读不到"伪装成"没有"；新模块用 `failed_sources` 显式区分。
+- **下一步**：B1 批次完成（零新增依赖）。待人工在提权环境复验事件日志与 `System32\Tasks` 两项（非提权只能给 `denied` / 0 条 + 失败子源）；既有 `startup/tasks.rs` 静默缺口已由 B1-10 修复。
 
 ## 2026-10-19 | R32-0 真机误删复盘热修（E:\tmp 文件区被一键清理永久删除）
 

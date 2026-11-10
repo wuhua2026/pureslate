@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import type { StartupEntry } from "../../types/ipc";
 import {
   disableRiskText,
+  failedSourcesNotice,
   impactLabel,
   isSystemDisabled,
   publisherLabel,
@@ -106,5 +107,23 @@ describe("文案函数", () => {
     expect(toggleFailText(entry({ source: "hklm_run" }))).toContain("管理员");
     expect(toggleFailText(entry({ source: "hkcu_run" }))).toContain("失败");
     expect(toggleFailText(entry({ source: "task_scheduler" }))).toContain("失败");
+  });
+});
+
+describe("failedSourcesNotice（v0.2.2 来源失败边界）", () => {
+  it("无失败 → 空串（不打扰用户）", () => {
+    expect(failedSourcesNotice([])).toBe("");
+  });
+
+  it("任务目录不可读 → 明确提示列表可能不完整，且空列表不等于没有", () => {
+    const text = failedSourcesNotice(["tasks_dir_empty_or_denied"]);
+    expect(text).toContain("计划任务目录不可枚举");
+    expect(text).toContain("列表为空不代表没有启动项");
+  });
+
+  it("遍历错误与未知失败码都保留原始信息", () => {
+    const text = failedSourcesNotice(["tasks_walk_errors_1", "custom_failure"]);
+    expect(text).toContain("计划任务目录部分不可读");
+    expect(text).toContain("custom_failure");
   });
 });
