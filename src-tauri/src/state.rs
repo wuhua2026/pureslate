@@ -39,7 +39,10 @@ impl AppState {
     pub fn new() -> Self {
         Self {
             version: env!("CARGO_PKG_VERSION").to_string(),
-            rules_version: "0".to_string(),
+            // R32-4a：规则包与安装包同版本发布（publish-manifest.ps1 的
+            // rulesVersion = 应用版本），不能写死 "0"，否则每次检查都会重下规则包、
+            // app_meta 对外谎报版本。
+            rules_version: env!("CARGO_PKG_VERSION").to_string(),
             // P2-01：启动从 settings.json 恢复设置（信任底座持久化）。
             settings: Mutex::new(crate::storage::load_settings()),
             scans: Mutex::new(ScanStore::default()),
@@ -150,6 +153,15 @@ mod tests {
             scan_id: id.into(),
             ..Default::default()
         }
+    }
+
+    /// R32-4a：`rulesVersion` 跟随应用版本，且绝不能再是占位 "0"。
+    #[test]
+    fn rules_version_follows_app_version() {
+        let state = AppState::new();
+        assert_eq!(state.rules_version, env!("CARGO_PKG_VERSION"));
+        assert_eq!(state.rules_version, state.version);
+        assert_ne!(state.rules_version, "0");
     }
 
     #[test]

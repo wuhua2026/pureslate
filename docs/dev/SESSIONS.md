@@ -14,7 +14,9 @@
 - **R32-1 验证**：`cargo fmt --check`/`clippy --all-targets -D warnings` 0 告警；`cargo test` **293 lib + 29 集成**全绿（9 ignored）；新增状态机用例 2 例（并发拒绝、id 不匹配不摘 current）与 `resolve_targets` 去重用例。
 - **R32-3a ✅（本次提交）**：`quarantineAutoPurge` 此前只在契约里存在、从未被读取（关掉也自动删）。现 `run_pass_globally` 从 `load_settings` 取开关，关闭时走 `run_pass_at_root_with(..., false)` 跳过到期硬删（到期项保留、继续计入用量，手动清理）。保留期 7–30 在三处 clamp：`AppSettings::normalized`（读/存）、`settings_set` 入口、`clean_retention`；默认 14 改为 contract 常量。设置页新增「隔离区」卡（自动清除 + 天数输入），全站硬编码「14 天」改成「保留期内」，Quarantine 到期提醒不再宣称必然自动清除；README/SPEC 同步为「可调 7–30」。
 - **R32-3a 验证**：cargo **295 lib + 29 集成**全绿（9 ignored）；vitest **99**；`pnpm typecheck`/`build` 绿；新增 autoPurge 关闭保留到期条目、保留期夹取（0→7、999→30、手改 2→7）用例。
-- **下一步**：R32-4 rulesVersion + 规则更新通道（签名/提权方案需先拍板，停下报告）。
+- **R32-4a ✅（本次提交）**：按用户拍板 D1「跟随应用版本」，`AppState.rules_version` 由写死 `"0"` 改为 `env!("CARGO_PKG_VERSION")`，与 `publish-manifest.ps1` 的 `rulesVersion = $Version` 一致；`app_meta` 不再谎报 0，更新检查不再因版本不等而每次重下规则包。不做安装时持久化。新增单测 `rules_version_follows_app_version`。
+- **R32-4a 验证**：cargo **296 lib + 29 集成**全绿（9 ignored）；fmt/clippy 0 告警；契约零变更。
+- **下一步**：R32-4b 签名通道（Ed25519/CNG，必要时退 ECDSA P-256；仅安装时验签；CI Secret 签名）+ NSIS 安装器跟随系统语言（独立提交）。
 
 ## 2026-11-11 | v0.2.2 发布（R32-0 误删修复 + R31 安全批次 + B1 开机诊断）
 
