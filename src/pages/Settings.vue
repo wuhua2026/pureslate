@@ -44,6 +44,14 @@ function toggle<K extends keyof AppSettings>(key: K): void {
   void save({ ...settings.value, [key]: !settings.value[key] });
 }
 
+/** 隔离区保留期：入口即夹到 7–30 天（后端 `settings_set` 会再夹一次）。 */
+function onRetentionChange(e: Event): void {
+  if (!settings.value) return;
+  const raw = Number((e.target as HTMLInputElement).value);
+  const days = Math.min(30, Math.max(7, Number.isFinite(raw) ? Math.round(raw) : 14));
+  void save({ ...settings.value, quarantineRetentionDays: days });
+}
+
 async function checkNow(): Promise<void> {
   if (checking.value) return;
   checking.value = true;
@@ -157,6 +165,35 @@ onMounted(() => {
       </section>
 
       <section class="card anim-rise d3">
+        <h2>隔离区（保留期与到期处理）</h2>
+        <label class="row">
+          <input
+            type="checkbox"
+            :checked="settings.quarantineAutoPurge"
+            @change="toggle('quarantineAutoPurge')"
+          />
+          <span>到期后自动清除（关闭后到期文件保留，需在隔离区手动清理）</span>
+        </label>
+        <label class="row">
+          <span>保留期</span>
+          <input
+            class="days-input"
+            type="number"
+            min="7"
+            max="30"
+            step="1"
+            :value="settings.quarantineRetentionDays"
+            @change="onRetentionChange"
+          />
+          <span>天（可设 7–30，默认 14；到期前 3 天提醒）</span>
+        </label>
+        <p class="hint">
+          关闭「到期自动清除」不会释放磁盘空间，只是把“到期即删”改为手动确认；
+          保留期内可随时在隔离区还原。
+        </p>
+      </section>
+
+      <section class="card anim-rise d3">
         <h2>崩溃数据（默认仅本地保存）</h2>
         <label class="row">
           <input
@@ -259,6 +296,16 @@ onMounted(() => {
 }
 .row.actions {
   cursor: default;
+}
+.days-input {
+  width: 64px;
+  padding: 4px 6px;
+  border: 1px solid var(--border, #e4e7ec);
+  border-radius: 6px;
+  background: var(--surface, #fff);
+  color: var(--text, #1f2430);
+  font-size: 0.85rem;
+  font-variant-numeric: tabular-nums;
 }
 .btn {
   padding: 6px 18px;

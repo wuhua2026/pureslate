@@ -587,13 +587,17 @@ pub fn clean_cancel(_state: State<AppState>, tx_id: String) -> bool {
     }
 }
 
-/// 取清理用隔离保留期（读当前设置；默认 14 天）。
+/// 取清理用隔离保留期（读当前设置；默认 14 天，越界值夹到 7–30）。
 fn clean_retention(state: &State<AppState>) -> u32 {
     state
         .settings
         .lock()
         .map(|s| s.quarantine_retention_days)
-        .unwrap_or(14)
+        .unwrap_or(crate::contract::QUARANTINE_RETENTION_DEFAULT_DAYS)
+        .clamp(
+            crate::contract::QUARANTINE_RETENTION_MIN_DAYS,
+            crate::contract::QUARANTINE_RETENTION_MAX_DAYS,
+        )
 }
 
 /// 生成唯一清理事务 id。
@@ -1091,8 +1095,10 @@ pub fn settings_get(state: State<AppState>) -> AppSettings {
 }
 
 /// 写入设置（全量覆盖）并持久化到 settings.json。
+/// R32-3：保留期在入口夹到 7–30 天，返回值与落盘值一致（前端据此回显）。
 #[tauri::command]
 pub fn settings_set(state: State<AppState>, settings: AppSettings) -> AppSettings {
+    let settings = settings.normalized();
     // 优先持久化（信任底座：即使内存更新失败也不丢配置）。
     if let Err(e) = crate::storage::save_settings(&settings) {
         eprintln!("[settings] 持久化失败: {e}");

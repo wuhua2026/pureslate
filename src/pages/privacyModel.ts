@@ -40,7 +40,7 @@ export function guardHint(categoryId: string): string {
 
 /** 去向标注：可恢复语义（SAFETY §4.5，UI 须区分"可还原"而非笼统"已清理"）。 */
 export function restorableNote(disposition: Disposition): string {
-  return disposition === "quarantine" ? "入隔离区 · 14 天内可还原" : "直接清理";
+  return disposition === "quarantine" ? "入隔离区 · 保留期内可还原" : "直接清理";
 }
 
 /** 选中项合计字节。 */

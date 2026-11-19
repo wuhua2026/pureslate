@@ -163,8 +163,8 @@ export interface ScanResult {
 
 ```ts
 export interface AppSettings {
-  quarantineRetentionDays: number;   // 默认 14；范围 7–30 尚未在 UI/clamp 落地（R32-3）
-  quarantineAutoPurge: boolean;      // 默认 true；当前行为恒自动清除（设置未接线，R32-3）
+  quarantineRetentionDays: number;   // 默认 14；范围 7–30（R32-3：读取/保存/入口三处 clamp，设置页可调）
+  quarantineAutoPurge: boolean;      // 默认 true；关闭后到期条目保留、需手动清理（R32-3 已接线）
   updateOptIn: boolean;              // 默认 false（R22）
   crashUploadOptIn: boolean;         // 默认 false（R24）
   expertMode: boolean;               // 默认 false（解锁 🔴）

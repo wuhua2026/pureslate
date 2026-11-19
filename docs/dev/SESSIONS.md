@@ -12,7 +12,9 @@
 - **验证**：新增集成 2 例（老 .log 产出 / 新 .log 被 maxAgeDays 排除 / .tmp 被 exclude 排除；重叠 target 只产出 1 项）；`cargo fmt --check` + `clippy --all-targets -D warnings` 0 告警；`cargo test` **290 lib + 29 集成**全绿（9 ignored）。
 - **R32-1 ✅（本次提交）**：扫描 single-flight——`ScanStore::begin` 在已有 current 时返回错误；`finish` 改为按 `scan_id` 匹配才摘 current，迟到的收尾线程不会污染新会话。清理侧：`clean_execute` 请求 id 与会话条目去重，`resolve_targets` 再按 id + 大小写不敏感路径去重（同一文件不再重复删除/伪失败）；`clean_execute` 与残留清理共用 `begin_clean`（同锁检查+登记）实现清理事务 single-flight。契约零变更。
 - **R32-1 验证**：`cargo fmt --check`/`clippy --all-targets -D warnings` 0 告警；`cargo test` **293 lib + 29 集成**全绿（9 ignored）；新增状态机用例 2 例（并发拒绝、id 不匹配不摘 current）与 `resolve_targets` 去重用例。
-- **下一步**：R32-3 autoPurge/retention 接线。
+- **R32-3a ✅（本次提交）**：`quarantineAutoPurge` 此前只在契约里存在、从未被读取（关掉也自动删）。现 `run_pass_globally` 从 `load_settings` 取开关，关闭时走 `run_pass_at_root_with(..., false)` 跳过到期硬删（到期项保留、继续计入用量，手动清理）。保留期 7–30 在三处 clamp：`AppSettings::normalized`（读/存）、`settings_set` 入口、`clean_retention`；默认 14 改为 contract 常量。设置页新增「隔离区」卡（自动清除 + 天数输入），全站硬编码「14 天」改成「保留期内」，Quarantine 到期提醒不再宣称必然自动清除；README/SPEC 同步为「可调 7–30」。
+- **R32-3a 验证**：cargo **295 lib + 29 集成**全绿（9 ignored）；vitest **99**；`pnpm typecheck`/`build` 绿；新增 autoPurge 关闭保留到期条目、保留期夹取（0→7、999→30、手改 2→7）用例。
+- **下一步**：R32-4 rulesVersion + 规则更新通道（签名/提权方案需先拍板，停下报告）。
 
 ## 2026-11-11 | v0.2.2 发布（R32-0 误删修复 + R31 安全批次 + B1 开机诊断）
 

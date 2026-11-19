@@ -3,7 +3,7 @@
  *
  * SAFETY §4.5：禁止混用「已清理」。首行必须区分：
  *   - 已释放（freed）= direct + recycle 去向中 ok 的字节（真正让渡给系统/回收站）；
- *   - 已隔离（quarantined）= quarantine 去向中 ok 的字节（尚未释放，14 天可还原）。
+ *   - 已隔离（quarantined）= quarantine 去向中 ok 的字节（尚未释放，保留期内可还原）。
  */
 import type { CleanProgressEvent, Disposition, Grade } from "../types/ipc";
 

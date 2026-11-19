@@ -67,7 +67,7 @@ describe("guardHint", () => {
 
 describe("restorableNote", () => {
   it("quarantine 标注可还原，其余标注直接清理", () => {
-    expect(restorableNote("quarantine")).toContain("14 天内可还原");
+    expect(restorableNote("quarantine")).toContain("保留期内可还原");
     expect(restorableNote("direct")).toBe("直接清理");
     expect(restorableNote("recycle")).toBe("直接清理");
   });

@@ -60,14 +60,14 @@ const tiles: Array<{
   { to: "/startup", title: "启动项", desc: "管理开机自启程序", icon: "startup", c: "#16a34a", bg: "#e4f7ec" },
   { to: "/privacy", title: "隐私清理", desc: "浏览痕迹与最近记录", icon: "privacy", c: "#7c3aed", bg: "#f0e8ff" },
   { to: "/apps", title: "软件卸载", desc: "调起官方卸载器并清残留", icon: "apps", c: "#ea580c", bg: "#ffeddc" },
-  { to: "/quarantine", title: "隔离区", desc: "14 天内可一键还原", icon: "quarantine", c: "#475569", bg: "#e9eef4" },
+  { to: "/quarantine", title: "隔离区", desc: "保留期内可一键还原", icon: "quarantine", c: "#475569", bg: "#e9eef4" },
   { to: "/log", title: "操作日志", desc: "每一步操作可审计", icon: "log", c: "#64748b", bg: "#eef2f7" },
 ];
 
 const promises = [
   { t: "只读扫描", d: "确认前不删除任何文件" },
   { t: "安全分级", d: "绿/黄/红三级去向" },
-  { t: "全程可还原", d: "默认隔离区保留 14 天" },
+  { t: "全程可还原", d: "默认隔离区保留 14 天（设置中可调 7–30 天）" },
 ];
 </script>
 

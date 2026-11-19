@@ -48,7 +48,7 @@ function cleanSelected(): void {
   <section class="page anim-rise d1">
     <header class="head">
       <h1>隐私资料</h1>
-      <p class="sub">浏览器历史与最近文档记录——逐项勾选确认后移入隔离区，14 天内可还原，不直接删除</p>
+      <p class="sub">浏览器历史与最近文档记录——逐项勾选确认后移入隔离区，保留期内可还原，不直接删除</p>
     </header>
 
     <div v-if="!hasScan" class="empty">
@@ -93,7 +93,7 @@ function cleanSelected(): void {
       <div class="actionbar">
         <span>已选 {{ selectedCount }} 项</span>
         <span>合计 {{ formatBytes(totalBytes) }}</span>
-        <span class="note">全部入隔离区 · 14 天内可还原</span>
+        <span class="note">全部入隔离区 · 保留期内可还原</span>
         <button class="btn" :disabled="selectedCount === 0 || clean.running" @click="cleanSelected">
           清理所选
         </button>

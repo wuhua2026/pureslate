@@ -98,7 +98,10 @@ fn civil_from_days(z: i64) -> (i64, u32, u32) {
 /// errors 不向调用方传播（设置可重生成），仅暴露读取异常计数供测试。
 pub fn load_settings() -> AppSettings {
     match fs::read_to_string(settings_path()) {
-        Ok(text) => serde_json::from_str(&text).unwrap_or_default(),
+        // R32-3：越界保留期在这里收敛（手改/旧版本 settings.json）。
+        Ok(text) => serde_json::from_str::<AppSettings>(&text)
+            .unwrap_or_default()
+            .normalized(),
         Err(_) => AppSettings::default(),
     }
 }
@@ -107,7 +110,8 @@ pub fn load_settings() -> AppSettings {
 pub fn save_settings(settings: &AppSettings) -> std::io::Result<()> {
     let root = data_root();
     fs::create_dir_all(&root)?;
-    let json = serde_json::to_string_pretty(settings)?;
+    // R32-3：落盘前同样夹到 7–30，保证磁盘上的值永远合法。
+    let json = serde_json::to_string_pretty(&settings.clone().normalized())?;
     fs::write(settings_path(), json)
 }
 
@@ -160,6 +164,48 @@ mod tests {
         let loaded = load_settings();
         assert!(loaded.expert_mode);
         assert_eq!(loaded.quarantine_retention_days, 7);
+        set_data_root_override(None);
+        let _ = fs::remove_dir_all(&sandbox);
+    }
+
+    /// R32-3：保留期在保存与读取两侧都夹到 7–30 天。
+    #[test]
+    fn retention_days_clamped_on_save_and_load() {
+        let sandbox = std::env::temp_dir().join(format!(
+            "pureslate-settings-clamp-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let _g = crate::storage::TEST_DATA_ROOT_LOCK.lock().unwrap();
+        set_data_root_override(Some(sandbox.join("data-root")));
+
+        // 低于下限 → 7；高于上限 → 30。
+        let low = AppSettings {
+            quarantine_retention_days: 0,
+            ..AppSettings::default()
+        };
+        save_settings(&low).unwrap();
+        assert_eq!(load_settings().quarantine_retention_days, 7);
+        let high = AppSettings {
+            quarantine_retention_days: 999,
+            ..AppSettings::default()
+        };
+        save_settings(&high).unwrap();
+        assert_eq!(load_settings().quarantine_retention_days, 30);
+
+        // 手改文件写入 2 天：读取时收敛到 7，且其它字段照常生效。
+        fs::write(
+            settings_path(),
+            r#"{"quarantineRetentionDays":2,"quarantineAutoPurge":false,"updateOptIn":false,"crashUploadOptIn":false,"expertMode":false,"mirrorFirst":true}"#,
+        )
+        .unwrap();
+        let loaded = load_settings();
+        assert_eq!(loaded.quarantine_retention_days, 7);
+        assert!(!loaded.quarantine_auto_purge);
+
         set_data_root_override(None);
         let _ = fs::remove_dir_all(&sandbox);
     }

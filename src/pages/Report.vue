@@ -209,7 +209,7 @@ function oneClickClean(): void {
         <div class="metric anim-rise d2">
           <span class="metric-label">进隔离区（可还原）</span>
           <span class="metric-val y">{{ formatBytes(animatedQuarantine) }}</span>
-          <span class="metric-note">🟡/🔴 14 天可还原</span>
+          <span class="metric-note">🟡/🔴 保留期内可还原</span>
         </div>
         <div class="metric anim-rise d3">
           <span class="metric-label">风险分布</span>
@@ -257,7 +257,7 @@ function oneClickClean(): void {
           危险项（{{ overview.redCategoryCount }}）{{ redExpanded ? "收起" : "展开查看" }}
         </button>
         <p class="red-note">
-          🔴 危险项一律进<span class="em">隔离区（14 天可还原）</span>，默认灰禁；需在<span class="em">设置中开启专家模式</span>后才会纳入本次清理，并须<span class="em">二次确认 token</span>。
+          🔴 危险项一律进<span class="em">隔离区（保留期内可还原）</span>，默认灰禁；需在<span class="em">设置中开启专家模式</span>后才会纳入本次清理，并须<span class="em">二次确认 token</span>。
         </p>
       </section>
 
@@ -285,7 +285,7 @@ function oneClickClean(): void {
             @click="selectedPlan = 'B'"
           >
             <span class="plan-name">方案 B · {{ overview.planB.name }}</span>
-            <span class="plan-desc">在安全项基础上加入 🟡 项（进隔离区，14 天可还原）</span>
+            <span class="plan-desc">在安全项基础上加入 🟡 项（进隔离区，保留期内可还原）</span>
             <span class="plan-nums">{{ planSummary(overview.planB) }}</span>
           </button>
         </div>

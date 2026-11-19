@@ -464,7 +464,7 @@ async function rescanAfterClean(): Promise<void> {
                   :checked="rowState.get(c.id)?.disposition === 'quarantine'"
                   @change="setDisposition(c.id, 'quarantine')"
                 />
-                移入隔离区（14 天可还原，推荐）
+                移入隔离区（保留期内可还原，推荐）
               </label>
               <label :class="{ active: rowState.get(c.id)?.disposition === 'direct' }">
                 <input
@@ -508,7 +508,7 @@ async function rescanAfterClean(): Promise<void> {
         </h2>
         <p class="detail">
           共 {{ cleanDone.total }} 项：成功 {{ cleanDone.ok }} · 失败 {{ cleanDone.fail }} ·
-          跳过 {{ cleanDone.skip }}。移入隔离区的内容可在"隔离区"页面 14 天内还原。
+          跳过 {{ cleanDone.skip }}。移入隔离区的内容可在"隔离区"页面保留期内还原。
         </p>
         <div class="actions">
           <button class="btn ghost" @click="rescanAfterClean">再扫一次</button>

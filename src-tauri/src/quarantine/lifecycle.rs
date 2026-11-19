@@ -103,6 +103,18 @@ fn mark_purged(root: &Path, e: &ManifestEntry) -> Result<(), String> {
 
 /// 对单个隔离区根执行一遍生命周期。`now`/`free_bytes` 注入（测试可控）。
 pub fn run_pass_at_root(root: &Path, now: i64, free_bytes: u64) -> LifecycleReport {
+    run_pass_at_root_with(root, now, free_bytes, true)
+}
+
+/// 同 `run_pass_at_root`，但可关闭"到期自动清除"（R32-3：接线
+/// `AppSettings.quarantine_auto_purge`）。关闭时到期条目保持 quarantined，
+/// 继续计入用量，由用户在隔离区手动清理。
+pub fn run_pass_at_root_with(
+    root: &Path,
+    now: i64,
+    free_bytes: u64,
+    auto_purge: bool,
+) -> LifecycleReport {
     let mut report = LifecycleReport::default();
     let Ok((entries, _)) = load_manifest(root) else {
         return report;
@@ -110,37 +122,40 @@ pub fn run_pass_at_root(root: &Path, now: i64, free_bytes: u64) -> LifecycleRepo
 
     // 1) 到期自动清除：先信任校验（R31-1）→ 硬删 → state→purged + 审计。
     //    校验失败不迁移状态（保留条目待人工处理），只写 fail 审计。
-    for e in &entries {
-        if e.state != ManifestState::Quarantined || e.expires_at > now {
-            continue;
-        }
-        match verify_purge_target(root, e) {
-            Err(reason) => audit(e, "auto_purge", "fail", Some(reason)),
-            Ok(PurgeTarget::Missing) => match mark_purged(root, e) {
-                Ok(()) => {
-                    report.purged += 1;
-                    report.purged_bytes += e.size_bytes;
-                    audit(e, "auto_purge", "ok", None);
-                }
+    //    R32-3：auto_purge=false 时整段跳过（设置此前只是"存在"，从未被读取）。
+    if auto_purge {
+        for e in &entries {
+            if e.state != ManifestState::Quarantined || e.expires_at > now {
+                continue;
+            }
+            match verify_purge_target(root, e) {
                 Err(reason) => audit(e, "auto_purge", "fail", Some(reason)),
-            },
-            Ok(PurgeTarget::Verified(p)) => {
-                if let Err(err) = fs::remove_file(&p) {
-                    audit(
-                        e,
-                        "auto_purge",
-                        "fail",
-                        Some(format!("隔离区文件删除失败: {err}")),
-                    );
-                    continue;
-                }
-                match mark_purged(root, e) {
+                Ok(PurgeTarget::Missing) => match mark_purged(root, e) {
                     Ok(()) => {
                         report.purged += 1;
                         report.purged_bytes += e.size_bytes;
                         audit(e, "auto_purge", "ok", None);
                     }
                     Err(reason) => audit(e, "auto_purge", "fail", Some(reason)),
+                },
+                Ok(PurgeTarget::Verified(p)) => {
+                    if let Err(err) = fs::remove_file(&p) {
+                        audit(
+                            e,
+                            "auto_purge",
+                            "fail",
+                            Some(format!("隔离区文件删除失败: {err}")),
+                        );
+                        continue;
+                    }
+                    match mark_purged(root, e) {
+                        Ok(()) => {
+                            report.purged += 1;
+                            report.purged_bytes += e.size_bytes;
+                            audit(e, "auto_purge", "ok", None);
+                        }
+                        Err(reason) => audit(e, "auto_purge", "fail", Some(reason)),
+                    }
                 }
             }
         }
@@ -189,11 +204,18 @@ pub fn run_pass_at_root(root: &Path, now: i64, free_bytes: u64) -> LifecycleRepo
 }
 
 /// 对全部固定盘隔离区根执行一遍生命周期（真实时钟 + 真实剩余空间）。
+/// R32-3：自动清除开关取自当前设置（`quarantine_auto_purge`）。
 pub fn run_pass_globally(now: i64) -> LifecycleReport {
+    let auto_purge = crate::storage::load_settings().quarantine_auto_purge;
+    run_pass_globally_with(now, auto_purge)
+}
+
+/// 同 `run_pass_globally`，但显式指定是否执行到期自动清除（测试/调用方注入）。
+pub fn run_pass_globally_with(now: i64, auto_purge: bool) -> LifecycleReport {
     let mut total = LifecycleReport::default();
     for root in super::all_quarantine_roots() {
         let drive = root.parent().unwrap_or_else(|| Path::new(r"C:\"));
-        let r = run_pass_at_root(&root, now, free_bytes_of(drive));
+        let r = run_pass_at_root_with(&root, now, free_bytes_of(drive), auto_purge);
         total.purged += r.purged;
         total.purged_bytes += r.purged_bytes;
         total.used_bytes += r.used_bytes;
@@ -465,6 +487,30 @@ mod tests {
         let logs = crate::logging::audit::query(now - 60_000, now + 60_000, Some("auto_purge"));
         assert_eq!(logs.len(), 1, "auto_purge 审计恰好一条");
         assert_eq!(logs[0].path.as_deref(), Some(r"C:\Users\u\orig-e1.tmp"));
+    }
+
+    /// R32-3：关闭 autoPurge 后到期条目必须保留（此前设置从未被读取，关不掉）。
+    #[test]
+    fn auto_purge_disabled_keeps_expired_entries() {
+        let sb = Sandbox::new("autopurge-off");
+        let e = sb.seed("e1", 100, NOW - 20 * DAY, NOW - DAY); // 已过期
+
+        let report = run_pass_at_root_with(&sb.root, NOW, u64::MAX / 10, false);
+
+        assert_eq!(report.purged, 0);
+        assert!(
+            Path::new(&e.quarantine_path).exists(),
+            "关闭自动清除时到期文件必须保留"
+        );
+        let (entries, _) = load_manifest(&sb.root).unwrap();
+        assert_eq!(
+            entries.iter().find(|x| x.id == "e1").unwrap().state,
+            ManifestState::Quarantined
+        );
+        assert_eq!(report.used_bytes, 100, "到期项仍计入隔离区用量");
+        let now = crate::logging::audit::now_ms();
+        let logs = crate::logging::audit::query(now - 60_000, now + 60_000, Some("auto_purge"));
+        assert!(logs.is_empty(), "未执行自动清除不应写 auto_purge 审计");
     }
 
     #[test]

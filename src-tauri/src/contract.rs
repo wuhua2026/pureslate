@@ -402,6 +402,11 @@ pub struct LogEntry {
 }
 
 // ---- 设置 ----
+/// 隔离区保留期边界（SAFETY §4.4：默认 14 天，可配 7–30）。
+pub const QUARANTINE_RETENTION_MIN_DAYS: u32 = 7;
+pub const QUARANTINE_RETENTION_MAX_DAYS: u32 = 30;
+pub const QUARANTINE_RETENTION_DEFAULT_DAYS: u32 = 14;
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AppSettings {
@@ -413,10 +418,21 @@ pub struct AppSettings {
     pub mirror_first: bool,
 }
 
+impl AppSettings {
+    /// R32-3：保留期夹到 7–30 天。手改 `settings.json`、旧版本写入的越界值
+    /// 都在读取/保存时收敛，避免出现"保留 0 天"或"保留 365 天"。
+    pub fn normalized(mut self) -> Self {
+        self.quarantine_retention_days = self
+            .quarantine_retention_days
+            .clamp(QUARANTINE_RETENTION_MIN_DAYS, QUARANTINE_RETENTION_MAX_DAYS);
+        self
+    }
+}
+
 impl Default for AppSettings {
     fn default() -> Self {
         Self {
-            quarantine_retention_days: 14,
+            quarantine_retention_days: QUARANTINE_RETENTION_DEFAULT_DAYS,
             quarantine_auto_purge: true,
             update_opt_in: false,
             crash_upload_opt_in: false,

@@ -38,7 +38,7 @@ export function recoveryNotice(r: CrashRecoveryReport | null | undefined): strin
   const detail: string[] = [];
   if (r.restored > 0) detail.push(`${r.restored} 项已自动还原`);
   if (r.conflictRestored > 0) detail.push(`${r.conflictRestored} 项因原路径占用移入冲突目录`);
-  if (r.adopted > 0) detail.push(`${r.adopted} 项已补登记入隔离区（14 天内可还原）`);
+  if (r.adopted > 0) detail.push(`${r.adopted} 项已补登记入隔离区（保留期内可还原）`);
   if (r.irreversible > 0) detail.push(`${r.irreversible} 项为不可逆去向，已记录待人工核查`);
   if (r.failures.length > 0) detail.push(`${r.failures.length} 项处理失败`);
   const body = detail.length > 0 ? detail.join("，") : "无需处理";

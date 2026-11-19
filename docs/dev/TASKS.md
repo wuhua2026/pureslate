@@ -216,7 +216,7 @@
 |----|------|------|-------------|
 | R32-2a | dup 维度遵守 include/exclude/age/size | ✅ 2026-11-20 | `scan_dup_category` 逐文件走 `CompiledCategory::match_include` + `constraint_allows`（口径同 `walk_target`），白名单之外补齐 include/exclude/maxAgeDays/minSizeMB/段收紧/深度；重叠 target 按路径去重。集成新增 2 例（三组过滤、重叠 target），cargo **290 lib + 29 集成**全绿。备注：R32-2 其余项（MFT 会话复用/UB/取消）仍未做 |
 | R32-1 | 扫描 single-flight + clean_execute 去重 | ✅ 2026-11-20 | `ScanStore::begin` 已有 current 时拒绝（同锁内判定）；`finish(scan_id,…)` 按 id 匹配才摘 current，迟到收尾不污染新会话。`clean_execute` 请求 id/会话条目去重；`resolve_targets` 再按 id + 大小写不敏感路径去重；清理事务（含残留清理）经 `begin_clean` 同锁检查+登记实现 single-flight，占用时返回明确错误。验证：cargo **293 lib + 29 集成**全绿（9 ignored），fmt/clippy 0 告警。契约零变更 |
-| R32-3a | autoPurge/retention 接线 + 设置文案 | ⏳ | 待做 |
+| R32-3a | autoPurge/retention 接线 + 设置文案 | ✅ 2026-11-20 | `quarantine_auto_purge` 已接线：`run_pass_globally` 读设置，关闭时 `run_pass_at_root_with(..., false)` 跳过到期硬删（到期项保留、仍计入用量，需手动清理）。保留期 clamp 7–30 落在三处：`AppSettings::normalized`（读取/保存）、`settings_set` 入口、`clean_retention`；默认 14 常量收敛到 contract.rs。设置页新增「隔离区」卡（自动清除开关 + 7–30 天数输入）并把全站硬编码「14 天」文案统一为「保留期内」（Quarantine 到期提醒不再宣称一定自动清除）。验证：cargo **295 lib + 29 集成**全绿（9 ignored），vitest **99**，typecheck/build 绿。备注：R32-3 其余项（残留空目录 journal/审计、fsync/轮转）未做 |
 | R32-4a | rulesVersion + 规则更新通道 | ⏳ | 待拍板（签名/提权方案） |
 
 ---

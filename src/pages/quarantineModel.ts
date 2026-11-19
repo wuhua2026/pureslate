@@ -23,5 +23,5 @@ export function expiringSoon(entries: QuarantineEntry[], daysThreshold = 3): Qua
 
 /** 语义首行（SAFETY §4.5）：严格区分"已隔离（尚未释放）"，禁止混用"已清理"）。 */
 export function semanticHeadline(humanBytes: string): string {
-  return `已隔离 ${humanBytes} · 尚未释放（保留期内可还原，到期自动清除）`;
+  return `已隔离 ${humanBytes} · 尚未释放（保留期内可还原，到期后按设置清理）`;
 }

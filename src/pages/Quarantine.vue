@@ -91,7 +91,7 @@ async function onTokenConfirm(token: string): Promise<void> {
 
 onMounted(async () => {
   unlisten = await events.onQuarantineExpiryWarning((p) => {
-    notice.value = `${p.ids.length} 项将在 ${p.daysLeft} 天内到期自动清除，如需保留请及时还原`;
+    notice.value = `${p.ids.length} 项将在 ${p.daysLeft} 天内到期，如需保留请及时还原`;
   });
   await refresh();
 });
