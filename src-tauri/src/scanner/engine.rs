@@ -251,6 +251,13 @@ fn scan_dup_category(
     current_path: &mut String,
 ) -> Vec<ScanItem> {
     // ① 收集全部 target 下的候选文件（白名单过滤、跳过空文件）。
+    // R32-2：dup 维度此前只看白名单，绕过 include/exclude/maxAgeDays/minSizeMB 收紧
+    // （AUDIT §3 #7）。现按类目规则逐文件复核，口径与 walk_target 一致：
+    // include 命中 + exclude 未排除 + per-include 约束（age/size）通过。
+    // 多个 target 目录重叠时同一路径只保留一次，避免同文件在判重组内重复出现。
+    let compiled = CompiledCategory::compile(cat);
+    let now_ms = crate::logging::audit::now_ms();
+    let mut seen: std::collections::HashSet<PathBuf> = std::collections::HashSet::new();
     let mut cands: Vec<DupCandidate> = Vec::new();
     for target in &cat.targets {
         let Some(start) = expand_target(target) else {
@@ -260,7 +267,17 @@ fn scan_dup_category(
         if cancel.is_cancelled() {
             break;
         }
-        cands.extend(collect_candidates(&start, cancel));
+        for c in collect_candidates(&start, cancel) {
+            let Some(constraint) = compiled.match_include(&c.path, &start) else {
+                continue;
+            };
+            if !super::matcher::constraint_allows(&constraint, c.size, c.mtime_ms, now_ms) {
+                continue;
+            }
+            if seen.insert(c.path.clone()) {
+                cands.push(c);
+            }
+        }
     }
 
     // ② 三级过滤判重 → 组。

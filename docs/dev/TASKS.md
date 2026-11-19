@@ -212,6 +212,13 @@
 
 > **R32 待办（审计遗留，详见 AUDIT §3）**：R32-1 扫描 single-flight + clean_execute 去重；R32-2 MFT 会话按卷复用 + dup 维度收紧 + mft UB/取消；R32-3 autoPurge/retention 接线与 clamp + 残留空目录 journal/审计 + journal/manifest/audit fsync/轮转；R32-4 更新通道签名 + rulesVersion + runas 来源校验；R32-5 崩溃恢复终态行语义 + 白名单字面兜底/加载时序 + mock 契约对齐。
 
+| ID | 任务 | 状态 | 产出 / 验证 |
+|----|------|------|-------------|
+| R32-2a | dup 维度遵守 include/exclude/age/size | ✅ 2026-11-20 | `scan_dup_category` 逐文件走 `CompiledCategory::match_include` + `constraint_allows`（口径同 `walk_target`），白名单之外补齐 include/exclude/maxAgeDays/minSizeMB/段收紧/深度；重叠 target 按路径去重。集成新增 2 例（三组过滤、重叠 target），cargo **290 lib + 29 集成**全绿。备注：R32-2 其余项（MFT 会话复用/UB/取消）仍未做 |
+| R32-1 | 扫描 single-flight + clean_execute 去重 | ⏳ | 本批次下一项 |
+| R32-3a | autoPurge/retention 接线 + 设置文案 | ⏳ | 待做 |
+| R32-4a | rulesVersion + 规则更新通道 | ⏳ | 待拍板（签名/提权方案） |
+
 ---
 
 ## 附加批次 · B1 开机诊断（只读，2026-11-10）

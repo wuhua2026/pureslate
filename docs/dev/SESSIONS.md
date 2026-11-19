@@ -5,6 +5,13 @@
 > 维护（AGENTS.md §9）：任务完成时 agent 自动追加/更新当前会话条目，随任务同一提交。格式：`## YYYY-MM-DD | 主题`。
 > 本初版由历史会话记忆回溯整理（截至 2026-09-29），细节以 git 历史与 TASKS.md 为准。
 
+## 2026-11-20 | R32 批次（审计遗留收口，逐项提交）
+
+- **范围**：用户指定四项——(1) dup 维度未遵守 include/exclude；(2) 扫描与清理缺 single-flight/并发去重；(3) autoPurge 未接保留期且设置说明不统一；(4) rulesVersion 写死 "0" 且规则更新通道未补。一项一提交，每项完成即报告；签名/提权方案需先拍板。
+- **R32-2a ✅（本次提交）**：`scanner/engine.rs::scan_dup_category` 此前只用 `collect_candidates`（仅白名单），绕过类目 include/exclude/maxAgeDays/minSizeMB/段收紧/深度。现编译 `CompiledCategory` 并对每个候选文件做 `match_include(path, target_root)` + `constraint_allows`，与 `walk_target` 同口径；多个 target 重叠时按路径去重，避免同一文件在判重组内重复出现。
+- **验证**：新增集成 2 例（老 .log 产出 / 新 .log 被 maxAgeDays 排除 / .tmp 被 exclude 排除；重叠 target 只产出 1 项）；`cargo fmt --check` + `clippy --all-targets -D warnings` 0 告警；`cargo test` **290 lib + 29 集成**全绿（9 ignored）。
+- **下一步**：R32-1 扫描 single-flight + clean_execute 去重。
+
 ## 2026-11-11 | v0.2.2 发布（R32-0 误删修复 + R31 安全批次 + B1 开机诊断）
 
 - **发布**：annotated tag `v0.2.2` → `ea9dbf7`；Release <https://github.com/wuhua2026/pureslate/releases/tag/v0.2.2>（标题 `PureSlate v0.2.2`）；workflow run [42783485482](https://github.com/wuhua2026/pureslate/actions/runs/42783485482) 全绿（8m20s）。正文 `.github/release-notes/v0.2.2.md`，主线写明 R32-0 数据盘 `tmp` 误删修复，并列 R31 四项安全收口、开机诊断（只读）、启动项读取失败可见。

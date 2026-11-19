@@ -130,6 +130,121 @@ fn write_dup_fixture_rules(rules_dir: &Path, target_dir: &str) {
     .expect("write fixture whitelist");
 }
 
+/// 写带过滤条件的 dup fixture 规则：include `*` + maxAgeDays=7，exclude `*.tmp`。
+fn write_dup_filtered_fixture_rules(rules_dir: &Path, target_dir: &str) {
+    let esc = target_dir.replace('\\', "\\\\");
+    let xml = format!(
+        r#"<?xml version="1.0" encoding="UTF-8"?>
+<ruleset id="itest-dup-filter" version="1" lang="zh-CN">
+  <category id="dup.file" label="重复文件" risk="yellow" disposition="quarantine"
+            description="集成测试构造的重复文件（带过滤条件）">
+    <target type="path" value="{esc}"/>
+    <include pattern="*" recursive="true" maxAgeDays="7"/>
+    <exclude pattern="*.tmp" recursive="true"/>
+    <guard process=""/>
+  </category>
+</ruleset>
+"#
+    );
+    fs::write(rules_dir.join("dup.xml"), xml).expect("write dup fixture rules");
+    fs::write(
+        rules_dir.join("whitelist.xml"),
+        r#"<?xml version="1.0" encoding="UTF-8"?>
+<whitelist></whitelist>
+"#,
+    )
+    .expect("write fixture whitelist");
+}
+
+/// R32-2：dup 维度必须遵守 include/exclude/maxAgeDays 收紧（AUDIT §3 #7）。
+/// 构造三组同内容文件：老的 .log（应产出）、新的 .log（age 不足应排除）、
+/// .tmp（exclude 应排除）；只有第一组的冗余副本可产出。
+#[test]
+fn dup_dimension_honors_include_exclude_and_age() {
+    let (rules_dir, target_dir) = fresh_roots();
+    write_dup_filtered_fixture_rules(&rules_dir, &target_dir.to_string_lossy());
+
+    let old = std::time::UNIX_EPOCH + std::time::Duration::from_secs(1_000_000);
+    let less_old = std::time::UNIX_EPOCH + std::time::Duration::from_secs(1_100_000);
+
+    // A 组：两个相同 .log，均已超过 7 天 → keeper=a1.log，候选=a2.log。
+    fs::write(target_dir.join("a1.log"), b"OLD-DUP").unwrap();
+    let _ = filetime_backdate(&target_dir.join("a1.log"), old);
+    fs::write(target_dir.join("a2.log"), b"OLD-DUP").unwrap();
+    let _ = filetime_backdate(&target_dir.join("a2.log"), less_old);
+
+    // B 组：两个相同 .log，mtime 为当前时间 → maxAgeDays=7 排除。
+    fs::write(target_dir.join("b1.log"), b"NEW-DUP").unwrap();
+    fs::write(target_dir.join("b2.log"), b"NEW-DUP").unwrap();
+
+    // C 组：两个相同 .tmp，够老，但命中 exclude。
+    fs::write(target_dir.join("c1.tmp"), b"TMP-DUP").unwrap();
+    let _ = filetime_backdate(&target_dir.join("c1.tmp"), old);
+    fs::write(target_dir.join("c2.tmp"), b"TMP-DUP").unwrap();
+    let _ = filetime_backdate(&target_dir.join("c2.tmp"), less_old);
+
+    let mut loader = RuleLoader::new();
+    let table = loader.load_dir(&rules_dir).expect("load dup fixture rules");
+    let cancel = CancelToken::new();
+    let mut progress = |_phase, _done, _total, _path, _found| {};
+    let outcome = run_scan(&table, &dup_profile(), &cancel, &mut progress);
+
+    let paths: Vec<String> = outcome
+        .items
+        .iter()
+        .map(|it| it.path.to_lowercase())
+        .collect();
+    assert_eq!(
+        paths.len(),
+        1,
+        "只有老 .log 组的冗余副本可产出，实得 {paths:?}"
+    );
+    assert!(paths[0].ends_with("a2.log"), "实得 {paths:?}");
+}
+
+/// 重叠 target 只收集一次：同一目录重复声明不应产出重复候选/重复项。
+#[test]
+fn dup_dimension_dedupes_overlapping_targets() {
+    let (rules_dir, target_dir) = fresh_roots();
+    let esc = target_dir.to_string_lossy().replace('\\', "\\\\");
+    let xml = format!(
+        r#"<?xml version="1.0" encoding="UTF-8"?>
+<ruleset id="itest-dup-overlap" version="1" lang="zh-CN">
+  <category id="dup.file" label="重复文件" risk="yellow" disposition="quarantine"
+            description="集成测试重叠 target">
+    <target type="path" value="{esc}"/>
+    <target type="path" value="{esc}"/>
+    <include pattern="*" recursive="true"/>
+    <guard process=""/>
+  </category>
+</ruleset>
+"#
+    );
+    fs::write(rules_dir.join("dup.xml"), xml).expect("write rules");
+    fs::write(
+        rules_dir.join("whitelist.xml"),
+        r#"<?xml version="1.0" encoding="UTF-8"?>
+<whitelist></whitelist>
+"#,
+    )
+    .expect("write whitelist");
+
+    fs::write(target_dir.join("a.bin"), b"same-bytes").unwrap();
+    fs::write(target_dir.join("b.bin"), b"same-bytes").unwrap();
+
+    let mut loader = RuleLoader::new();
+    let table = loader.load_dir(&rules_dir).expect("load rules");
+    let cancel = CancelToken::new();
+    let mut progress = |_phase, _done, _total, _path, _found| {};
+    let outcome = run_scan(&table, &dup_profile(), &cancel, &mut progress);
+
+    assert_eq!(
+        outcome.items.len(),
+        1,
+        "同一文件不应因 target 重叠而重复出现"
+    );
+}
+
 /// dup 维度：仅产出冗余副本 + 回填 dup_group；keeper（最早者）不被列为可清理项。
 #[test]
 fn dup_dimension_backfills_group_and_keeps_earliest() {

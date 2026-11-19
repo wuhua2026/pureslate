@@ -6,6 +6,12 @@
 
 ## ① 踩坑记录
 
+### 专用收集器必须复用类目规则口径：dup 维度只过白名单，include/exclude 形同虚设（2026-11-20，R32-2a）
+- 现象：`dup.file` 等 dup 类目走独立收集器 `cleaner::dup::collect_candidates`，只做白名单/空文件/云占位过滤；类目的 `<include>`、`<exclude>`、`maxAgeDays`、`minSizeMB`、段收紧、深度全部不生效，普通 walk 与 dup 两条路径判断口径不一致。
+- 根因：为判重单独写了目录遍历，没有复用 `CompiledCategory`（`scanner/matcher.rs`）——"另起一条遍历"就等于"另起一套安全/约束语义"。
+- 修复：`scan_dup_category` 先 `CompiledCategory::compile(cat)`，对每个候选文件用 `match_include(path, target_root)` + `constraint_allows` 复核（与 `walk_target` 相同），并对重叠 target 的路径去重。
+- 复利结论：任何"专用扫描器/收集器"上线前，逐条对照通用 walker 的过滤清单（白名单、include/exclude、age/size、段/深度、云占位、取消）；少一条就是一条静默绕过。集成测试要分别覆盖 include、exclude、age 三类约束，别只测"能判出重复"。
+
 ### 枚举型来源必须返回失败子源：`0 条` 与"读不到"必须分开（2026-11-10，B1-10）
 - 现象：`startup/tasks.rs` 用 `filter_map(|e| e.ok())` + `read_to_string` + `continue`，非提权下返回空列表，UI 显示"未发现启动项"；同一台机 `Get-ScheduledTask` 有 **49** 条 Boot/Logon 任务。
 - 根因：①walkdir 的 `Err` 被 `filter_map(ok)` 丢弃；②`read_to_string` 对 UTF-16LE 任务 XML 必然失败（BOM `FF FE` 不是合法 UTF-8）——**即使提权也读不到**；③失败没有出口，调用方只能看到空数组。
