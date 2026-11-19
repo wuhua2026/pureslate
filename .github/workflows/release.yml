@@ -7,6 +7,8 @@ name: Release (R26)
 # 占位项（定稿后单点改动，见 TASKS P4-06 备注）：
 # - SignPath 签名：配置 SIGNPATH_API_TOKEN / SIGNPATH_ORG_ID / SIGNPATH_PROJECT_ID
 #   / SIGNPATH_SIGNING_POLICY_SLUG secrets 后自动启用；未配置时产出未签名占位包；
+# - 规则包签名（R32-4b）：必须配置 RULES_SIGNING_KEY（ECDSA P-256 PKCS#8 PEM），
+#   否则"Generate rules pack + update manifest"步骤失败（fail-closed，不允许无签名发布）；
 # - REPO_SLUG：已定稿 wuhua2026/pureslate（发布侧取 GITHUB_REPOSITORY，与
 #   updates/mod.rs 常量一致）；
 # - 崩溃上传端点（crash::CRASH_UPLOAD_URL）：后端定稿后更新。
@@ -108,10 +110,24 @@ jobs:
           .\tools\check-size.ps1 -SearchPath "src-tauri/target/release/bundle" -ResultFile "docs/verify/ci-size-report.json"
           if ($LASTEXITCODE -ne 0) { throw "Size gate FAILED" }
 
-      # ---- 发布清单（规则包 + update-manifest）----
+      # ---- 发布清单（规则包签名 + update-manifest）----
+      # R32-4b：规则包用 ECDSA P-256 离线私钥签名，私钥放 GitHub Secret
+      # `RULES_SIGNING_KEY`（PKCS#8 PEM 全文）；缺失则本步骤失败，不允许无签名发布。
       - name: Generate rules pack + update manifest
         shell: pwsh
-        run: .\tools\publish-manifest.ps1
+        env:
+          RULES_SIGNING_KEY: ${{ secrets.RULES_SIGNING_KEY }}
+        run: |
+          if (-not $env:RULES_SIGNING_KEY) {
+            throw "缺少 GitHub Secret RULES_SIGNING_KEY（规则包签名私钥 PKCS#8 PEM）"
+          }
+          $pem = Join-Path $env:RUNNER_TEMP "rules-signing-key.pem"
+          [IO.File]::WriteAllText($pem, $env:RULES_SIGNING_KEY, [Text.UTF8Encoding]::new($false))
+          try {
+            .\tools\publish-manifest.ps1 -SigningKeyPath $pem -RequireSignature
+          } finally {
+            Remove-Item $pem -Force -ErrorAction SilentlyContinue
+          }
 
       # ---- 便携版 zip（v0.1.1 起：exe + rules/ + 说明，免安装形态）----
       - name: Build portable zip

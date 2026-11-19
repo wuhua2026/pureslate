@@ -26,6 +26,15 @@
   "bundle": {
     "active": true,
     "targets": "all",
+    "windows": {
+      "nsis": {
+        "languages": [
+          "English",
+          "SimpChinese",
+          "TradChinese"
+        ]
+      }
+    },
     "resources": {
       "resources/rules/*.xml": "rules/"
     },

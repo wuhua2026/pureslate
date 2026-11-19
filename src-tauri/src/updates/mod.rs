@@ -4,12 +4,16 @@
 //!   `false` → 直连优先、镜像兜底；任一成功即停；
 //! - **sha256 校验**：规则包下载后先校验，失败 → 丢弃 + `rulesPackHashOk=false` + 审计；
 //!   **校验通过才落盘**（规则 XML 是可执行内容，红线 #5/#4）；
+//! - **分离签名（R32-4b）**：manifest 的 `rulesSig`/`rulesKeyId` 用编译进二进制的
+//!   ECDSA P-256 公钥验签（仅安装时，D3）；未知 keyId / 缺签名 / 验签失败一律
+//!   丢弃且不写任何文件（fail-closed）；
 //! - **安装位置**：`<data_root>\rules\`（安装目录对 asInvoker 只读）；加载时与资源目录
 //!   叠加，用户目录 category 覆盖资源目录（loader `load_dirs`，规则包更新语义）；
 //! - **opt-in 周查**：7 天窗口（`should_auto_check`），manual 无视 optIn；
 //!   周查请求仅含路径参数，无任何标识（红线 #4）；
 //! - 网络访问集中在 `http::http_get`（WinHTTP）；回退/校验/周查判定均为注入式纯函数，可单测。
 
+pub mod ecdsa;
 pub mod http;
 
 use std::path::PathBuf;
@@ -46,6 +50,65 @@ pub struct UpdateManifest {
     pub rules_url: String,
     #[serde(default)]
     pub rules_sha256: String,
+    /// R32-4b：规则包分离签名（hex 编码的 IEEE P1363 裸 `r||s`，64 字节）。
+    #[serde(default)]
+    pub rules_sig: String,
+    /// R32-4b：签名密钥标识（查下方编译进二进制的公钥表；未知 id 一律拒绝）。
+    #[serde(default)]
+    pub rules_key_id: String,
+}
+
+/// 规则包签名公钥（编译进二进制，按 `rulesKeyId` 选择）。
+///
+/// 轮换流程（最小可用）：① 用 `tools/gen-rules-key.ps1 -KeyId 2` 生成新密钥，
+/// 把公钥加入本表并随应用发版（此时仍用旧 keyId 签包）；② 等新版本覆盖面足够后，
+/// CI 改用新私钥、`publish-manifest.ps1 -RulesKeyId 2` 签包；③ 旧 keyId 至少保留
+/// 一个大版本再删除。旧客户端遇到未知 keyId 会 fail-closed（拒绝安装规则包），
+/// 因此"先发公钥、后换签名"的顺序不可颠倒。
+pub struct RulesSigningKey {
+    pub key_id: &'static str,
+    pub public_key: ecdsa::P256PublicKey,
+}
+
+pub const RULES_SIGNING_KEYS: &[RulesSigningKey] = &[RulesSigningKey {
+    key_id: "1",
+    public_key: [
+        0x4c, 0xf6, 0xdb, 0x68, 0x5a, 0xb6, 0x13, 0x27, 0xe5, 0xbe, 0xcd, 0x22, 0xb1, 0x55, 0x17,
+        0x12, 0x2a, 0x0a, 0x26, 0xa3, 0x94, 0x54, 0x18, 0x93, 0x6b, 0x10, 0x26, 0xcc, 0x77, 0x5f,
+        0x15, 0x67, 0x08, 0xf1, 0x56, 0x7f, 0xe8, 0x45, 0x54, 0xdf, 0x17, 0xa7, 0x23, 0x79, 0x13,
+        0x23, 0x6c, 0xc2, 0x0d, 0xc8, 0x0e, 0x10, 0xd8, 0xbe, 0x67, 0xc6, 0xb2, 0x19, 0xaf, 0x50,
+        0x4c, 0x3e, 0xe5, 0xd3,
+    ],
+}];
+
+/// 按 manifest 的 `rulesKeyId` 查公钥；未知 id → None（调用方 fail-closed）。
+pub fn find_rules_key(key_id: &str) -> Option<&'static RulesSigningKey> {
+    RULES_SIGNING_KEYS.iter().find(|k| k.key_id == key_id)
+}
+
+/// hex → 64 字节签名（长度/字符不合法 → None）。
+fn hex_to_signature(s: &str) -> Option<ecdsa::P256Signature> {
+    let s = s.trim();
+    if s.len() != 128 {
+        return None;
+    }
+    let bytes = s.as_bytes();
+    let mut out = [0u8; 64];
+    for (i, slot) in out.iter_mut().enumerate() {
+        let hi = hex_nibble(bytes[i * 2])?;
+        let lo = hex_nibble(bytes[i * 2 + 1])?;
+        *slot = (hi << 4) | lo;
+    }
+    Some(out)
+}
+
+fn hex_nibble(c: u8) -> Option<u8> {
+    match c {
+        b'0'..=b'9' => Some(c - b'0'),
+        b'a'..=b'f' => Some(c - b'a' + 10),
+        b'A'..=b'F' => Some(c - b'A' + 10),
+        _ => None,
+    }
 }
 
 /// 规则包结构（自研格式）：sha256 对**整包字节**校验，通过后逐文件落 `<data_root>\rules\`。
@@ -153,12 +216,15 @@ pub fn user_rules_dir() -> PathBuf {
 }
 
 /// 规则包校验+安装核心（下载注入，测试可控）。
-/// 返回 `Ok(true)`=校验通过并已安装；`Ok(false)`=**sha256 不符已丢弃**（未写任何文件）；
-/// `Err`=下载/包结构/文件名非法（未安装）。
+/// 校验顺序：sha256 → 分离签名（ECDSA P-256）→ 结构/文件名 → 落盘。
+/// 返回 `Ok(true)`=全部校验通过并已安装；`Ok(false)`=**sha256 或签名校验失败已丢弃**
+/// （未写任何文件）；`Err`=下载/包结构/文件名非法（未安装）。
 pub fn verify_and_install_pack_with(
     download: &dyn Fn(&str) -> Result<Vec<u8>, String>,
     pack_url: &str,
     expected_sha256: &str,
+    rules_key_id: &str,
+    rules_sig: &str,
 ) -> Result<bool, String> {
     let bytes = download(pack_url)?;
     let actual = {
@@ -172,6 +238,30 @@ pub fn verify_and_install_pack_with(
     // 期望 hash 缺失也按校验失败处理（写入前必须校验通过，SPEC §6.5）。
     if expected_sha256.trim().is_empty() || !actual.eq_ignore_ascii_case(expected_sha256.trim()) {
         audit_update("fail", Some("规则包 sha256 校验失败，已丢弃".into()));
+        return Ok(false);
+    }
+
+    // R32-4b：分离签名（D3 只在安装时验签）。sha256 只防传输损坏，防不了
+    // "劫持源连恶意带正确哈希"；签名私钥离线保存，公钥编译进二进制。
+    let Some(signature) = hex_to_signature(rules_sig) else {
+        audit_update(
+            "fail",
+            Some("规则包缺少合法签名（rulesSig 应为 128 位 hex r||s），已丢弃".into()),
+        );
+        return Ok(false);
+    };
+    let Some(key) = find_rules_key(rules_key_id.trim()) else {
+        audit_update(
+            "fail",
+            Some(format!(
+                "规则包签名密钥未知（rulesKeyId={}），已丢弃",
+                rules_key_id.trim()
+            )),
+        );
+        return Ok(false);
+    };
+    if !ecdsa::verify_p256_sha256(&key.public_key, &bytes, &signature) {
+        audit_update("fail", Some("规则包签名校验失败，已丢弃".into()));
         return Ok(false);
     }
 
@@ -276,7 +366,13 @@ pub fn check(
             });
             rules_ok = Some(false);
         } else {
-            match verify_and_install_pack_with(&fetch_bytes, &m.rules_url, &m.rules_sha256) {
+            match verify_and_install_pack_with(
+                &fetch_bytes,
+                &m.rules_url,
+                &m.rules_sha256,
+                &m.rules_key_id,
+                &m.rules_sig,
+            ) {
                 Ok(true) => rules_ok = Some(true),
                 Ok(false) => rules_ok = Some(false),
                 Err(_) => rules_ok = Some(false),
@@ -356,6 +452,13 @@ mod tests {
         }
     }
 
+    /// 测试夹具签名（由 `rulesKeyId="1"` 的离线私钥对下方 pack_json 签名生成；
+    /// 公钥见 `RULES_SIGNING_KEYS`。改动夹具字节须重新生成签名）。
+    const SIG_INSTALL: &str = "03c4e0bd9eb1219ecfade6df198d36597b07c34db6e31411ffd1f91eb6a09d43\
+                               07654418b74a603ed42f4549a529a4dfa7d867c3c85e806ac5ac65a866efb2e3";
+    const SIG_TRAVERSAL: &str = "0f27f3f3df34e80c247194341faf4c0b63b87cb2e7ec5d85bbb286931d1ddbf72\
+         8a34668d4649c04392edbf261f2e6fe2be1e4814c676e9b504f82282dad5535";
+
     #[test]
     fn channel_urls_order_by_mirror_first() {
         let mirror = channel_urls(true, "a/b", "m.json");
@@ -429,7 +532,7 @@ mod tests {
         let pack_json = r#"{"version":"2","files":[{"name":"x.xml","content":"<ruleset/>"}]}"#;
         let download = |_u: &str| -> Result<Vec<u8>, String> { Ok(pack_json.as_bytes().to_vec()) };
         // 错误 hash → Ok(false)（丢弃），且规则目录不得有任何文件。
-        let r = verify_and_install_pack_with(&download, "https://x/pack.json", "deadbeef");
+        let r = verify_and_install_pack_with(&download, "https://x/pack.json", "deadbeef", "", "");
         assert_eq!(r, Ok(false));
         assert!(
             !user_rules_dir().exists() || std::fs::read_dir(user_rules_dir()).unwrap().count() == 0
@@ -450,7 +553,8 @@ mod tests {
         let sha: String = h.finalize().iter().map(|b| format!("{b:02x}")).collect();
         let download =
             move |_u: &str| -> Result<Vec<u8>, String> { Ok(pack_json.as_bytes().to_vec()) };
-        let r = verify_and_install_pack_with(&download, "https://x/pack.json", &sha);
+        let r =
+            verify_and_install_pack_with(&download, "https://x/pack.json", &sha, "1", SIG_INSTALL);
         assert_eq!(r, Ok(true));
         let written = user_rules_dir().join("privacy-traces.xml");
         assert!(written.is_file(), "校验通过后须落盘");
@@ -468,9 +572,74 @@ mod tests {
         let sha: String = h.finalize().iter().map(|b| format!("{b:02x}")).collect();
         let download =
             move |_u: &str| -> Result<Vec<u8>, String> { Ok(pack_json.as_bytes().to_vec()) };
-        assert!(verify_and_install_pack_with(&download, "https://x/p.json", &sha).is_err());
+        assert!(verify_and_install_pack_with(
+            &download,
+            "https://x/p.json",
+            &sha,
+            "1",
+            SIG_TRAVERSAL
+        )
+        .is_err());
         // data_root 之外不得出现 evil.xml。
         assert!(!data_root().parent().unwrap().join("evil.xml").exists());
+    }
+
+    #[test]
+    fn pack_requires_signature_and_known_key() {
+        let _sb = Sandbox::new("sig-required");
+        let pack_json = r#"{"version":"5","files":[{"name":"ok.xml","content":"<ruleset/>"}]}"#;
+        let mut h = Sha256::new();
+        h.update(pack_json.as_bytes());
+        let sha: String = h.finalize().iter().map(|b| format!("{b:02x}")).collect();
+        let download = |_u: &str| -> Result<Vec<u8>, String> { Ok(pack_json.as_bytes().to_vec()) };
+
+        // 缺签名：fail-closed。
+        let r = verify_and_install_pack_with(&download, "u", &sha, "1", "");
+        assert_eq!(r, Ok(false), "缺签名必须丢弃");
+        // 未知 keyId：fail-closed（即使签名非空）。
+        let r = verify_and_install_pack_with(&download, "u", &sha, "999", SIG_INSTALL);
+        assert_eq!(r, Ok(false), "未知 keyId 必须丢弃");
+        // 签名格式不合法（长度不对）。
+        let r = verify_and_install_pack_with(&download, "u", &sha, "1", "abcd");
+        assert_eq!(r, Ok(false), "畸形签名必须丢弃");
+        assert!(
+            !user_rules_dir().exists() || std::fs::read_dir(user_rules_dir()).unwrap().count() == 0,
+            "任何验签失败都不得写文件"
+        );
+    }
+
+    #[test]
+    fn pack_rejects_tampered_or_wrong_key_signature() {
+        let _sb = Sandbox::new("sig-bad");
+        let pack_json = r#"{"version":"6","files":[{"name":"ok.xml","content":"<ruleset/>"}]}"#;
+        let mut h = Sha256::new();
+        h.update(pack_json.as_bytes());
+        let sha: String = h.finalize().iter().map(|b| format!("{b:02x}")).collect();
+        let download = |_u: &str| -> Result<Vec<u8>, String> { Ok(pack_json.as_bytes().to_vec()) };
+
+        // 用别的内容的合法签名（安装夹具签名）→ 验签失败。
+        let r = verify_and_install_pack_with(&download, "u", &sha, "1", SIG_INSTALL);
+        assert_eq!(r, Ok(false), "签名与包内容不匹配必须丢弃");
+        // 篡改签名首字节。
+        let mut bad = SIG_TRAVERSAL.to_string();
+        bad.replace_range(0..2, "00");
+        let r = verify_and_install_pack_with(&download, "u", &sha, "1", &bad);
+        assert_eq!(r, Ok(false), "篡改签名必须丢弃");
+        assert!(
+            !user_rules_dir().exists() || std::fs::read_dir(user_rules_dir()).unwrap().count() == 0
+        );
+    }
+
+    #[test]
+    fn hex_signature_parsing() {
+        assert!(hex_to_signature(SIG_INSTALL).is_some());
+        assert!(hex_to_signature(SIG_TRAVERSAL).is_some());
+        assert!(hex_to_signature("").is_none());
+        assert!(hex_to_signature("zz").is_none());
+        assert!(hex_to_signature(&"0".repeat(127)).is_none());
+        assert!(hex_to_signature(&"g".repeat(128)).is_none());
+        assert_eq!(find_rules_key("1").map(|k| k.key_id), Some("1"));
+        assert!(find_rules_key("2").is_none());
     }
 
     #[test]

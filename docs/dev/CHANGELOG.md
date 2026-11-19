@@ -4,6 +4,16 @@
 
 ## [Unreleased]
 
+### 2026-11-20 · R32-4b 规则包分离签名 + 安装器语言（发布清单加性变更，IPC 契约零变更）
+- `update-manifest.json` 加性新增 `rulesSig`（规则包原始字节的 ECDSA P-256/SHA-256 签名，IEEE P1363 裸 `r||s` 的 128 位 hex）与 `rulesKeyId`（公钥标识）；既有字段与 `UpdateStatus` 不变。
+- 新客户端对缺签名/未知 `rulesKeyId`/验签失败**一律拒绝安装规则包**（fail-closed，不写文件 + `op=update` fail 审计）；旧版客户端忽略新增字段、行为不变。
+- 校验顺序：域白名单 → sha256 → 签名 → 包结构/文件名 → 落盘；仅在安装时验签（D3）。
+- 发布侧：GitHub Secret `RULES_SIGNING_KEY`（PKCS#8 PEM）→ `tools/publish-manifest.ps1 -RequireSignature`；新增 `tools/gen-rules-key.ps1` 与"先发公钥、后换签名"的轮换顺序。
+- NSIS：`bundle.windows.nsis.languages = ["English","SimpChinese","TradChinese"]`，安装向导跟随系统语言，未命中回退首项 English。
+
+### 2026-11-20 · R32-4a rulesVersion 跟随应用版本（IPC 契约零变更）
+- `app_meta.rulesVersion` 不再恒为 `"0"`，取 `env!("CARGO_PKG_VERSION")`，与发布清单 `rulesVersion` 一致；不做安装时持久化（D1）。
+
 ### v0.2.2（发布）
 
 - 2026-11-10 发布：tag `v0.2.2`（annotated；工作流校验 tag 与 `tauri.conf.json` 版本一致）；Release 正文 `.github/release-notes/v0.2.2.md`；内容主线为 R32-0 数据盘 `tmp` 误删修复，附带 R31 安全批次、B1 开机诊断（只读）、B1-10 启动项失败可见。

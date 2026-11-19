@@ -16,7 +16,12 @@
 - **R32-3a 验证**：cargo **295 lib + 29 集成**全绿（9 ignored）；vitest **99**；`pnpm typecheck`/`build` 绿；新增 autoPurge 关闭保留到期条目、保留期夹取（0→7、999→30、手改 2→7）用例。
 - **R32-4a ✅（本次提交）**：按用户拍板 D1「跟随应用版本」，`AppState.rules_version` 由写死 `"0"` 改为 `env!("CARGO_PKG_VERSION")`，与 `publish-manifest.ps1` 的 `rulesVersion = $Version` 一致；`app_meta` 不再谎报 0，更新检查不再因版本不等而每次重下规则包。不做安装时持久化。新增单测 `rules_version_follows_app_version`。
 - **R32-4a 验证**：cargo **296 lib + 29 集成**全绿（9 ignored）；fmt/clippy 0 告警；契约零变更。
-- **下一步**：R32-4b 签名通道（Ed25519/CNG，必要时退 ECDSA P-256；仅安装时验签；CI Secret 签名）+ NSIS 安装器跟随系统语言（独立提交）。
+- **R32-4b ✅（本次提交）**：按用户 D2 先核实 CNG 是否支持 Ed25519——微软官方算法标识符清单只有 `ECDSA_P256/384/521`，无 Ed25519/EdDSA，故按允许的降级路径采用 **ECDSA P-256 + SHA-256**，验签经 bcrypt.dll 直调（`#[link]` extern，零新增 crate）。本机 P/Invoke 实测确认：公钥 blob magic 为 `'ECS1'`（ECDSA_PUBLIC_P256，`'ECK1'` 是 ECDH）；验签须 `pPaddingInfo=NULL + dwFlags=0`（传 `BCRYPT_ECDSA_PKCS1_PADDING_INFO` 反而 INVALID_PARAMETER）；签名必须是 IEEE P1363 裸 `r||s`（64 字节），不是 DER；合法返回 0、篡改/错误哈希返回 `0xC000A000`。
+- **签名通道**：manifest 加性 `rulesSig`（128 hex）+ `rulesKeyId`；公钥表 `RULES_SIGNING_KEYS`（keyId=`1`）编译进二进制；sha256 通过后验签，未知 keyId/缺签名/验签失败一律 fail-closed（不写文件 + `op=update` fail 审计）；仅安装时验签（D3）。CI：GitHub Secret `RULES_SIGNING_KEY`（PKCS#8 PEM）→ `publish-manifest.ps1 -RequireSignature`；新增 `tools/gen-rules-key.ps1`，轮换顺序"先发公钥、后换签名"已写入脚本/SPEC。
+- **签名私钥位置**：仅存仓库外 `%USERPROFILE%\.pureslate\rules-signing-key.pem`（**尚未上传 GitHub Secret，需作者手动把 PEM 全文存入 `RULES_SIGNING_KEY`**；该文件勿入库、勿贴公开渠道）。
+- **安装器语言**：`src-tauri/tauri.conf.json` 增加 `bundle.windows.nsis.languages=["English","SimpChinese","TradChinese"]`；NSIS 默认跟随系统语言，系统语言不在列表时回退首项 English；未开 `displayLanguageSelector`；语言包来自 NSIS 官方 `Contrib/Language files/*.nlf`（Tauri bundler 随下载的 NSIS 发行版内置），可用 `customLanguageFiles` 覆盖。
+- **R32-4b 验证**：`cargo fmt --check` / `clippy --all-targets -D warnings` 0 告警；`cargo test` **300 lib + 29 集成**全绿（9 ignored），含真实 CNG 验签用例（合法通过/篡改失败/换消息失败）与 fail-closed 用例（缺签名、未知 keyId、畸形签名、签名与包不匹配均不落盘）；`tools/gen-rules-key.ps1` 试跑成功；IPC 契约零变更（仅发布清单 JSON 加性字段）。
+- **下一步**：R32 剩余项按 AUDIT §3 排期（R32-2 MFT 会话复用/UB/取消、R32-3 残留空目录 journal/审计与 fsync/轮转、R32-5 崩溃恢复语义等）；作者需配置 `RULES_SIGNING_KEY` 并决定下次发布是否同步启用签名。
 
 ## 2026-11-11 | v0.2.2 发布（R32-0 误删修复 + R31 安全批次 + B1 开机诊断）
 

@@ -280,9 +280,14 @@ journal 协议见 SAFETY §3。🟢 direct：`RemoveFile`（Windows API，绕过
 枚举源：`HKCU\...\Run`、`HKLM\...\Run`、`HKLM\...\WOW6432Node\Run`、`shell:startup` 文件夹、计划任务（登录触发类）；禁用 = 导出到 `%LOCALAPPDATA%\PureSlate\startup-backup\<id>.reg|.lnk` 后移除，UI 提供"恢复"（还原即重新导入）——**不删源程序**。
 
 ### 6.5 更新（R22）
-- `update-manifest.json`（GitHub Releases latest）：`{appVersion, appUrl, appSha256, rulesVersion, rulesUrl, rulesSha256}`；
+- `update-manifest.json`（GitHub Releases latest；R32-4b 追加字段均可缺省）：
+  `{appVersion, appUrl, appSha256, rulesVersion, rulesUrl, rulesSha256, rulesSig, rulesKeyId}`；
+- `rulesSig` = 规则包**原始字节**的 ECDSA P-256/SHA-256 分离签名（IEEE P1363 裸 `r||s` 的 128 位 hex）；
+  `rulesKeyId` = 公钥标识，查编译进二进制的 `RULES_SIGNING_KEYS`（`updates/mod.rs`），未知 id 一律拒绝；
 - 通道顺序：`mirrorFirst=true` 时 jsDelivr（`https://cdn.jsdelivr.net/gh/<org>/<repo>@latest/...`）→ ghproxy → GitHub 直连，任一成功即停；
-- 下载后 sha256 校验失败 → 丢弃 + `rulesPackHashOk=false` + 审计日志；**规则包写入前须校验通过**（规则 XML 是可执行内容）；
+- 校验顺序：域白名单 → sha256 → 签名 → 包结构/文件名 → 落盘；任一失败 → 丢弃 + `rulesPackHashOk=false` + 审计日志；**规则包写入前须校验通过**（规则 XML 是可执行内容）；
+- 验签时机（R32-4b D3）：只在规则包**安装时**验签，不做每次加载前逐文件验签；私钥离线保存，CI 经 GitHub Secret `RULES_SIGNING_KEY` 签名，公钥随应用发版；
+- 密钥轮换：先发新公钥（旧 keyId 继续签包）→ 新版本覆盖面足够后 CI 切新 keyId → 旧 keyId 至少保留一个大版本再删。旧客户端对未知 keyId fail-closed，**顺序不可颠倒**；
 - opt-in 周查请求仅含版本号路径参数，无任何标识（AGENTS 红线 #4）。
 
 ### 6.6 崩溃安全（R24，P4-03）
@@ -298,6 +303,11 @@ journal 协议见 SAFETY §3。🟢 direct：`RemoveFile`（Windows API，绕过
 - **审计**：新增 op=`uninstall`（拉起/等待结论/待重启）；残留删除仍走既有 clean/quarantine op（category=`residue.uninstall`），覆盖率口径不变。
 - **契约**：`uninstall_list() → InstalledApp[]`、`uninstall_run(id)` / `uninstall_cancel(txId)` 与 `uninstall_progress`/`uninstall_done` 事件（执行批次）；R27-3 加性新增 `uninstall_residue_scan() → ResidueCandidate[]` 与 `uninstall_residue_clean(ResidueCleanParams) → txId`（复用 clean_progress/clean_done/clean_cancel）。
 - **R30 加性**：①展示字段（DisplayName/Publisher/DisplayVersion/InstallDate）防御解码——UTF-16/CP_ACP/CP936 三候选评分（ANSI 时代老安装器坏 REG_SZ），不可辨识的名称给"异常名称的程序"占位（条目保留可卸载），命令/路径字段仍用原值；②`uninstall_app_icons(appIds)` 批量返回 DisplayIcon 提取的 PNG data URL（32px，失败静默，前端字形回退），图标不影响卸载可用性；③大文件页定位复用 `shell_reveal(path)`。
+
+### 6.8 安装器语言（R32-4b）
+- 配置字段：`bundle.windows.nsis.languages = ["English", "SimpChinese", "TradChinese"]`（`src-tauri/tauri.conf.json`）；
+- 行为：NSIS 安装向导**默认跟随系统语言**；系统语言不在列表时回退到列表**第一项**（English）；不开启 `displayLanguageSelector`，即保持"跟随系统"而非让用户手选；
+- 语言包来源：NSIS 官方 `Contrib/Language files/*.nlf`（Tauri bundler 使用其下载的 NSIS 发行版内置语言文件），可用 `bundle.windows.nsis.customLanguageFiles` 覆盖。`SimpChinese`/`TradChinese` 分别覆盖简繁中文系统，其余语言回退 English。
 
 ## 7. UI 规范
 

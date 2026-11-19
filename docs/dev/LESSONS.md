@@ -6,6 +6,18 @@
 
 ## ① 踩坑记录
 
+### CNG 的 ECDSA 验签有三处反直觉：padding 传 NULL、签名是裸 r||s、magic 是 `ECS1`（2026-11-20，R32-4b）
+- 现象：按别处示例传 `BCRYPT_ECDSA_PKCS1_PADDING_INFO` + `dwFlags=0` 调 `BCryptVerifySignature`，合法签名也返回 `0xC000000D`（INVALID_PARAMETER）；把公钥 magic 记成 `'ECK1'` 时 `BCryptImportKeyPair` 直接失败；不清楚签名该喂 DER 还是裸 `r||s`。
+- 根因/结论（微软文档 + 本机实测）：① `BCryptVerifySignature` 官方约束是"`dwFlags=0` 时 `pPaddingInfo` 必须为 NULL"——ECDSA 传 NULL + 0 即可，哈希算法由调用方预哈希（SHA-256）决定；② 签名格式是 **IEEE P1363 裸 `r||s`**（P-256 各 32 字节，共 64），OpenSSL 默认 DER 不能直接喂（本机 .NET/CNG 默认输出即裸格式）；③ 公钥 blob magic `'ECS1'`（0x31534345）才是 ECDSA_PUBLIC_P256，`'ECK1'` 是 ECDH；blob = 8 字节头 + 大端 X[32] + Y[32]。
+- 修复：`updates/ecdsa.rs` 按 `hKey=NULL padding + flag 0` 直调 bcrypt；`tools/publish-manifest.ps1` 用 `DSASignatureFormat.IeeeP1363FixedFieldConcatenation` 输出裸签名；测试夹具由离线私钥签好内嵌（合法签名返回 0、篡改/错误哈希返回 `0xC000A000`）。
+- 复利结论：Windows 原生加密 API 不要凭记忆写参数——先查官方签名页的"when dwFlags is 0"约束，再用最小 PowerShell P/Invoke 探针实测四组（合法/篡改/错哈希/错 magic），把结果写进注释或 LESSONS；跨实现（OpenSSL ↔ CNG）交换签名时优先确认编码格式，DER 与 IEEE P1363 是两套东西。
+
+### 规则包更新通道的 sha256 是同源校验，不是信任校验（2026-11-20，R32-4b）
+- 现象：`update-manifest.json` 与规则包走同一通道分发，sha256 也写在同一个 manifest 里；源被劫持时可以连"恶意规则包 + 正确哈希"一起下发，sha256 永远通过。
+- 根因：把"完整性校验"当成"真实性校验"；哈希与内容同源时只防传输损坏，不防篡改。
+- 修复：manifest 加性新增 `rulesSig`（规则包字节的 ECDSA P-256/SHA-256 分离签名）与 `rulesKeyId`，公钥编译进二进制；未知 keyId/缺签名/验签失败一律 fail-closed（不写文件 + 审计），哈希校验保留作快速失败。
+- 复利结论：凡"从远端取来又要执行的文本"（规则 XML、脚本、配置），必须有一条与内容**不同源**的信任锚（编译进二进制的公钥 / 系统证书链）；只有哈希的防线等于没有防线。验签时机按威胁模型定：本场景仅安装时验一次（D3），加载时不再逐文件验。
+
 ### 契约里的设置项不等于生效：`quarantineAutoPurge` 从未被读取（2026-11-20，R32-3a）
 - 现象：`AppSettings.quarantine_auto_purge` 在默认值、serde、前端类型里都齐全，但全仓没有任何读取点——用户在设置里关掉"到期自动清除"，隔离区仍然照删；保留期号称 7–30，后端无 clamp、前端无入口。
 - 根因：把"字段存在"当成"功能已实现"；设置项的消费端与 UI 入口都没有任务清单约束，默认值/序列化测试只验证了结构，没有验证行为。
@@ -271,6 +283,12 @@
 
 ## ② 决策记录
 
+### 规则包签名选型：Ed25519 → ECDSA P-256（2026-11-20，R32-4b）
+- 背景：用户拍板"Ed25519 分离签名 + 公钥编译进二进制 + CNG 验签 + 零新增 crate"，并允许在确认最小 Windows 版本不支持时退到 CNG 支持的 ECDSA P-256。
+- 核实：微软 CNG Algorithm Identifiers 清单没有 Ed25519/EdDSA 条目，只有 `ECDSA_P256/384/521`（本机 Win11 实测 `ECDSA_P256` 可用）。
+- 决策：采用 **ECDSA P-256 + SHA-256**；签名 64 字节裸 `r||s`，manifest 里写 128 位 hex；密钥标识用递增短字符串（`"1"`、`"2"`），公钥表编译进二进制，未知 id fail-closed。
+- 理由/取舍：ECDSA P-256 同为 CNG 原生、Win7+ 可用、零新增 crate，代价是签名比 Ed25519 长 32 字节、无确定性签名特性——对"仅安装时验一次规则包"无实际影响。轮换顺序（先发公钥、后换签名）不可颠倒，否则旧客户端会拒绝新 keyId。
+
 ### 一键清理只清绿色 + 两击闭环：安全项自动、风险项人工（2026-10-18，R31-6）
 - 背景：审计发现默认入口"一键体检"只扫不删、用户还需自行理解方案 A/B，普通用户实际使用率受损；且同批审计出的 R1/R2 在未修前会放大误删后果。
 - 决策：首页「一键清理」= 快速扫描 → 简化结果页（可释放 X / N 项安全项）→「立即清理」；只清 🟢（可重建临时文件/缓存），🟡/🔴 一律不进一键流程；**不做"扫描后自动删"**——规则包签名落地前，自动清理会把"坏规则"变成"静默误删"。深度体检/完整报告保留为次入口。
@@ -348,6 +366,8 @@
 - `src/types/ipc.ts`（TS 唯一事实源）与 `contract.rs`（serde 镜像）两端同步改；变更记 CHANGELOG；新增字段必须 optional。详见 AGENTS §8。
 
 ## ③ 本机环境结论
+
+- 2026-11-20：本机已装 **pwsh 7.7**，`ECDsa.ImportFromPem` / `DSASignatureFormat.IeeeP1363FixedFieldConcatenation` 可用；Windows PowerShell 5.1 **不支持**这两个 API，规则包签名/密钥脚本须用 pwsh 7（CI `shell: pwsh` 满足）。规则包私钥在 `%USERPROFILE%\.pureslate\rules-signing-key.pem`（仓库外，绝不入库）。
 
 - 本机 `%SystemRoot%` 值为 **`C:\WINDOWS`（大写）**（2026-10-13 实测）——涉及该变量的断言/比较必须大小写不敏感；ExpandEnvironmentStringsW 展开结果保留注册表/环境原值大小写。
 - 开发机用户名不入公开文档（2026-10-04 脱敏；本机路径形如 `C:\Users\<本地账户>\`），Windows，系统盘 C: 为 NTFS。
