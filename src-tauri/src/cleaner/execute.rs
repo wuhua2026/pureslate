@@ -8,6 +8,7 @@
 //! 大类目串行、可取消；每个文件操作前写 journal intent、操作后写 result；
 //! 单文件失败不中断事务（记 ok=false 汇总）。进程守卫：类目 guard 进程运行中 → 整类阻止。
 
+use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 
 use crate::contract::{CleanProgressState, Disposition, Grade};
@@ -42,9 +43,19 @@ pub fn resolve_targets(
     ids: &[String],
     table: &crate::rules::model::RuleSetTable,
 ) -> Result<Vec<CleanTarget>, String> {
+    // R32-1：请求 id 去重（同一 id 重复提交、或跨多个历史扫描命中同一条目时，
+    // 原实现会产出重复目标 → 第一次删除成功、第二次对不存在文件报失败）。
+    let requested: HashSet<&str> = ids.iter().map(String::as_str).collect();
+    let mut seen_ids: HashSet<&str> = HashSet::new();
+    // 同一路径可能以不同 id/类目出现（如规则重叠）：按不区分大小写的路径再去重，
+    // 保证每个文件在一次事务里只被操作一次。
+    let mut seen_paths: HashSet<String> = HashSet::new();
     let mut out = Vec::new();
     for item in items {
-        if !ids.contains(&item.id) {
+        if !requested.contains(item.id.as_str()) || !seen_ids.insert(item.id.as_str()) {
+            continue;
+        }
+        if !seen_paths.insert(item.path.to_lowercase()) {
             continue;
         }
         let Some((_, cat)) = table.by_id.get(&item.category_id) else {
@@ -526,5 +537,44 @@ mod tests {
         delete_direct(&f).expect("长路径 direct 删除应成功（\\?\\ 前缀）");
         assert!(!f.exists(), "长路径文件应已删除");
         std::fs::remove_dir_all(&root).ok();
+    }
+
+    /// R32-1：重复 id / 同路径不同 id 只能解析出一个清理目标。
+    #[test]
+    fn resolve_targets_dedupes_ids_and_paths() {
+        let cat = crate::rules::model::Category {
+            id: "temp.demo".into(),
+            label: "demo".into(),
+            risk: crate::rules::model::Risk::Green,
+            disposition: crate::rules::model::Disposition::Direct,
+            description: None,
+            targets: Vec::new(),
+            includes: Vec::new(),
+            excludes: Vec::new(),
+            guard_processes: Vec::new(),
+        };
+        let mut table = crate::rules::model::RuleSetTable::default();
+        table.by_id.insert("temp.demo".into(), ("demo".into(), cat));
+        let item = |id: &str, path: &str| crate::contract::ScanItem {
+            id: id.into(),
+            category_id: "temp.demo".into(),
+            label: "demo".into(),
+            path: path.into(),
+            size_bytes: 1,
+            grade: Grade::Green,
+            disposition: Disposition::Direct,
+            reason: "test".into(),
+            mtime: None,
+            atime: None,
+            dup_group: None,
+        };
+        let items = vec![
+            item("id-a", r"C:\Users\x\a.tmp"),
+            item("id-a", r"C:\Users\x\a.tmp"),
+            item("id-b", r"c:\users\x\A.TMP"),
+        ];
+        let ids = vec!["id-a".to_string(), "id-a".to_string(), "id-b".to_string()];
+        let out = resolve_targets(&items, &ids, &table).expect("resolve");
+        assert_eq!(out.len(), 1, "重复 id 与同路径不同 id 必须去重");
     }
 }

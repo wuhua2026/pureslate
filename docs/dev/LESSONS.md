@@ -6,6 +6,12 @@
 
 ## ① 踩坑记录
 
+### 单例会话存储的 `finish` 必须带 id：无 single-flight 时结果会挂到下一次扫描（2026-11-20，R32-1）
+- 现象：`ScanStore.current` 只存一个"当前扫描"，`begin` 无条件覆盖、`finish` 无条件 `take()`。两个扫描并行时会话 B 的上下文被扫描 A 的收尾线程摘走/覆盖，`scan_get_items` 返回错数据。
+- 根因：把"同刻只有一个扫描"当成了约定，但既没有入口拒绝（single-flight），收尾也没有身份校验（id 匹配）。清理侧同理：`clean_execute` 跨所有历史会话按 id 收集且不去重，同一 id 出现两次就产生重复目标。
+- 修复：`begin` 在已有 current 时返回错误；`finish(scan_id, …)` 仅在 id 匹配时摘取；清理事务用同一把锁完成"检查为空 + 登记"（`begin_clean`），并在收集层（请求 id/会话条目）与解析层（id + 路径）双重去重。
+- 复利结论：任何 `Option<Current>`/全局单例的"开始-结束"生命周期，都必须满足两条——开始有互斥、结束有身份；"检查后使用"要放在同一把锁内，否则等于没检查。去重要在**入口**和**执行前**各做一次，只做一层总会漏。
+
 ### 专用收集器必须复用类目规则口径：dup 维度只过白名单，include/exclude 形同虚设（2026-11-20，R32-2a）
 - 现象：`dup.file` 等 dup 类目走独立收集器 `cleaner::dup::collect_candidates`，只做白名单/空文件/云占位过滤；类目的 `<include>`、`<exclude>`、`maxAgeDays`、`minSizeMB`、段收紧、深度全部不生效，普通 walk 与 dup 两条路径判断口径不一致。
 - 根因：为判重单独写了目录遍历，没有复用 `CompiledCategory`（`scanner/matcher.rs`）——"另起一条遍历"就等于"另起一套安全/约束语义"。

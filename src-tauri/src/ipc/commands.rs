@@ -29,6 +29,22 @@ fn clean_cancel_registry() -> std::sync::MutexGuard<'static, HashMap<String, Can
         .unwrap_or_else(|e| e.into_inner())
 }
 
+/// R32-1：清理事务 single-flight——同刻只允许一个事务（含残留清理）。
+/// 检查与登记在同一把锁内完成，避免"先查后插"的竞态。
+fn begin_clean(tx_id: &str, cancel: CancelToken) -> Result<(), String> {
+    let mut g = clean_cancel_registry();
+    if !g.is_empty() {
+        return Err("已有清理事务进行中，请等待其完成或取消后再试".into());
+    }
+    g.insert(tx_id.to_string(), cancel);
+    Ok(())
+}
+
+/// 是否已有清理事务在途（残留清理在消费快照前先做一次快速检查）。
+fn clean_busy() -> bool {
+    !clean_cancel_registry().is_empty()
+}
+
 /// 应用元信息（首个打通命令）。is_elevated：提权状态（v0.1.2 加性）——
 /// UI 据此提示"MFT 快速引擎可用性"（便携/双击运行通常非提权，大容量盘
 /// 深度维度会显著变慢）。
@@ -138,12 +154,14 @@ pub async fn scan_start(
         let Ok(mut scans) = state.scans.lock() else {
             return Err("扫描状态不可用".into());
         };
+        // R32-1 single-flight：已有扫描进行中时拒绝，避免两个扫描并行、
+        // 结果错挂到另一会话（AUDIT §3 #1）。
         scans.begin(ScanContext {
             scan_id: scan_id.clone(),
             started_at,
             cancel: cancel.clone(),
             ..Default::default()
-        });
+        })?;
     }
 
     let dirs = rules_dirs(&app);
@@ -293,7 +311,7 @@ fn do_scan(
     let items = outcome.items;
 
     if let Ok(mut scans) = app_state.scans.lock() {
-        scans.finish(result.clone(), items);
+        scans.finish(scan_id, result.clone(), items);
     }
     // R32-0：扫描完成写一条 op=scan 审计（此前只有白名单降级才写，SPEC §4.4 op 集口子）。
     audit_scan(
@@ -349,7 +367,7 @@ fn finish_empty(
         whitelist_ok: None,
     };
     if let Ok(mut scans) = app_state.scans.lock() {
-        scans.finish(result.clone(), vec![]);
+        scans.finish(scan_id, result.clone(), vec![]);
     }
     let _ = app.emit(events::SCAN_DONE, result);
 }
@@ -455,14 +473,19 @@ pub fn clean_execute(
         return Err("崩溃恢复进行中，请稍后重试".into());
     }
     // 1. 跨会话收集请求的扫描项（按 item.id）。
+    //    R32-1：请求 id 与会话内条目都去重——同一 id 可能同时出现在 current 与
+    //    已完成历史（AUDIT §3 #2），原实现会重复收集产出重复目标/伪失败。
     let items = {
         let Ok(scans) = state.scans.lock() else {
             return Err("扫描状态不可用".into());
         };
+        let requested: std::collections::HashSet<&str> =
+            params.items.iter().map(String::as_str).collect();
+        let mut seen: std::collections::HashSet<&str> = std::collections::HashSet::new();
         let mut out: Vec<ScanItem> = Vec::new();
         for ctx in scans.finished.iter().chain(scans.current.iter()) {
             for item in &ctx.items {
-                if params.items.contains(&item.id) {
+                if requested.contains(item.id.as_str()) && seen.insert(item.id.as_str()) {
                     out.push(item.clone());
                 }
             }
@@ -494,10 +517,10 @@ pub fn clean_execute(
         return Err("二次确认令牌无效或已过期，请重新发起确认".into());
     }
 
-    // 3. 生成 tx_id + 取消令牌并登记。
+    // 3. 生成 tx_id + 取消令牌并登记（R32-1：同刻只允许一个清理事务）。
     let tx_id = new_clean_id();
     let cancel = CancelToken::new();
-    clean_cancel_registry().insert(tx_id.clone(), cancel.clone());
+    begin_clean(&tx_id, cancel.clone())?;
 
     // 4. 取隔离保留期（quarantine 去向）→ spawn 后台执行。
     let retention = clean_retention(&state);
@@ -902,6 +925,10 @@ pub async fn uninstall_residue_clean(
     if state.recovery_pending.load(AtomicOrdering::SeqCst) {
         return Err("崩溃恢复进行中，请稍后重试".into());
     }
+    // R32-1：已有清理事务在途时先拒绝，避免消费残留快照后才发现无法登记。
+    if clean_busy() {
+        return Err("已有清理事务进行中，请等待其完成或取消后再试".into());
+    }
     if params.selections.is_empty() {
         return Err("未选择任何残留项".into());
     }
@@ -941,13 +968,19 @@ pub async fn uninstall_residue_clean(
     }
 
     // ③ 事务登记（取消令牌进 clean 登记表，前端复用 clean_cancel）。
+    // R32-1：single-flight——已有清理在途时拒绝，且把快照放回供稍后重试。
     let t = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .map(|d| d.as_nanos())
         .unwrap_or(0);
     let tx_id = format!("residue-{t:020x}");
     let cancel = CancelToken::new();
-    clean_cancel_registry().insert(tx_id.clone(), cancel.clone());
+    if begin_clean(&tx_id, cancel.clone()).is_err() {
+        if let Ok(mut g) = state.residue_snapshot.lock() {
+            *g = Some(snapshot);
+        }
+        return Err("已有清理事务进行中，请等待其完成或取消后再试".into());
+    }
     let retention = clean_retention(&state);
 
     let app2 = app.clone();

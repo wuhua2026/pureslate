@@ -97,13 +97,28 @@ pub struct ScanStore {
 }
 
 impl ScanStore {
-    /// 登记一个新的进行中扫描。
-    pub fn begin(&mut self, ctx: ScanContext) {
+    /// 登记一个新的进行中扫描（R32-1 single-flight：同刻只允许一个扫描）。
+    /// 已有进行中会话时拒绝——否则两个扫描并行推进，`finish` 会把结果错挂到
+    /// 另一会话（AUDIT §3 #1）。取消后仍需等待后台线程收尾（`finish`）才能再开。
+    pub fn begin(&mut self, ctx: ScanContext) -> Result<(), String> {
+        if self.current.is_some() {
+            return Err("已有扫描进行中，请等待其完成或取消后再试".into());
+        }
         self.current = Some(ctx);
+        Ok(())
     }
 
-    /// 将进行中扫描转入完成历史（裁剪超量），并回填 result/items。
-    pub fn finish(&mut self, result: ScanResult, items: Vec<ScanItem>) {
+    /// 将指定 scan_id 的进行中扫描转入完成历史（裁剪超量），并回填 result/items。
+    /// R32-1：按 id 匹配才摘取 current；id 不符一律不动（防迟到的收尾线程
+    /// 把另一会话的上下文摘走）。返回是否实际完成。
+    pub fn finish(&mut self, scan_id: &str, result: ScanResult, items: Vec<ScanItem>) -> bool {
+        let matches = self
+            .current
+            .as_ref()
+            .is_some_and(|cur| cur.scan_id == scan_id);
+        if !matches {
+            return false;
+        }
         if let Some(mut cur) = self.current.take() {
             cur.items = items;
             cur.result = Some(result);
@@ -112,6 +127,7 @@ impl ScanStore {
         while self.finished.len() > RETAIN_FINISHED {
             self.finished.remove(0);
         }
+        true
     }
 
     /// 按 scan_id 定位扫描上下文：先在 current，再在 finished（倒序最近优先）。
@@ -162,7 +178,7 @@ mod tests {
     #[test]
     fn begin_then_finish_moves_to_history() {
         let mut store = ScanStore::default();
-        store.begin(ctx("s1"));
+        store.begin(ctx("s1")).unwrap();
         assert!(store.current.is_some());
         let result = ScanResult {
             scan_id: "s1".into(),
@@ -178,7 +194,7 @@ mod tests {
             },
             whitelist_ok: None,
         };
-        store.finish(result, vec![]);
+        assert!(store.finish("s1", result, vec![]));
         assert!(store.current.is_none());
         assert_eq!(store.finished.len(), 1);
         assert!(store.by_id("s1").is_some());
@@ -188,7 +204,7 @@ mod tests {
     fn finished_history_trims() {
         let mut store = ScanStore::default();
         for i in 0..(RETAIN_FINISHED + 3) {
-            store.begin(ctx(&format!("s{i}")));
+            store.begin(ctx(&format!("s{i}"))).unwrap();
             let result = ScanResult {
                 scan_id: format!("s{i}"),
                 started_at: i as i64,
@@ -203,12 +219,57 @@ mod tests {
                 },
                 whitelist_ok: None,
             };
-            store.finish(result, vec![]);
+            store.finish(&format!("s{i}"), result, vec![]);
         }
         assert_eq!(store.finished.len(), RETAIN_FINISHED);
         // 最旧 "s0" 被裁掉，最近 "sN" 仍在。
         assert!(store.by_id("s0").is_none());
         assert!(store.by_id(&format!("s{}", RETAIN_FINISHED + 2)).is_some());
         // finished 里最新在当前的最前? 倒序检索：最新在前。
+    }
+
+    #[test]
+    fn begin_rejects_second_scan_until_finished() {
+        // R32-1 single-flight：进行中不得再开第二个扫描。
+        let mut store = ScanStore::default();
+        store.begin(ctx("s1")).unwrap();
+        assert!(store.begin(ctx("s2")).is_err(), "已有 current 时必须拒绝");
+        assert_eq!(
+            store.current.as_ref().map(|c| c.scan_id.as_str()),
+            Some("s1")
+        );
+        // 完成 s1 后可再开。
+        assert!(store.finish("s1", test_result("s1"), vec![]));
+        store.begin(ctx("s2")).unwrap();
+    }
+
+    #[test]
+    fn finish_with_mismatched_id_leaves_current_untouched() {
+        // R32-1：迟到的收尾线程不得摘走另一会话。
+        let mut store = ScanStore::default();
+        store.begin(ctx("s2")).unwrap();
+        assert!(!store.finish("s1", test_result("s1"), vec![]));
+        assert_eq!(
+            store.current.as_ref().map(|c| c.scan_id.as_str()),
+            Some("s2")
+        );
+        assert!(store.finished.is_empty());
+    }
+
+    fn test_result(scan_id: &str) -> ScanResult {
+        ScanResult {
+            scan_id: scan_id.into(),
+            started_at: 0,
+            finished_at: 1,
+            volume: "C:".into(),
+            aggregates: vec![],
+            item_count: 0,
+            total_bytes: crate::contract::FoundBytes {
+                green: 0,
+                yellow: 0,
+                red: 0,
+            },
+            whitelist_ok: None,
+        }
     }
 }

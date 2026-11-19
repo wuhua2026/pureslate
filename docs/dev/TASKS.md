@@ -215,7 +215,7 @@
 | ID | 任务 | 状态 | 产出 / 验证 |
 |----|------|------|-------------|
 | R32-2a | dup 维度遵守 include/exclude/age/size | ✅ 2026-11-20 | `scan_dup_category` 逐文件走 `CompiledCategory::match_include` + `constraint_allows`（口径同 `walk_target`），白名单之外补齐 include/exclude/maxAgeDays/minSizeMB/段收紧/深度；重叠 target 按路径去重。集成新增 2 例（三组过滤、重叠 target），cargo **290 lib + 29 集成**全绿。备注：R32-2 其余项（MFT 会话复用/UB/取消）仍未做 |
-| R32-1 | 扫描 single-flight + clean_execute 去重 | ⏳ | 本批次下一项 |
+| R32-1 | 扫描 single-flight + clean_execute 去重 | ✅ 2026-11-20 | `ScanStore::begin` 已有 current 时拒绝（同锁内判定）；`finish(scan_id,…)` 按 id 匹配才摘 current，迟到收尾不污染新会话。`clean_execute` 请求 id/会话条目去重；`resolve_targets` 再按 id + 大小写不敏感路径去重；清理事务（含残留清理）经 `begin_clean` 同锁检查+登记实现 single-flight，占用时返回明确错误。验证：cargo **293 lib + 29 集成**全绿（9 ignored），fmt/clippy 0 告警。契约零变更 |
 | R32-3a | autoPurge/retention 接线 + 设置文案 | ⏳ | 待做 |
 | R32-4a | rulesVersion + 规则更新通道 | ⏳ | 待拍板（签名/提权方案） |
 

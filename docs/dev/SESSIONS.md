@@ -10,7 +10,9 @@
 - **范围**：用户指定四项——(1) dup 维度未遵守 include/exclude；(2) 扫描与清理缺 single-flight/并发去重；(3) autoPurge 未接保留期且设置说明不统一；(4) rulesVersion 写死 "0" 且规则更新通道未补。一项一提交，每项完成即报告；签名/提权方案需先拍板。
 - **R32-2a ✅（本次提交）**：`scanner/engine.rs::scan_dup_category` 此前只用 `collect_candidates`（仅白名单），绕过类目 include/exclude/maxAgeDays/minSizeMB/段收紧/深度。现编译 `CompiledCategory` 并对每个候选文件做 `match_include(path, target_root)` + `constraint_allows`，与 `walk_target` 同口径；多个 target 重叠时按路径去重，避免同一文件在判重组内重复出现。
 - **验证**：新增集成 2 例（老 .log 产出 / 新 .log 被 maxAgeDays 排除 / .tmp 被 exclude 排除；重叠 target 只产出 1 项）；`cargo fmt --check` + `clippy --all-targets -D warnings` 0 告警；`cargo test` **290 lib + 29 集成**全绿（9 ignored）。
-- **下一步**：R32-1 扫描 single-flight + clean_execute 去重。
+- **R32-1 ✅（本次提交）**：扫描 single-flight——`ScanStore::begin` 在已有 current 时返回错误；`finish` 改为按 `scan_id` 匹配才摘 current，迟到的收尾线程不会污染新会话。清理侧：`clean_execute` 请求 id 与会话条目去重，`resolve_targets` 再按 id + 大小写不敏感路径去重（同一文件不再重复删除/伪失败）；`clean_execute` 与残留清理共用 `begin_clean`（同锁检查+登记）实现清理事务 single-flight。契约零变更。
+- **R32-1 验证**：`cargo fmt --check`/`clippy --all-targets -D warnings` 0 告警；`cargo test` **293 lib + 29 集成**全绿（9 ignored）；新增状态机用例 2 例（并发拒绝、id 不匹配不摘 current）与 `resolve_targets` 去重用例。
+- **下一步**：R32-3 autoPurge/retention 接线。
 
 ## 2026-11-11 | v0.2.2 发布（R32-0 误删修复 + R31 安全批次 + B1 开机诊断）
 
