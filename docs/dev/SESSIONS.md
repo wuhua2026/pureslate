@@ -5,6 +5,16 @@
 > 维护（AGENTS.md §9）：任务完成时 agent 自动追加/更新当前会话条目，随任务同一提交。格式：`## YYYY-MM-DD | 主题`。
 > 本初版由历史会话记忆回溯整理（截至 2026-09-29），细节以 git 历史与 TASKS.md 为准。
 
+## 2026-11-21 | v0.2.3 发布准备（版本 bump + 验证 + NSIS 打包）
+
+- **范围**：收尾 R32 批次并发布 v0.2.3；发布前先确认 GitHub Secret `RULES_SIGNING_KEY`（新流程 fail-closed，缺失即构建失败）。
+- **Secret**：经作者授权用 `gh secret set RULES_SIGNING_KEY` 以 stdin 方式写入仓库 `wuhua2026/pureslate`（值来自 `%USERPROFILE%\.pureslate\rules-signing-key.pem`，全程未回显）；随后仅核对元数据：`total_count=1`、`secret_name=RULES_SIGNING_KEY`（不读值）。踩坑：`GH_TOKEN` 为 App token 时读写 secrets 均 403，需 `$env:GH_TOKEN=$null` 走 keyring OAuth token。
+- **版本同步**：`src-tauri/Cargo.toml` 0.2.2→0.2.3；`src-tauri/tauri.conf.json` 同值；`src-tauri/Cargo.lock` 的 `name = "pureslate"` 条目由 cargo 自动同步；`package.json` 维持 `0.1.0`；README 下载链接/文件名改 `v0.2.3`。发布正文新建 `.github/release-notes/v0.2.3.md`。
+- **验证（当前 HEAD）**：`cargo fmt --check` 通过、`clippy --all-targets -D warnings` 0 告警；`cargo test` **300 lib passed + 9 ignored + 29 集成（12+4+4+3+6）**全绿；`pnpm typecheck` 通过、vitest **99 passed（12 文件）**；零新增 crate/npm。
+- **打包**：`pnpm tauri build --bundles nsis` 成功；`PureSlate_0.2.3_x64-setup.exe` **3,011,017 B ≈ 2.87 MiB**，sha256 `5e2ec0f0d74a93d909082e7b93ab83b92d05ae228bec157731d4122fc965b90e`；`tools/check-size.ps1` PASS（目录内残留的 0.2.2 旧产物同样 PASS）。
+- **门禁时效**：性能（2026-09-29）、误删率（2026-10-04）、还原率（2026-10-04）**本轮未重跑，证据早于当前 HEAD**，不阻塞发布（沿用 v0.2.2 的口径）。
+- **下一步**：打 annotated tag `v0.2.3` → push（tag 与 main）→ workflow 校验 tag↔版本 → 四资产 Release + manifest 回推 main；完成后回填 Release 地址/CI 哈希并复核 `appSha256`/`rulesSha256` 一致性。**不可逆步骤已按约定停下等作者确认。**
+
 ## 2026-11-20 | R32 批次（审计遗留收口，逐项提交）
 
 - **范围**：用户指定四项——(1) dup 维度未遵守 include/exclude；(2) 扫描与清理缺 single-flight/并发去重；(3) autoPurge 未接保留期且设置说明不统一；(4) rulesVersion 写死 "0" 且规则更新通道未补。一项一提交，每项完成即报告；签名/提权方案需先拍板。

@@ -4,6 +4,16 @@
 
 ## [Unreleased]
 
+### v0.2.3（发布）
+
+- 本地构建与提交（2026-11-21）：tag `v0.2.3`（annotated）待推送；Release 正文 `.github/release-notes/v0.2.3.md`；内容主线为 R32 批次（规则包分离签名、重复文件维度约束、扫描/清理 single-flight、autoPurge 接线与保留期 7–30、rulesVersion 跟随应用版本、NSIS 跟随系统语言）。
+- 版本同步：`src-tauri/tauri.conf.json` / `src-tauri/Cargo.toml` / `src-tauri/Cargo.lock`；`package.json` 沿用历史恒 `0.1.0` 不动；README 下载链接与文件名同步 `v0.2.3`。
+- 体积门禁（当前 HEAD 本地实测）：NSIS `PureSlate_0.2.3_x64-setup.exe` **3,011,017 B ≈ 2.87 MiB**（sha256 `5e2ec0f0d74a93d909082e7b93ab83b92d05ae228bec157731d4122fc965b90e`）；`tools/check-size.ps1` **PASS**（<20MB）。CI 会重新构建，Release 资产哈希以 CI 产物为准。
+- **另外三类门禁的证据时效（如实标注）**：性能（`docs/verify/bench-scan.json`，2026-09-29）、误删率（`docs/verify/golden-misdelete.json`，2026-10-04）、还原率（`docs/verify/restore-1000.json`，2026-10-04）**本轮未重跑，证据早于当前 HEAD**；不作为 v0.2.3 达标依据，也不阻塞本次发布。重跑计划：按 TASKS P5-01 统一补测。
+- 验证：cargo fmt --check / clippy `-D warnings` 零告警；`cargo test` **300 lib passed + 9 ignored + 29 集成全绿**；`pnpm typecheck` / **99 vitest（12 文件）** 全绿；零新增 crate/npm。
+- 发布前置：GitHub Actions Secret `RULES_SIGNING_KEY`（ECDSA P-256 PKCS#8 PEM）已配置，name-only 核对 `total_count=1`（未读取值）。
+- Release：待 CI 完成后回填（Release 地址、workflow run、四资产体积与 sha256、manifest 回推 commit 与哈希一致性）。
+
 ### 2026-11-20 · R32-4b 规则包分离签名 + 安装器语言（发布清单加性变更，IPC 契约零变更）
 - `update-manifest.json` 加性新增 `rulesSig`（规则包原始字节的 ECDSA P-256/SHA-256 签名，IEEE P1363 裸 `r||s` 的 128 位 hex）与 `rulesKeyId`（公钥标识）；既有字段与 `UpdateStatus` 不变。
 - 新客户端对缺签名/未知 `rulesKeyId`/验签失败**一律拒绝安装规则包**（fail-closed，不写文件 + `op=update` fail 审计）；旧版客户端忽略新增字段、行为不变。
