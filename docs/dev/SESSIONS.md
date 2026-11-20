@@ -13,7 +13,10 @@
 - **验证（当前 HEAD）**：`cargo fmt --check` 通过、`clippy --all-targets -D warnings` 0 告警；`cargo test` **300 lib passed + 9 ignored + 29 集成（12+4+4+3+6）**全绿；`pnpm typecheck` 通过、vitest **99 passed（12 文件）**；零新增 crate/npm。
 - **打包**：`pnpm tauri build --bundles nsis` 成功；`PureSlate_0.2.3_x64-setup.exe` **3,011,017 B ≈ 2.87 MiB**，sha256 `5e2ec0f0d74a93d909082e7b93ab83b92d05ae228bec157731d4122fc965b90e`；`tools/check-size.ps1` PASS（目录内残留的 0.2.2 旧产物同样 PASS）。
 - **门禁时效**：性能（2026-09-29）、误删率（2026-10-04）、还原率（2026-10-04）**本轮未重跑，证据早于当前 HEAD**，不阻塞发布（沿用 v0.2.2 的口径）。
-- **下一步**：打 annotated tag `v0.2.3` → push（tag 与 main）→ workflow 校验 tag↔版本 → 四资产 Release + manifest 回推 main；完成后回填 Release 地址/CI 哈希并复核 `appSha256`/`rulesSha256` 一致性。**不可逆步骤已按约定停下等作者确认。**
+- **发布**：作者放行后打 annotated tag `v0.2.3`（`bc153c4`）→ `git push origin main` + `git push origin v0.2.3`。Release run [44782484135](https://github.com/wuhua2026/pureslate/actions/runs/44782484135) **success**（job 5m22s，SignPath 步骤按预期 skipped）。Release <https://github.com/wuhua2026/pureslate/releases/tag/v0.2.3>。
+- **资产**：NSIS `PureSlate_0.2.3_x64-setup.exe` **3,014,736 B ≈ 2.88 MiB** sha256 `b4ea6ae6…`（本地构建 3,011,017 B，差异属重建时间戳）；portable zip 4,059,253 B ≈ 3.87 MiB sha256 `fdf2f335…`；rules pack 5,761 B sha256 `6cb58f8c…`；build-hashes 367 B sha256 `febafab5…`。
+- **manifest**：bot 回推 `bbd5674`（`[skip ci]`）；`appVersion`/`rulesVersion` = 0.2.3，`appSha256`/`rulesSha256` 与 Release digest 逐字一致；`rulesSig`（128 hex）+ `rulesKeyId="1"` 存在——**规则包分离签名在生产环境首次跑通**。
+- **下一步**：R32 剩余项按 AUDIT §3 排期；性能/误删/还原三类门禁按 TASKS P5-01 统一补测。
 
 ## 2026-11-20 | R32 批次（审计遗留收口，逐项提交）
 

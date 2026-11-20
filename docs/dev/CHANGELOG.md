@@ -6,13 +6,14 @@
 
 ### v0.2.3（发布）
 
-- 本地构建与提交（2026-11-21）：tag `v0.2.3`（annotated）待推送；Release 正文 `.github/release-notes/v0.2.3.md`；内容主线为 R32 批次（规则包分离签名、重复文件维度约束、扫描/清理 single-flight、autoPurge 接线与保留期 7–30、rulesVersion 跟随应用版本、NSIS 跟随系统语言）。
+- 2026-11-21 发布：tag `v0.2.3`（annotated，打在 `bc153c4`）；Release 正文 `.github/release-notes/v0.2.3.md`；内容主线为 R32 批次（规则包分离签名、重复文件维度约束、扫描/清理 single-flight、autoPurge 接线与保留期 7–30、rulesVersion 跟随应用版本、NSIS 跟随系统语言）。
 - 版本同步：`src-tauri/tauri.conf.json` / `src-tauri/Cargo.toml` / `src-tauri/Cargo.lock`；`package.json` 沿用历史恒 `0.1.0` 不动；README 下载链接与文件名同步 `v0.2.3`。
-- 体积门禁（当前 HEAD 本地实测）：NSIS `PureSlate_0.2.3_x64-setup.exe` **3,011,017 B ≈ 2.87 MiB**（sha256 `5e2ec0f0d74a93d909082e7b93ab83b92d05ae228bec157731d4122fc965b90e`）；`tools/check-size.ps1` **PASS**（<20MB）。CI 会重新构建，Release 资产哈希以 CI 产物为准。
+- 体积门禁：本地 HEAD 构建 NSIS `PureSlate_0.2.3_x64-setup.exe` **3,011,017 B ≈ 2.87 MiB**（sha256 `5e2ec0f0…`）；CI 产物 **3,014,736 B ≈ 2.88 MiB**（sha256 `b4ea6ae6…`，差异属重建时间戳）；两次 `tools/check-size.ps1` 均 **PASS**（<20MB）。Release 资产哈希以 CI 产物为准。
 - **另外三类门禁的证据时效（如实标注）**：性能（`docs/verify/bench-scan.json`，2026-09-29）、误删率（`docs/verify/golden-misdelete.json`，2026-10-04）、还原率（`docs/verify/restore-1000.json`，2026-10-04）**本轮未重跑，证据早于当前 HEAD**；不作为 v0.2.3 达标依据，也不阻塞本次发布。重跑计划：按 TASKS P5-01 统一补测。
 - 验证：cargo fmt --check / clippy `-D warnings` 零告警；`cargo test` **300 lib passed + 9 ignored + 29 集成全绿**；`pnpm typecheck` / **99 vitest（12 文件）** 全绿；零新增 crate/npm。
 - 发布前置：GitHub Actions Secret `RULES_SIGNING_KEY`（ECDSA P-256 PKCS#8 PEM）已配置，name-only 核对 `total_count=1`（未读取值）。
-- Release：待 CI 完成后回填（Release 地址、workflow run、四资产体积与 sha256、manifest 回推 commit 与哈希一致性）。
+- Release：[v0.2.3](https://github.com/wuhua2026/pureslate/releases/tag/v0.2.3) 已发布；workflow run [44782484135](https://github.com/wuhua2026/pureslate/actions/runs/44782484135) 全绿（job 5m22s）。四资产：`PureSlate_0.2.3_x64-setup.exe` **3,014,736 B ≈ 2.88 MiB** sha256 `b4ea6ae6a52423bdc94eae65d7f6c36fa8ab14a28a1e8fe4fab8420fcafaee4f`、`PureSlate-0.2.3-portable.zip` 4,059,253 B ≈ 3.87 MiB sha256 `fdf2f335…`、`pureslate-rules-0.2.3.json` 5,761 B sha256 `6cb58f8c…`、`build-hashes.json` 367 B sha256 `febafab5…`。
+- manifest 由 bot 回推 main（`bbd5674`）：`appVersion`/`rulesVersion` = 0.2.3，`appSha256`/`rulesSha256` 与上述 NSIS/规则包 digest 逐字一致；`rulesSig`（128 hex）+ `rulesKeyId="1"` 已写入，规则包分离签名链路在生产环境首次验证通过。MSI 按决策不补传。
 
 ### 2026-11-20 · R32-4b 规则包分离签名 + 安装器语言（发布清单加性变更，IPC 契约零变更）
 - `update-manifest.json` 加性新增 `rulesSig`（规则包原始字节的 ECDSA P-256/SHA-256 签名，IEEE P1363 裸 `r||s` 的 128 位 hex）与 `rulesKeyId`（公钥标识）；既有字段与 `UpdateStatus` 不变。
