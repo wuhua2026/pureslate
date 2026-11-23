@@ -87,92 +87,83 @@ async function restore(item: StartupEntry): Promise<void> {
     </p>
     <template v-else>
       <div class="summary">
-        <span>共 {{ entries.length }} 项</span>
-        <span>启用 {{ groups.enabled.length }}</span>
-        <span>已禁用 {{ groups.disabled.length }}</span>
-        <span class="warn" v-if="highCount > 0">高影响 {{ highCount }} 项</span>
+        <span class="chip">共 {{ entries.length }} 项</span>
+        <span class="chip ok">启用 {{ groups.enabled.length }}</span>
+        <span class="chip">已禁用 {{ groups.disabled.length }}</span>
+        <span class="chip danger" v-if="highCount > 0">高影响 {{ highCount }} 项</span>
       </div>
 
       <p v-if="actionError" class="error">{{ actionError }}</p>
 
-      <table class="list" v-if="groups.enabled.length > 0">
-        <colgroup>
-          <col class="col-name" />
-          <col class="col-pub" />
-          <col class="col-impact" />
-          <col class="col-source" />
-          <col />
-          <col class="col-op" />
-        </colgroup>
-        <thead>
-          <tr>
-            <th>名称</th>
-            <th>发布者</th>
-            <th>影响</th>
-            <th>来源</th>
-            <th>命令</th>
-            <th class="op">操作</th>
-          </tr>
-        </thead>
-        <tbody>
-          <tr v-for="e in groups.enabled" :key="e.id" :class="{ muted: isSystemDisabled(e) }">
-            <td class="name" :title="e.name">{{ e.name }}</td>
-            <td class="pub" :class="{ unknown: publisherLabel(e.publisher) === '未知发布者' }">
-              {{ publisherLabel(e.publisher) }}
-            </td>
-            <td><span class="impact" :class="e.impact">{{ impactLabel(e.impact) }}</span></td>
-            <td>{{ sourceLabel(e.source) }}</td>
-            <td class="cmd" :title="e.command">{{ e.command }}</td>
-            <td class="op">
-              <span v-if="isSystemDisabled(e)" class="sys-disabled">系统已禁用</span>
-              <button
-                v-else
-                class="btn"
-                :disabled="busyId === e.id || pending !== null"
-                @click="pending = e"
-              >
-                {{ busyId === e.id ? "处理中…" : "禁用" }}
-              </button>
-            </td>
-          </tr>
-        </tbody>
-      </table>
-
-      <template v-if="groups.disabled.length > 0">
-        <h2 class="section">已禁用（备份在 PureSlate，可恢复）</h2>
-        <table class="list muted">
-          <colgroup>
-            <col class="col-name2" />
-            <col class="col-source2" />
-            <col />
-            <col class="col-op" />
-          </colgroup>
-          <thead>
-            <tr>
-              <th>名称</th>
-              <th>来源</th>
-              <th>命令</th>
-              <th class="op">操作</th>
-            </tr>
-          </thead>
-          <tbody>
-            <tr v-for="e in groups.disabled" :key="e.id">
-              <td class="name" :title="e.name">{{ e.name }}</td>
-              <td>{{ sourceLabel(e.source) }}</td>
-              <td class="cmd" :title="e.command">{{ e.command }}</td>
-              <td class="op">
+      <div class="board">
+        <section class="panel">
+          <div class="panel-head">
+            <h2>已启用</h2>
+            <span class="panel-count">{{ groups.enabled.length }}</span>
+          </div>
+          <p class="panel-hint">禁用 = 备份后移除，不删除程序本身，可随时恢复</p>
+          <div class="panel-list">
+            <p v-if="groups.enabled.length === 0" class="panel-empty">没有启用的启动项</p>
+            <article
+              v-for="e in groups.enabled"
+              :key="e.id"
+              class="item"
+              :class="{ muted: isSystemDisabled(e) }"
+            >
+              <div class="item-main">
+                <div class="item-top">
+                  <span class="item-name" :title="e.name">{{ e.name }}</span>
+                  <span class="impact" :class="e.impact">{{ impactLabel(e.impact) }}</span>
+                </div>
+                <div class="item-meta">
+                  <span :class="{ unknown: publisherLabel(e.publisher) === '未知发布者' }">
+                    {{ publisherLabel(e.publisher) }}
+                  </span>
+                  <span class="dot">·</span>
+                  <span>{{ sourceLabel(e.source) }}</span>
+                </div>
+                <p class="item-cmd" :title="e.command">{{ e.command }}</p>
+              </div>
+              <div class="item-op">
+                <span v-if="isSystemDisabled(e)" class="sys-disabled">系统已禁用</span>
                 <button
-                  class="btn primary"
-                  :disabled="busyId === e.id"
-                  @click="restore(e)"
+                  v-else
+                  class="btn"
+                  :disabled="busyId === e.id || pending !== null"
+                  @click="pending = e"
                 >
-                  {{ busyId === e.id ? "处理中…" : "恢复" }}
+                  {{ busyId === e.id ? "处理中…" : "禁用" }}
                 </button>
-              </td>
-            </tr>
-          </tbody>
-        </table>
-      </template>
+              </div>
+            </article>
+          </div>
+        </section>
+
+        <section class="panel">
+          <div class="panel-head">
+            <h2>已禁用</h2>
+            <span class="panel-count">{{ groups.disabled.length }}</span>
+          </div>
+          <p class="panel-hint">备份在 PureSlate，随时可恢复</p>
+          <div class="panel-list">
+            <p v-if="groups.disabled.length === 0" class="panel-empty">还没有禁用项</p>
+            <article v-for="e in groups.disabled" :key="e.id" class="item">
+              <div class="item-main">
+                <div class="item-top">
+                  <span class="item-name" :title="e.name">{{ e.name }}</span>
+                </div>
+                <div class="item-meta">
+                  <span>{{ sourceLabel(e.source) }}</span>
+                </div>
+                <p class="item-cmd" :title="e.command">{{ e.command }}</p>
+              </div>
+              <button class="btn primary" :disabled="busyId === e.id" @click="restore(e)">
+                {{ busyId === e.id ? "处理中…" : "恢复" }}
+              </button>
+            </article>
+          </div>
+        </section>
+      </div>
     </template>
 
     <!-- 禁用风险确认（轻量面板，非 🔴 级不走 token 流） -->
@@ -192,180 +183,253 @@ async function restore(item: StartupEntry): Promise<void> {
 
 <style scoped>
 .page {
-  padding: 20px 24px;
   max-width: 1080px;
   margin: 0 auto;
 }
 .head h1 {
   margin: 0;
-  font-size: 1.35rem;
+  font-size: 1.6rem;
+  font-weight: 720;
+  letter-spacing: -0.02em;
   color: var(--text, #1f2430);
 }
 .sub {
-  margin: 4px 0 16px;
+  margin: 4px 0 18px;
   font-size: 0.85rem;
   color: var(--text-2, #5a6472);
+  line-height: 1.65;
 }
 .empty-list {
-  padding: 32px 0;
+  padding: 48px 0;
   text-align: center;
   color: var(--text-2, #5a6472);
+  background: var(--surface);
+  border: 1px solid var(--glass-line);
+  border-radius: var(--r-xl);
+  box-shadow: var(--shadow-1);
 }
 .summary {
   display: flex;
   flex-wrap: wrap;
-  gap: 16px;
+  gap: 8px;
   align-items: center;
-  margin-bottom: 12px;
-  font-size: 0.85rem;
-  color: var(--text, #1f2430);
+  margin-bottom: 14px;
 }
-.summary .warn {
-  color: var(--grade-red, #c4382e);
-}
-.error {
-  margin: 0 0 12px;
-  padding: 8px 12px;
-  border: 1px solid var(--grade-red, #c4382e);
-  border-radius: 8px;
-  background: var(--surface, #fff);
-  color: var(--grade-red, #c4382e);
-  font-size: 0.85rem;
-}
-
-/* 来源读取不完整：黄色警示，明确"空列表 ≠ 没有启动项"。 */
-.source-warn {
-  margin: 0 0 12px;
-  padding: 8px 12px;
-  border: 1px solid var(--grade-yellow, #d9971c);
-  border-radius: 8px;
-  background: var(--surface, #fff);
-  color: var(--text, #1f2328);
-  font-size: 0.85rem;
-}
-.section {
-  margin: 20px 0 10px;
-  font-size: 0.95rem;
-  color: var(--text, #1f2430);
-}
-.list {
-  width: 100%;
-  /* R30-3：fixed 布局，超长命令/名称按列宽省略，不撑出横向滚动。 */
-  table-layout: fixed;
-  border-collapse: collapse;
-  background: var(--surface, #fff);
-  border: 1px solid var(--border, #e4e7ec);
-  border-radius: 10px;
-  overflow: hidden;
-  font-size: 0.85rem;
-}
-/* R30-3：百分比列宽（两表各自合计 100%），窄窗下列也不重叠。 */
-/* 启用表 */
-.col-name {
-  width: 17%;
-}
-.col-pub {
-  width: 14%;
-}
-.col-impact {
-  width: 8%;
-}
-.col-source {
-  width: 13%;
-}
-.col-op {
-  width: 12%;
-}
-/* 已禁用表 */
-.col-name2 {
-  width: 24%;
-}
-.col-source2 {
-  width: 16%;
-}
-.list.muted {
-  opacity: 0.85;
-}
-.list th,
-.list td {
-  padding: 8px 12px;
-  text-align: left;
-  border-bottom: 1px solid var(--border, #e4e7ec);
-}
-.list thead th {
-  background: var(--bg, #fafafa);
+.chip {
+  font-size: 0.78rem;
+  font-weight: 600;
   color: var(--text-2, #5a6472);
-  font-weight: 500;
+  background: rgba(255, 255, 255, 0.7);
+  border: 1px solid var(--glass-line);
+  border-radius: var(--r-pill);
+  padding: 4px 10px;
 }
-.list tbody tr {
+.chip.ok {
+  color: var(--grade-green, #12a150);
+  background: rgba(230, 246, 236, 0.85);
+  border-color: rgba(18, 136, 74, 0.22);
+}
+.chip.danger {
+  color: var(--grade-red, #c4382e);
+  background: rgba(255, 244, 242, 0.85);
+  border-color: rgba(214, 58, 47, 0.28);
+}
+.board {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 1rem;
+  align-items: start;
+}
+.panel {
+  display: flex;
+  flex-direction: column;
+  gap: 0.7rem;
+  padding: 1.1rem 1.15rem 1.2rem;
+  background: var(--surface);
+  border: 1px solid var(--glass-line);
+  border-radius: var(--r-xl);
+  backdrop-filter: var(--glass-blur);
+  -webkit-backdrop-filter: var(--glass-blur);
+  box-shadow:
+    var(--glass-sheen),
+    var(--shadow-1);
+}
+.panel-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.panel-head h2 {
+  margin: 0;
+  font-size: 1rem;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+}
+.panel-count {
+  font-size: 0.72rem;
+  font-weight: 700;
+  color: var(--text-2, #5a6472);
+  background: rgba(19, 32, 54, 0.06);
+  border-radius: var(--r-pill);
+  padding: 1px 8px;
+}
+.panel-hint {
+  margin: 0;
+  font-size: 0.76rem;
+  line-height: 1.5;
+  color: var(--text-2, #5a6472);
+}
+.panel-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 2px;
+}
+.panel-empty {
+  margin: 0;
+  padding: 28px 0;
+  text-align: center;
+  font-size: 0.82rem;
+  color: var(--text-2, #5a6472);
+  border: 1px dashed var(--border, #e4e7ec);
+  border-radius: var(--r-md);
+}
+.item {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 0.7rem 0.8rem;
+  border: 1px solid var(--border, #e4e7ec);
+  border-radius: var(--r-md);
+  background: rgba(255, 255, 255, 0.55);
   transition: background var(--dur-fast) var(--ease-inout);
 }
-.list tbody tr:hover {
-  background: var(--surface-2, #f8fafc);
+.item:hover {
+  background: rgba(255, 255, 255, 0.85);
 }
-.list tbody tr:last-child td {
-  border-bottom: none;
+.item.muted {
+  opacity: 0.72;
 }
-.name {
+.item-main {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+}
+.item-top {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+.item-name {
+  font-size: 0.86rem;
+  font-weight: 600;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  font-weight: 500;
 }
-.pub {
+.item-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+  font-size: 0.73rem;
+  color: var(--text-2, #5a6472);
+  min-width: 0;
+}
+.item-meta .unknown {
+  color: var(--grade-yellow, #b26a00);
+}
+.dot {
+  color: var(--border-strong, #d7deea);
+}
+.item-cmd {
+  margin: 0;
+  max-width: 100%;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  font-family: Consolas, monospace;
+  font-size: 0.72rem;
+  color: var(--text-2, #5a6472);
 }
-.pub.unknown {
-  color: var(--grade-yellow, #d9971c);
+.item-op {
+  flex: none;
+  padding-top: 2px;
 }
 .impact {
-  white-space: nowrap;
+  flex: none;
+  padding: 1px 6px;
+  border-radius: var(--r-pill);
+  font-size: 0.7rem;
+  font-weight: 700;
+  background: rgba(19, 32, 54, 0.05);
 }
 .impact.high {
   color: var(--grade-red, #c4382e);
+  background: rgba(255, 244, 242, 0.95);
 }
 .impact.medium {
-  color: var(--grade-yellow, #d9971c);
+  color: var(--grade-yellow, #b26a00);
+  background: rgba(253, 247, 235, 0.95);
 }
 .impact.low {
-  color: var(--grade-green, #2e9e5b);
-}
-.list tr.muted .name,
-.list tr.muted .cmd {
-  opacity: 0.6;
+  color: var(--grade-green, #12a150);
+  background: rgba(230, 246, 236, 0.95);
 }
 .sys-disabled {
   color: var(--text-2, #5a6472);
   font-size: 0.78rem;
   white-space: nowrap;
 }
-.cmd {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  font-family: Consolas, monospace;
-  font-size: 0.8rem;
+@media (max-width: 900px) {
+  .board {
+    grid-template-columns: minmax(0, 1fr);
+  }
 }
-.op {
-  text-align: right;
-  white-space: nowrap;
+.error {
+  margin: 0 0 12px;
+  padding: 9px 13px;
+  border: 1px solid rgba(214, 58, 47, 0.35);
+  border-radius: var(--r-md);
+  background: rgba(255, 244, 242, 0.88);
+  color: var(--grade-red, #c4382e);
+  font-size: 0.85rem;
+  box-shadow: var(--shadow-1);
+}
+
+/* 来源读取不完整：黄色警示，明确"空列表 ≠ 没有启动项"。 */
+.source-warn {
+  margin: 0 0 12px;
+  padding: 9px 13px;
+  border: 1px solid rgba(202, 158, 74, 0.4);
+  border-radius: var(--r-md);
+  background: rgba(253, 247, 235, 0.88);
+  color: var(--text, #1f2328);
+  font-size: 0.85rem;
+  box-shadow: var(--shadow-1);
 }
 .btn {
-  padding: 4px 14px;
-  border: 1px solid var(--border, #e4e7ec);
-  border-radius: 8px;
-  background: var(--surface, #fff);
+  padding: 5px 14px;
+  border: 1px solid var(--border-strong, #d7deea);
+  border-radius: 9px;
+  background: rgba(255, 255, 255, 0.75);
   color: var(--text, #1f2430);
   font-size: 0.82rem;
+  font-weight: 600;
   cursor: pointer;
   transition:
-    transform var(--dur-fast) var(--ease-inout),
+    transform var(--dur-fast) var(--ease-out),
     border-color var(--dur-fast) var(--ease-inout),
     color var(--dur-fast) var(--ease-inout),
     background var(--dur-fast) var(--ease-inout),
     opacity var(--dur-fast) var(--ease-inout);
+}
+.btn:hover:not(:disabled) {
+  border-color: rgba(37, 99, 235, 0.4);
+  color: var(--accent);
+  background: #fff;
 }
 .btn:active {
   transform: scale(0.97);
@@ -375,21 +439,31 @@ async function restore(item: StartupEntry): Promise<void> {
   cursor: default;
 }
 .btn.primary {
-  border-color: var(--accent, #3b82f6);
-  color: var(--accent, #3b82f6);
+  border-color: rgba(37, 99, 235, 0.4);
+  color: var(--accent, #2563eb);
+  background: rgba(255, 255, 255, 0.88);
 }
 .btn.primary:hover {
-  background: var(--accent-soft, #eaf1ff);
+  background: rgba(37, 99, 235, 0.08);
 }
 .btn.danger {
-  border-color: var(--grade-red, #c4382e);
-  background: var(--grade-red, #c4382e);
+  border-color: transparent;
+  background: linear-gradient(180deg, #e2544a 0%, #d63a2f 55%, #b92a20 100%);
   color: #fff;
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.28),
+    0 6px 16px -8px rgba(214, 58, 47, 0.6);
+}
+.btn.danger:hover:not(:disabled) {
+  color: #fff;
+  filter: brightness(1.05);
 }
 .mask {
   position: fixed;
   inset: 0;
-  background: rgba(15, 18, 25, 0.45);
+  background: rgba(14, 22, 38, 0.34);
+  backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -398,28 +472,36 @@ async function restore(item: StartupEntry): Promise<void> {
 }
 .confirm {
   width: min(480px, calc(100vw - 48px));
-  padding: 20px;
-  border-radius: 12px;
-  background: var(--surface, #fff);
-  box-shadow: 0 12px 32px rgba(15, 18, 25, 0.2);
+  padding: 22px;
+  border-radius: var(--r-xl);
+  background: rgba(255, 255, 255, 0.94);
+  border: 1px solid var(--glass-line);
+  backdrop-filter: var(--glass-blur-strong);
+  -webkit-backdrop-filter: var(--glass-blur-strong);
+  box-shadow:
+    var(--glass-sheen),
+    0 30px 70px -20px rgba(14, 22, 38, 0.4);
   animation: ps-modal-pop var(--dur-base) var(--ease-out);
 }
 .confirm h3 {
   margin: 0 0 10px;
-  font-size: 1.05rem;
+  font-size: 1.1rem;
+  font-weight: 720;
+  letter-spacing: -0.01em;
   color: var(--text, #1f2430);
 }
 .risk {
   margin: 0 0 10px;
   font-size: 0.88rem;
-  line-height: 1.6;
+  line-height: 1.65;
   color: var(--text, #1f2430);
 }
 .cmd-line {
-  margin: 0 0 14px;
-  padding: 8px 10px;
-  border-radius: 8px;
-  background: var(--bg, #fafafa);
+  margin: 0 0 16px;
+  padding: 9px 11px;
+  border-radius: var(--r-md);
+  background: rgba(244, 247, 252, 0.8);
+  border: 1px solid var(--border);
   font-family: Consolas, monospace;
   font-size: 0.78rem;
   color: var(--text-2, #5a6472);

@@ -94,7 +94,9 @@ const meta = computed(() => {
 }
 h2 {
   margin: 0;
-  font-size: 1.05rem;
+  font-size: 1.08rem;
+  font-weight: 720;
+  letter-spacing: -0.015em;
   color: var(--text, #1c2433);
 }
 .sub {
@@ -106,22 +108,31 @@ h2 {
 }
 .btn {
   flex: 0 0 auto;
-  border: 1px solid var(--accent, #2563eb);
-  background: var(--accent, #2563eb);
+  border: none;
+  background: linear-gradient(180deg, #3b7bf5 0%, #2563eb 55%, #1d51d8 100%);
   color: #fff;
-  border-radius: 9px;
-  padding: 7px 14px;
+  border-radius: 10px;
+  padding: 8px 15px;
   font-size: 0.82rem;
+  font-weight: 600;
   cursor: pointer;
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.3),
+    0 6px 16px -8px rgba(37, 99, 235, 0.55);
   transition:
-    background var(--dur-fast, 140ms) var(--ease-out, ease),
+    transform var(--dur-fast, 140ms) var(--ease-out, ease),
+    filter var(--dur-fast, 140ms) var(--ease-out, ease),
     opacity var(--dur-fast, 140ms) var(--ease-out, ease);
 }
 .btn:hover:not(:disabled) {
-  background: var(--accent-hover, #1d4ed8);
+  filter: brightness(1.05);
+}
+.btn:active:not(:disabled) {
+  transform: scale(0.97);
 }
 .btn:disabled {
-  opacity: 0.65;
+  opacity: 0.6;
+  box-shadow: none;
   cursor: default;
 }
 .error {

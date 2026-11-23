@@ -58,49 +58,39 @@ const mockHint = isMockMode();
     <template v-else>
       <p v-if="files.length === 0" class="empty-list">本次扫描未发现 ≥500MB 的大文件</p>
       <template v-else>
-        <div class="summary">
-          <span>共 {{ files.length }} 个</span>
-          <span>合计 {{ formatBytes(totalBytes) }}</span>
+        <div class="toolbar">
+          <span class="chip">共 {{ files.length }} 个</span>
+          <span class="chip strong">合计 {{ formatBytes(totalBytes) }}</span>
           <span class="hint">个人文件 · 仅供查阅，应用内不提供删除</span>
           <span v-if="mockHint" class="mock-tag">mock</span>
         </div>
         <p v-if="revealError" class="reveal-err">{{ revealError }}</p>
-        <table class="list">
-          <colgroup>
-            <col class="col-path" />
-            <col class="col-size" />
-            <col class="col-date" />
-            <col class="col-date" />
-            <col class="col-op" />
-          </colgroup>
-          <thead>
-            <tr>
-              <th>文件</th>
-              <th class="num">大小</th>
-              <th>修改时间</th>
-              <th>访问时间</th>
-              <th class="op">操作</th>
-            </tr>
-          </thead>
-          <tbody>
-            <tr v-for="f in files" :key="f.id">
-              <td class="path" :title="f.path">{{ f.path }}</td>
-              <td class="num strong">{{ formatBytes(f.sizeBytes) }}</td>
-              <td>{{ formatDay(f.mtime) }}</td>
-              <td>{{ formatDay(f.atime) }}</td>
-              <td class="op">
-                <button
-                  class="reveal-btn"
-                  :disabled="revealingId !== ''"
-                  :title="`在资源管理器中打开并选中：${f.path}`"
-                  @click="revealInExplorer(f)"
-                >
-                  {{ revealingId === f.id ? "打开中…" : "在资源管理器中显示" }}
-                </button>
-              </td>
-            </tr>
-          </tbody>
-        </table>
+
+        <section class="data" aria-label="大文件清单">
+          <article v-for="f in files" :key="f.id" class="file-row">
+            <span class="f-ico" aria-hidden="true">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8Z" />
+                <path d="M14 3v5h5" />
+              </svg>
+            </span>
+            <div class="f-main">
+              <p class="f-path" :title="f.path">{{ f.path }}</p>
+              <p class="f-meta">
+                修改 {{ formatDay(f.mtime) }} · 访问 {{ formatDay(f.atime) }}
+              </p>
+            </div>
+            <span class="f-size">{{ formatBytes(f.sizeBytes) }}</span>
+            <button
+              class="reveal-btn"
+              :disabled="revealingId !== ''"
+              :title="`在资源管理器中打开并选中：${f.path}`"
+              @click="revealInExplorer(f)"
+            >
+              {{ revealingId === f.id ? "打开中…" : "在资源管理器中显示" }}
+            </button>
+          </article>
+        </section>
       </template>
     </template>
   </section>
@@ -108,158 +98,195 @@ const mockHint = isMockMode();
 
 <style scoped>
 .page {
-  padding: 20px 24px;
   max-width: 1080px;
   margin: 0 auto;
 }
 .head h1 {
   margin: 0;
-  font-size: 1.35rem;
+  font-size: 1.6rem;
+  font-weight: 720;
+  letter-spacing: -0.02em;
   color: var(--text, #1f2430);
 }
 .sub {
-  margin: 4px 0 16px;
+  margin: 4px 0 18px;
   font-size: 0.85rem;
   color: var(--text-2, #5a6472);
-  line-height: 1.6;
+  line-height: 1.65;
 }
 .empty {
-  padding: 48px 0;
+  padding: 56px 0;
   text-align: center;
   color: var(--text-2, #5a6472);
+  background: var(--surface);
+  border: 1px solid var(--glass-line);
+  border-radius: var(--r-xl);
+  box-shadow:
+    var(--glass-sheen),
+    var(--shadow-1);
+  backdrop-filter: var(--glass-blur);
+  -webkit-backdrop-filter: var(--glass-blur);
 }
 .cta {
-  margin-top: 8px;
-  padding: 6px 20px;
+  margin-top: 12px;
+  padding: 8px 22px;
   border: none;
-  border-radius: 8px;
-  background: var(--accent, #3b82f6);
+  border-radius: 11px;
+  background: linear-gradient(180deg, #3b7bf5 0%, #2563eb 55%, #1d51d8 100%);
   color: #fff;
   font-size: 0.9rem;
+  font-weight: 650;
   cursor: pointer;
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.3),
+    0 8px 18px -8px rgba(37, 99, 235, 0.55);
   transition:
-    transform var(--dur-fast) var(--ease-inout),
-    background var(--dur-fast) var(--ease-inout);
+    transform var(--dur-fast) var(--ease-out),
+    filter var(--dur-fast) var(--ease-inout);
 }
 .cta:hover {
-  background: var(--accent-hover, #1d4ed8);
+  filter: brightness(1.05);
 }
 .cta:active {
   transform: scale(0.98);
 }
 .empty-list {
-  padding: 32px 0;
+  padding: 48px 0;
   text-align: center;
   color: var(--text-2, #5a6472);
+  background: var(--surface);
+  border: 1px solid var(--glass-line);
+  border-radius: var(--r-xl);
+  box-shadow: var(--shadow-1);
 }
-.summary {
+.toolbar {
   display: flex;
   flex-wrap: wrap;
-  gap: 16px;
   align-items: center;
+  gap: 8px 10px;
   margin-bottom: 12px;
-  font-size: 0.85rem;
+}
+.chip {
+  padding: 3px 11px;
+  border-radius: var(--r-pill);
+  background: rgba(255, 255, 255, 0.8);
+  border: 1px solid var(--glass-line);
+  font-size: 0.78rem;
+  font-weight: 600;
+  color: var(--text-2, #5a6472);
+  font-variant-numeric: tabular-nums;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.7);
+}
+.chip.strong {
   color: var(--text, #1f2430);
 }
-.summary .hint {
+.toolbar .hint {
   color: var(--text-2, #5a6472);
+  font-size: 0.78rem;
 }
 .mock-tag {
-  padding: 0 8px;
-  border-radius: 6px;
+  padding: 1px 8px;
+  border-radius: var(--r-pill);
   background: var(--accent-soft);
   color: var(--accent);
   font-size: 0.72rem;
+  font-weight: 600;
 }
 .reveal-err {
   margin: 0 0 8px;
-  padding: 6px 10px;
+  padding: 7px 11px;
   font-size: 0.8rem;
   color: var(--grade-red, #c4382e);
-  background: rgba(220, 59, 48, 0.07);
-  border: 1px solid rgba(220, 59, 48, 0.35);
-  border-radius: 8px;
+  background: rgba(255, 244, 242, 0.85);
+  border: 1px solid rgba(214, 58, 47, 0.3);
+  border-radius: var(--r-md);
 }
-/* R30-3：fixed 布局 + 列宽，长路径省略号截断，杜绝横向溢出。 */
-.list {
-  width: 100%;
-  table-layout: fixed;
-  border-collapse: collapse;
-  background: var(--surface, #fff);
-  border: 1px solid var(--border, #e4e7ec);
-  border-radius: 10px;
+/* 数据区：行卡片（长路径省略号截断，杜绝横向溢出） */
+.data {
+  display: flex;
+  flex-direction: column;
+  background: var(--surface);
+  border: 1px solid var(--glass-line);
+  border-radius: var(--r-lg);
   overflow: hidden;
-  font-size: 0.85rem;
+  backdrop-filter: var(--glass-blur);
+  -webkit-backdrop-filter: var(--glass-blur);
+  box-shadow:
+    var(--glass-sheen),
+    var(--shadow-1);
 }
-/* R30-3：百分比列宽（合计 100%），窄窗下列也不重叠。 */
-.col-path {
-  width: 42%;
-}
-.col-size {
-  width: 10%;
-}
-.col-date {
-  width: 14%;
-}
-.col-op {
-  width: 20%;
-}
-.list th,
-.list td {
-  padding: 8px 12px;
-  text-align: left;
+.file-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 11px 16px;
   border-bottom: 1px solid var(--border, #e4e7ec);
-}
-.list thead th {
-  background: var(--bg, #fafafa);
-  color: var(--text-2, #5a6472);
-  font-weight: 500;
-}
-.list tbody tr {
   transition: background var(--dur-fast) var(--ease-inout);
 }
-.list tbody tr:hover {
-  background: var(--surface-2, #f8fafc);
-}
-.list tbody tr:last-child td {
+.file-row:last-child {
   border-bottom: none;
 }
-.path {
+.file-row:hover {
+  background: rgba(255, 255, 255, 0.72);
+}
+.f-ico {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  border-radius: 9px;
+  background: rgba(244, 247, 252, 0.9);
+  color: var(--text-3, #8a97aa);
+  box-shadow: inset 0 0 0 1px var(--border);
+}
+.f-main {
+  flex: 1;
+  min-width: 0;
+}
+.f-path {
+  margin: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
   font-family: Consolas, monospace;
-  font-size: 0.8rem;
+  font-size: 0.79rem;
+  color: var(--text, #1f2430);
 }
-.num {
-  text-align: right;
-  white-space: nowrap;
+.f-meta {
+  margin: 2px 0 0;
+  font-size: 0.72rem;
+  color: var(--text-2, #5a6472);
   font-variant-numeric: tabular-nums;
 }
-.strong {
-  font-weight: 600;
-}
-.op {
+.f-size {
+  flex: none;
+  font-size: 0.85rem;
+  font-weight: 700;
+  color: var(--text, #1f2430);
+  font-variant-numeric: tabular-nums;
   text-align: right;
-  white-space: nowrap;
+  min-width: 72px;
 }
 .reveal-btn {
-  padding: 4px 10px;
-  border: 1px solid var(--border, #e4e7ec);
-  border-radius: 7px;
-  background: var(--surface, #fff);
+  padding: 5px 11px;
+  border: 1px solid var(--border-strong, #d7deea);
+  border-radius: 9px;
+  background: rgba(255, 255, 255, 0.75);
   color: var(--accent, #2563eb);
   font-size: 0.76rem;
+  font-weight: 600;
   cursor: pointer;
   transition:
-    transform var(--dur-fast) var(--ease-inout),
+    transform var(--dur-fast) var(--ease-out),
     border-color var(--dur-fast) var(--ease-inout),
     background var(--dur-fast) var(--ease-inout),
     opacity var(--dur-fast) var(--ease-inout);
 }
-.reveal-btn:hover {
-  border-color: var(--accent, #2563eb);
-  background: var(--accent-soft, #eaf1ff);
+.reveal-btn:hover:not(:disabled) {
+  border-color: rgba(37, 99, 235, 0.5);
+  background: #fff;
 }
 .reveal-btn:active {
   transform: scale(0.97);

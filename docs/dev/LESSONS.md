@@ -6,6 +6,24 @@
 
 ## ① 踩坑记录
 
+### headless Edge 的 `--screenshot` 抓不到"扫描后自动跳转"的页面，改用 CDP（2026-11-23，UI 重构）
+- 现象：`msedge --headless=new --screenshot=... --virtual-time-budget=12000 "http://localhost:5199/#/scan?auto=1"` 截图始终停在扫描 100%「结果聚合中」，报告页有数据态截不到；同命令截静态页（首页/设置/日志）正常。
+- 根因：`--virtual-time-budget` 只推进虚拟时钟，Vue Router 的异步跳转与 CDP 截帧时机不一致，预算耗尽即截帧，路由还没落地；直接打开 `/#/report` 又会因 Pinia 内存 store 为空而显示空态。
+- 修复：用 `--remote-debugging-port` + PowerShell `ClientWebSocket` 走 CDP：`Emulation.setDeviceMetricsOverride` 固定 1000×700 → `Page.navigate` 到 `/#/scan?auto=1` → 等 6s → `Runtime.evaluate` 改 `location.hash` 在同页内切到 `#/report`/`#/files`/`#/privacy`（**不刷新**，store 保留）→ `Page.getLayoutMetrics` + `Page.captureScreenshot(captureBeyondViewport, clip)` 出全页图。
+- 复利结论：需要"跨路由且带内存状态"的截图时，别指望单次 `--screenshot`；CDP 同页改 hash 是保留 store 的关键，任何 `Page.navigate` 都会清空 Pinia。截图宽度可用 `Emulation.setDeviceMetricsOverride` 精确控制（窗口参数不一定生效）。
+
+### 用 `powershell`（5.1）跑含中文的临时脚本会静默乱码（2026-11-23，UI 重构）
+- 现象：CDP 截图脚本里用中文按钮文案做 `textContent.includes('确认清理')` 匹配，返回 `notfound`；同一操作改用类选择器 `.rail-cta` 立刻成功。
+- 根因：脚本文件是无 BOM UTF-8，Windows PowerShell 5.1 按 ANSI 读取，中文字面量在传给 `Runtime.evaluate` 前已损坏；命令本身并未报错。
+- 修复：临时脚本一律用 `pwsh` 执行（或写 UTF-8 BOM），且 CDP 内的元素定位优先用稳定的 class/selector，不依赖中文文案。
+- 复利结论：工具链默认编码是隐形的输入契约；"字符串匹配莫名失败"先怀疑编码，再怀疑选择器。
+
+### 同组件内新布局类名可能撞上遗留样式：Apps 的 `.detail` 被结果段落复用（2026-11-23，UI 重构）
+- 现象：软件卸载页改成"左列表 + 右详情"后，卸载结果卡里的说明段落突然变成 sticky 卡片样式、位置错乱。
+- 根因：右详情卡用了 `.detail`，而同一 `.vue` 的结果视图早已有 `p.detail`（说明文字），scoped CSS 里同名选择器互相覆盖。
+- 修复：结果段落改名 `.result-detail` 并同步模板，详情卡保留 `.detail`。
+- 复利结论：重构页面骨架前先全局搜一遍新类名；同文件内语义不同的元素不要共用同一个泛化类名（`.detail`/`.info`/`.meta` 最易撞）。
+
 ### CNG 的 ECDSA 验签有三处反直觉：padding 传 NULL、签名是裸 r||s、magic 是 `ECS1`（2026-11-20，R32-4b）
 - 现象：按别处示例传 `BCRYPT_ECDSA_PKCS1_PADDING_INFO` + `dwFlags=0` 调 `BCryptVerifySignature`，合法签名也返回 `0xC000000D`（INVALID_PARAMETER）；把公钥 magic 记成 `'ECK1'` 时 `BCryptImportKeyPair` 直接失败；不清楚签名该喂 DER 还是裸 `r||s`。
 - 根因/结论（微软文档 + 本机实测）：① `BCryptVerifySignature` 官方约束是"`dwFlags=0` 时 `pPaddingInfo` 必须为 NULL"——ECDSA 传 NULL + 0 即可，哈希算法由调用方预哈希（SHA-256）决定；② 签名格式是 **IEEE P1363 裸 `r||s`**（P-256 各 32 字节，共 64），OpenSSL 默认 DER 不能直接喂（本机 .NET/CNG 默认输出即裸格式）；③ 公钥 blob magic `'ECS1'`（0x31534345）才是 ECDSA_PUBLIC_P256，`'ECK1'` 是 ECDH；blob = 8 字节头 + 大端 X[32] + Y[32]。
@@ -282,6 +300,18 @@
 - 复利结论：新增触碰既有共享全局的测试时，先给该全局补锁，别赌时序；"单线程全绿 + 并行随机挂"就是共享全局竞态的指纹。
 
 ## ② 决策记录
+
+### 导航壳改为顶部双层胶囊，报告页用 sticky 决策栏替代底部操作条（2026-11-23，UI 重构）
+- 背景：旧版 236px 左侧栏在 1000×700 默认窗口下挤压内容，且"分区/页面"混杂；报告页的方案 A/B 与确认按钮原先分散在页尾，用户需要滚动才能看到"清多少、清哪里"。
+- 决策：顶部双层导航——第一层主分区（概览/清理/优化与安全/记录），第二层当前分区页面胶囊，右侧常驻"只读扫描"chip 与设置入口；报告页改左内容 + 右 322px sticky 决策栏（方案 A/B、可释放体积、确认清理、灰禁说明同屏）。
+- 理由：默认窗口高度有限，纵向空间比横向稀缺；把"决策相关的一切"固定在右侧，避免用户滚回页尾才能确认；🔴 灰禁说明与 token 说明跟确认按钮同屏，比放在页尾更难被忽略。
+- 取舍：导航不再有展开式侧栏，页面数量增多时靠分区胶囊分组；内容最大宽度 1120px，宽屏不会过度拉伸。
+
+### 应用图标走"SVG 母版 + Edge 光栅化 + Python 手工封 ICO/ICNS"，不用生图（2026-11-23，UI 重构）
+- 背景：需要替换 Tauri 默认图标，覆盖 16–256 多尺寸 `.ico`、`.icns`、窗口 PNG 与 favicon，且 16px 必须可辨识。
+- 决策：`src-tauri/icons/source.svg` 画"深石板底 + 白色对勾"母版；用本机 Edge headless 逐尺寸光栅化 PNG；`tools/gen-icons.py` 仅用 Python 标准库 `struct` 封装 ICO（9 档）与 ICNS，零新增依赖。
+- 理由：生图工具对简单几何/渐变不可控且最小像素要求过高；矢量母版可重复生成、16px 下靠整体剪影（石板圆角矩形 + 粗对勾）而非细节辨识。曾试净弧/双扫等方案，缩小后均糊成一团，最终选对勾。
+- 复利结论：小尺寸图标先定"16px 剪影"，再补大尺寸细节；图标资产要保留可重跑的生成脚本与母版，否则下次改色只能手工重画。
 
 ### 规则包签名选型：Ed25519 → ECDSA P-256（2026-11-20，R32-4b）
 - 背景：用户拍板"Ed25519 分离签名 + 公钥编译进二进制 + CNG 验签 + 零新增 crate"，并允许在确认最小 Windows 版本不支持时退到 CNG 支持的 ECDSA P-256。

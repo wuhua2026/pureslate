@@ -75,195 +75,250 @@ onMounted(load);
 </script>
 
 <template>
-  <main class="log">
-    <header class="log-head">
-      <router-link to="/" class="back">← 首页</router-link>
+  <section class="page anim-rise d1">
+    <header class="head">
       <h1>操作日志</h1>
       <p class="sub">今日清理 / 还原 / 清除 / 禁用启动项全记录（JSONL 只追加）</p>
     </header>
 
     <div v-if="error" class="error">{{ error }}</div>
 
-    <section class="card anim-rise d1">
-      <div class="toolbar">
-        <span class="m-label">明细（{{ entries.length }}）</span>
-        <div class="tools">
-          <button class="tbtn" :disabled="loading" @click="load">刷新</button>
-          <button class="tbtn primary" :disabled="exporting" @click="doExport">
-            {{ exporting ? "导出中…" : "导出" }}
-          </button>
-        </div>
+    <div class="toolbar">
+      <span class="chip">今日记录 {{ entries.length }}</span>
+      <span class="hint">JSONL 只追加 · 全量可追溯</span>
+      <div class="tools">
+        <button class="tbtn" :disabled="loading" @click="load">刷新</button>
+        <button class="tbtn primary" :disabled="exporting" @click="doExport">
+          {{ exporting ? "导出中…" : "导出" }}
+        </button>
       </div>
-      <p v-if="exported" class="ok-tip">
-        已导出到数据目录 <code>exports\pureslate-audit-export-*.jsonl</code>
-      </p>
+    </div>
+    <p v-if="exported" class="ok-tip">
+      已导出到数据目录 <code>exports\pureslate-audit-export-*.jsonl</code>
+    </p>
 
+    <section class="data" aria-label="操作日志明细">
       <div class="state" v-if="loading">加载中…</div>
-      <div class="state empty" v-else-if="entries.length === 0">今日暂无操作记录。</div>
-      <table v-else class="tbl">
-        <colgroup>
-          <col class="col-time" />
-          <col class="col-op" />
-          <col class="col-disp" />
-          <col class="col-result" />
-          <col />
-        </colgroup>
-        <thead>
-          <tr>
-            <th>时间</th>
-            <th>操作</th>
-            <th>去向</th>
-            <th>结果</th>
-            <th>对象</th>
-          </tr>
-        </thead>
-        <tbody>
-          <tr v-for="(l, i) in entries" :key="i">
-            <td class="mono">{{ fmtTime(l.ts) }}</td>
-            <td>{{ opText(l.op) }}</td>
-            <td>{{ l.disposition ? DISP_CN[l.disposition] : "—" }}</td>
-            <td :class="l.result === 'fail' ? 'fail' : ''">{{ stateText(l) || "—" }}</td>
-            <td class="obj" :title="l.path || l.txId || ''">{{ l.path || l.txId || "" }}</td>
-          </tr>
-        </tbody>
-      </table>
+      <div class="state empty" v-else-if="entries.length === 0">
+        <strong>今日暂无操作记录</strong>
+        <span>清理、还原、清除隔离项等操作会逐条记录在这里。</span>
+      </div>
+      <div v-else class="rows">
+        <article v-for="(l, i) in entries" :key="i" class="row">
+          <span class="r-time">{{ fmtTime(l.ts) }}</span>
+          <span class="r-op">{{ opText(l.op) }}</span>
+          <span class="r-disp" :data-disp="l.disposition ?? ''">
+            {{ l.disposition ? DISP_CN[l.disposition] : "—" }}
+          </span>
+          <span class="r-result" :class="l.result === 'fail' ? 'fail' : ''">
+            {{ stateText(l) || "—" }}
+          </span>
+          <span class="r-obj" :title="l.path || l.txId || ''">{{ l.path || l.txId || "" }}</span>
+        </article>
+      </div>
     </section>
-  </main>
+  </section>
 </template>
 
 <style scoped>
-.log {
-  display: flex;
-  flex-direction: column;
-  gap: 1.25rem;
+.page {
+  max-width: 1080px;
+  margin: 0 auto;
 }
-.back {
-  color: var(--accent);
-  font-weight: 600;
-}
-.log-head h1 {
-  margin: 0.5rem 0 0.25rem;
+.head h1 {
+  margin: 0;
+  font-size: 1.6rem;
+  font-weight: 720;
+  letter-spacing: -0.02em;
+  color: var(--text, #1f2430);
 }
 .sub {
-  margin: 0;
+  margin: 4px 0 18px;
   color: var(--text-2);
-  font-size: 0.9rem;
+  font-size: 0.85rem;
+  line-height: 1.65;
 }
 .error {
   color: var(--grade-red);
-  background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: 10px;
-  padding: 1rem 1.25rem;
-}
-.card {
-  background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: 10px;
-  padding: 1.25rem 1.5rem;
+  background: rgba(255, 244, 242, 0.85);
+  border: 1px solid rgba(214, 58, 47, 0.24);
+  border-radius: var(--r-md);
+  padding: 0.8rem 1rem;
+  margin-bottom: 12px;
+  box-shadow: var(--shadow-1);
+  font-size: 0.84rem;
 }
 .toolbar {
   display: flex;
-  justify-content: space-between;
+  flex-wrap: wrap;
   align-items: center;
-  margin-bottom: 0.75rem;
+  gap: 8px 10px;
+  margin-bottom: 12px;
 }
-.m-label {
-  font-size: 0.85rem;
+.chip {
+  padding: 3px 11px;
+  border-radius: var(--r-pill);
+  background: rgba(255, 255, 255, 0.8);
+  border: 1px solid var(--glass-line);
+  font-size: 0.78rem;
+  font-weight: 600;
+  color: var(--text-2, #5a6472);
+  font-variant-numeric: tabular-nums;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.7);
+}
+.hint {
+  font-size: 0.78rem;
   color: var(--text-2);
 }
 .tools {
   display: flex;
   gap: 0.5rem;
+  margin-left: auto;
 }
 .tbtn {
-  background: none;
-  border: 1px solid var(--border);
+  background: rgba(255, 255, 255, 0.72);
+  border: 1px solid var(--border-strong);
   color: var(--text);
-  border-radius: 6px;
-  padding: 0.4rem 0.9rem;
-  font-size: 0.85rem;
+  border-radius: 9px;
+  padding: 0.42rem 1rem;
+  font-size: 0.84rem;
+  font-weight: 600;
   cursor: pointer;
+  box-shadow: 0 2px 6px -3px rgba(16, 28, 52, 0.2);
   transition:
-    transform var(--dur-fast) var(--ease-inout),
+    transform var(--dur-fast) var(--ease-out),
     border-color var(--dur-fast) var(--ease-inout),
     color var(--dur-fast) var(--ease-inout),
     background var(--dur-fast) var(--ease-inout),
     opacity var(--dur-fast) var(--ease-inout);
 }
+.tbtn:hover:not(:disabled) {
+  border-color: rgba(37, 99, 235, 0.4);
+  color: var(--accent);
+  background: #fff;
+}
 .tbtn:active {
   transform: scale(0.97);
 }
 .tbtn.primary {
-  background: var(--accent);
-  border-color: var(--accent);
+  background: linear-gradient(180deg, #3b7bf5 0%, #2563eb 55%, #1d51d8 100%);
+  border-color: transparent;
   color: #fff;
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.3),
+    0 6px 16px -8px rgba(37, 99, 235, 0.55);
 }
-.tbtn.primary:hover {
-  background: var(--accent-hover);
+.tbtn.primary:hover:not(:disabled) {
+  color: #fff;
+  filter: brightness(1.05);
 }
 .tbtn:disabled {
-  opacity: 0.5;
+  opacity: 0.45;
+  box-shadow: none;
   cursor: not-allowed;
 }
 .ok-tip {
-  margin: 0 0 0.75rem;
+  margin: 0 0 12px;
   font-size: 0.8rem;
   color: var(--grade-green);
+}
+.data {
+  background: var(--surface);
+  border: 1px solid var(--glass-line);
+  border-radius: var(--r-lg);
+  box-shadow:
+    var(--glass-sheen),
+    var(--shadow-1);
+  backdrop-filter: var(--glass-blur);
+  -webkit-backdrop-filter: var(--glass-blur);
+  overflow: hidden;
 }
 .state {
   padding: 1.5rem;
   color: var(--text-2);
   text-align: center;
 }
-.tbl {
-  width: 100%;
-  /* R30-3：fixed 布局，超长对象路径按剩余列宽省略。 */
-  table-layout: fixed;
-  border-collapse: collapse;
-  font-size: 0.82rem;
+.state.empty {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 3rem 1.5rem;
 }
-/* R30-3：百分比列宽（合计 100%），窄窗下列也不重叠。 */
-.col-time {
-  width: 16%;
+.state.empty strong {
+  font-size: 0.98rem;
+  font-weight: 650;
+  color: var(--text);
 }
-.col-op {
-  width: 10%;
+.state.empty span {
+  font-size: 0.84rem;
 }
-.col-disp {
-  width: 9%;
+.rows {
+  display: flex;
+  flex-direction: column;
 }
-.col-result {
-  width: 11%;
-}
-.tbl th,
-.tbl td {
-  text-align: left;
-  padding: 0.5rem 0.6rem;
+.row {
+  display: grid;
+  grid-template-columns: 72px 64px 62px 56px minmax(0, 1fr);
+  align-items: center;
+  gap: 10px;
+  padding: 9px 16px;
   border-bottom: 1px solid var(--border);
-  vertical-align: top;
-}
-.tbl tbody tr {
+  font-size: 0.82rem;
   transition: background var(--dur-fast) var(--ease-inout);
 }
-.tbl tbody tr:hover {
-  background: var(--surface-2, #f8fafc);
+.row:last-child {
+  border-bottom: none;
 }
-.tbl th {
-  color: var(--text-2);
-  font-weight: 600;
+.row:hover {
+  background: rgba(255, 255, 255, 0.72);
 }
-.mono {
+.r-time {
   font-family: ui-monospace, monospace;
   font-variant-numeric: tabular-nums;
+  color: var(--text-2);
 }
-.fail {
+.r-op {
+  font-weight: 600;
+}
+.r-disp {
+  justify-self: start;
+  padding: 1px 8px;
+  border-radius: var(--r-pill);
+  font-size: 0.72rem;
+  font-weight: 600;
+  color: var(--text-2);
+  background: rgba(19, 32, 54, 0.05);
+}
+.r-disp[data-disp="direct"] {
+  color: var(--grade-green, #12a150);
+  background: rgba(18, 161, 80, 0.1);
+}
+.r-disp[data-disp="quarantine"] {
+  color: var(--grade-yellow, #b26a00);
+  background: rgba(217, 151, 28, 0.13);
+}
+.r-result {
+  color: var(--text-2);
+}
+.r-result.fail {
   color: var(--grade-red);
+  font-weight: 600;
 }
-.obj {
+.r-obj {
   color: var(--text-2);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+  font-family: Consolas, monospace;
+  font-size: 0.76rem;
+}
+@media (max-width: 760px) {
+  .row {
+    grid-template-columns: 64px 56px 1fr;
+    row-gap: 4px;
+  }
+  .r-obj {
+    grid-column: 1 / -1;
+  }
 }
 </style>

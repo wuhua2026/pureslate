@@ -42,22 +42,35 @@ const percent = useCountUp(() => percentOf(props.disk), { durationMs: 700 });
 <style scoped>
 .disk-card {
   background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: var(--r-card);
-  box-shadow: var(--shadow-card);
-  padding: 15px 16px 13px;
+  border: 1px solid var(--glass-line);
+  border-radius: var(--r-lg);
+  box-shadow:
+    var(--glass-sheen),
+    var(--shadow-1);
+  backdrop-filter: var(--glass-blur);
+  -webkit-backdrop-filter: var(--glass-blur);
+  padding: 15px 16px 14px;
+  transition:
+    transform var(--dur-base) var(--ease-out),
+    box-shadow var(--dur-base) var(--ease-out);
+}
+.disk-card:hover {
+  transform: translateY(-2px);
+  box-shadow:
+    var(--glass-sheen),
+    var(--shadow-2);
 }
 .disk-top {
   display: flex;
   align-items: center;
   gap: 11px;
-  margin-bottom: 11px;
+  margin-bottom: 12px;
 }
 .drive-badge {
   width: 36px;
   height: 36px;
-  border-radius: 9px;
-  background: var(--accent-soft);
+  border-radius: 11px;
+  background: linear-gradient(160deg, rgba(37, 99, 235, 0.16), rgba(37, 99, 235, 0.07));
   color: var(--accent);
   font-weight: 700;
   font-size: 0.88rem;
@@ -65,10 +78,16 @@ const percent = useCountUp(() => percentOf(props.disk), { durationMs: 700 });
   align-items: center;
   justify-content: center;
   flex-shrink: 0;
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.7),
+    inset 0 0 0 1px rgba(37, 99, 235, 0.1);
 }
 .drive-badge.warn {
-  background: #fdf0d8;
+  background: linear-gradient(160deg, rgba(201, 135, 8, 0.18), rgba(201, 135, 8, 0.08));
   color: var(--grade-yellow);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.7),
+    inset 0 0 0 1px rgba(178, 106, 0, 0.16);
 }
 .disk-meta {
   display: flex;
@@ -98,23 +117,27 @@ const percent = useCountUp(() => percentOf(props.disk), { durationMs: 700 });
   color: var(--grade-yellow);
 }
 .disk-bar {
-  height: 7px;
-  border-radius: 4px;
-  background: var(--surface-2);
-  border: 1px solid var(--border);
+  height: 8px;
+  border-radius: var(--r-pill);
+  background: rgba(19, 32, 54, 0.06);
+  box-shadow:
+    inset 0 1px 2px rgba(16, 28, 52, 0.08),
+    inset 0 0 0 1px rgba(19, 32, 54, 0.03);
   overflow: hidden;
 }
 .disk-bar-fill {
   height: 100%;
-  border-radius: 4px;
-  background: linear-gradient(90deg, #4f83f2, var(--accent));
+  border-radius: var(--r-pill);
+  background: linear-gradient(90deg, #5b8cf5, var(--accent));
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.35);
   /* R29：宽度直接落到目标值，用 scaleX 做挂载生长（只动 transform，SPEC §7）*/
   width: var(--target-w);
   transform-origin: left center;
   animation: disk-grow var(--dur-slow) var(--ease-out) forwards;
 }
 .disk-bar-fill.warn {
-  background: linear-gradient(90deg, #f0b13c, var(--grade-yellow));
+  background: linear-gradient(90deg, #eab03c, #b87800);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.35);
 }
 @keyframes disk-grow {
   from {

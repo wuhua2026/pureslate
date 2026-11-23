@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { ref, watch } from "vue";
 import { issueToken, verifyToken } from "./confirmToken";
+import GradeIcon from "./GradeIcon.vue";
 
 // 🔴 二次确认（SAFETY §8 / I-2 · P4-06）：令牌由后端签发（一次性消费、仅专家
 // 模式），用户逐字输入一致才放行；提交值由后端取出消费。
@@ -68,9 +69,9 @@ function close() {
     <Transition name="token-modal" appear>
       <div v-if="modelValue" class="mask" @click.self="close">
         <div class="modal" role="dialog" aria-modal="true" aria-label="二次确认">
-        <h2 class="m-title">🔴 二次确认</h2>
+        <h2 class="m-title"><GradeIcon grade="red" :size="18" /> 二次确认</h2>
         <p class="m-desc" :class="{ red: hasRed }">
-          {{ hasRed ? "本次清理包含高风险（🔴）项。请核对下方一次性令牌并逐字输入以确认。" : "请核对下方一次性令牌并逐字输入以确认。" }}
+          {{ hasRed ? "本次清理包含高风险（危险级）项。请核对下方一次性令牌并逐字输入以确认。" : "请核对下方一次性令牌并逐字输入以确认。" }}
         </p>
 
         <div class="token-box">
@@ -111,7 +112,9 @@ function close() {
 .mask {
   position: fixed;
   inset: 0;
-  background: rgba(0, 0, 0, 0.45);
+  background: rgba(14, 22, 38, 0.34);
+  backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -138,19 +141,26 @@ function close() {
   transform: translateY(10px) scale(0.97);
 }
 .modal {
-  width: min(420px, 90vw);
-  background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: 12px;
-  padding: 1.5rem;
+  width: min(430px, 90vw);
+  background: rgba(255, 255, 255, 0.9);
+  border: 1px solid var(--glass-line);
+  border-radius: var(--r-xl);
+  padding: 1.6rem;
   display: flex;
   flex-direction: column;
   gap: 1rem;
-  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.2);
+  backdrop-filter: var(--glass-blur-strong);
+  -webkit-backdrop-filter: var(--glass-blur-strong);
+  box-shadow:
+    var(--glass-sheen),
+    0 32px 80px -20px rgba(14, 22, 38, 0.45),
+    0 8px 24px -10px rgba(14, 22, 38, 0.2);
 }
 .m-title {
   margin: 0;
-  font-size: 1.15rem;
+  font-size: 1.14rem;
+  font-weight: 720;
+  letter-spacing: -0.015em;
 }
 .m-desc {
   margin: 0;
@@ -166,32 +176,35 @@ function close() {
   align-items: center;
   justify-content: space-between;
   gap: 0.75rem;
-  background: var(--bg);
-  border: 1px dashed var(--border);
-  border-radius: 8px;
-  padding: 0.75rem 1rem;
+  background: linear-gradient(140deg, rgba(37, 99, 235, 0.07), rgba(244, 247, 252, 0.6));
+  border: 1px dashed rgba(37, 99, 235, 0.3);
+  border-radius: var(--r-md);
+  padding: 0.8rem 1rem;
+  box-shadow: inset 0 1px 2px rgba(16, 28, 52, 0.04);
 }
 .tok {
-  font-family: ui-monospace, monospace;
-  font-size: 1.1rem;
+  font-family: ui-monospace, "Cascadia Mono", monospace;
+  font-size: 1.15rem;
   font-weight: 700;
-  letter-spacing: 1px;
+  letter-spacing: 2px;
+  color: var(--accent);
   user-select: all;
 }
 .tok.pending {
-  color: var(--text-2);
+  color: var(--text-3);
   font-weight: 400;
+  letter-spacing: 1px;
 }
 .gen {
-  background: none;
+  background: rgba(255, 255, 255, 0.85);
   border: 1px solid var(--border);
   color: var(--text-2);
-  border-radius: 5px;
-  padding: 0.25rem 0.6rem;
+  border-radius: var(--r-pill);
+  padding: 0.28rem 0.75rem;
   font-size: 0.75rem;
   cursor: pointer;
   transition:
-    transform var(--dur-fast) var(--ease-inout),
+    transform var(--dur-fast) var(--ease-out),
     border-color var(--dur-fast) var(--ease-inout),
     color var(--dur-fast) var(--ease-inout);
 }
@@ -199,29 +212,31 @@ function close() {
   transform: scale(0.96);
 }
 .gen:hover:not(:disabled) {
-  border-color: var(--accent);
+  border-color: rgba(37, 99, 235, 0.45);
   color: var(--accent);
 }
 .pin {
   width: 100%;
   box-sizing: border-box;
-  font-family: ui-monospace, monospace;
+  font-family: ui-monospace, "Cascadia Mono", monospace;
   font-size: 1rem;
-  letter-spacing: 2px;
+  letter-spacing: 3px;
   text-transform: uppercase;
-  padding: 0.6rem 0.9rem;
+  padding: 0.65rem 0.9rem;
   border: 1px solid var(--border);
-  border-radius: 8px;
-  background: var(--bg);
+  border-radius: var(--r-md);
+  background: rgba(255, 255, 255, 0.78);
   color: var(--text);
   outline: none;
   transition:
     border-color var(--dur-fast) var(--ease-inout),
-    box-shadow var(--dur-fast) var(--ease-inout);
+    box-shadow var(--dur-fast) var(--ease-inout),
+    background var(--dur-fast) var(--ease-inout);
 }
 .pin:focus {
-  border-color: var(--accent);
-  box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.12);
+  border-color: rgba(37, 99, 235, 0.6);
+  background: #fff;
+  box-shadow: 0 0 0 4px rgba(37, 99, 235, 0.14);
 }
 .pin.mismatch {
   border-color: var(--grade-red);
@@ -241,33 +256,43 @@ function close() {
 }
 .btn {
   border: none;
-  border-radius: 8px;
-  padding: 0.6rem 1.25rem;
-  font-weight: 600;
+  border-radius: 11px;
+  padding: 0.62rem 1.3rem;
+  font-weight: 650;
+  font-family: inherit;
+  font-size: 0.88rem;
   cursor: pointer;
   transition:
-    transform var(--dur-fast) var(--ease-inout),
+    transform var(--dur-fast) var(--ease-out),
     opacity var(--dur-fast) var(--ease-inout),
-    background var(--dur-fast) var(--ease-inout);
+    filter var(--dur-fast) var(--ease-inout),
+    border-color var(--dur-fast) var(--ease-inout);
 }
 .btn:active {
   transform: scale(0.97);
 }
 .btn.ghost {
-  background: none;
-  border: 1px solid var(--border);
+  background: rgba(255, 255, 255, 0.7);
+  border: 1px solid var(--border-strong);
   color: var(--text);
 }
 .btn.ghost:hover {
-  border-color: var(--accent);
+  border-color: rgba(37, 99, 235, 0.45);
   color: var(--accent);
 }
 .btn.primary {
-  background: var(--grade-red);
+  background: linear-gradient(180deg, #e2544a 0%, #d63a2f 55%, #b92a20 100%);
   color: #fff;
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.28),
+    0 8px 20px -8px rgba(214, 58, 47, 0.6);
+}
+.btn.primary:hover:not(:disabled) {
+  filter: brightness(1.05);
 }
 .btn.primary:disabled {
-  opacity: 0.45;
+  opacity: 0.4;
+  box-shadow: none;
   cursor: not-allowed;
 }
 </style>

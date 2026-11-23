@@ -61,6 +61,9 @@ const cleanTxId = ref("");
 
 const visible = computed(() => filterApps(apps.value, query.value));
 const summary = computed(() => summarizeApps(apps.value));
+/** 左列表右详情：选中项随搜索过滤自动失效（不保留已隐藏项）。 */
+const selectedId = ref("");
+const detail = computed(() => visible.value.find((a) => a.id === selectedId.value) ?? null);
 const resultMeta = computed(() =>
   done.value ? uninstallResultMeta(done.value.result) : null,
 );
@@ -130,6 +133,7 @@ function backToList(): void {
   done.value = null;
   txId.value = "";
   message.value = "";
+  selectedId.value = "";
 }
 
 async function confirmRun(): Promise<void> {
@@ -506,7 +510,7 @@ async function rescanAfterClean(): Promise<void> {
         <h2 :class="['result-title', cleanDone.fail > 0 ? 'warn' : 'ok']">
           {{ cleanDone.fail > 0 ? "部分完成" : "清理完成" }}
         </h2>
-        <p class="detail">
+        <p class="result-detail">
           共 {{ cleanDone.total }} 项：成功 {{ cleanDone.ok }} · 失败 {{ cleanDone.fail }} ·
           跳过 {{ cleanDone.skip }}。移入隔离区的内容可在"隔离区"页面保留期内还原。
         </p>
@@ -554,7 +558,7 @@ async function rescanAfterClean(): Promise<void> {
     <!-- 卸载结果面板 -->
     <div v-else-if="view === 'done' && done && resultMeta" class="panel">
       <h2 :class="['result-title', resultMeta.tone]">{{ resultMeta.title }}</h2>
-      <p class="detail">{{ done.detail }}</p>
+      <p class="result-detail">{{ done.detail }}</p>
       <ul v-if="done.rebootPending" class="tag-row">
         <li class="tag info">系统已登记待重启删除</li>
       </ul>
@@ -570,7 +574,7 @@ async function rescanAfterClean(): Promise<void> {
       </div>
     </div>
 
-    <!-- 程序列表 -->
+    <!-- 程序列表：左列表 + 右详情 -->
     <template v-else>
       <div class="toolbar">
         <input v-model="query" class="search" type="search" placeholder="搜索程序名/发布者/版本…" />
@@ -579,32 +583,16 @@ async function rescanAfterClean(): Promise<void> {
 
       <div v-if="visible.length === 0" class="state">没有匹配的程序</div>
 
-      <table v-else class="list">
-        <colgroup>
-          <col class="col-icon" />
-          <col class="col-name" />
-          <col class="col-pub" />
-          <col class="col-ver" />
-          <col class="col-scope" />
-          <col class="col-size" />
-          <col class="col-date" />
-          <col class="col-op" />
-        </colgroup>
-        <thead>
-          <tr>
-            <th class="ico" aria-label="图标"></th>
-            <th>名称</th>
-            <th>发布者</th>
-            <th>版本</th>
-            <th>范围</th>
-            <th>大小</th>
-            <th>安装日期</th>
-            <th class="op">操作</th>
-          </tr>
-        </thead>
-        <tbody>
-          <tr v-for="a in visible" :key="a.id">
-            <td class="ico">
+      <div v-else class="board">
+        <section class="app-list" aria-label="已安装程序">
+          <button
+            v-for="a in visible"
+            :key="a.id"
+            class="app-row"
+            :class="{ active: detail?.id === a.id }"
+            @click="selectedId = a.id"
+          >
+            <span class="ico">
               <img
                 v-if="iconUrls.get(a.id)"
                 :src="iconUrls.get(a.id)"
@@ -616,32 +604,89 @@ async function rescanAfterClean(): Promise<void> {
               <span v-else class="app-icon-fallback" aria-hidden="true">
                 <AppIcon name="apps" :size="14" />
               </span>
-            </td>
-            <td class="name">
-              <div class="name-cell">
+            </span>
+            <span class="ar-main">
+              <span class="ar-name-row">
                 <span class="name-text" :title="a.name">{{ a.name }}</span>
                 <span v-if="a.isMsi" class="badge msi" title="Windows Installer 产品">MSI</span>
                 <span class="badge arch">{{ a.arch }}</span>
+              </span>
+              <span class="ar-meta">
+                {{ a.publisher ?? "未知发布者" }} · {{ a.version ?? "—" }} · {{ scopeLabel(a.scope) }}
+              </span>
+            </span>
+            <span class="ar-size">{{ formatSize(a.estimatedSizeBytes) || "—" }}</span>
+          </button>
+        </section>
+
+        <aside class="detail">
+          <template v-if="detail">
+            <div class="detail-head">
+              <span class="ico">
+                <img
+                  v-if="iconUrls.get(detail.id)"
+                  :src="iconUrls.get(detail.id)"
+                  class="app-icon"
+                  alt=""
+                  draggable="false"
+                  @error="iconUrls.set(detail.id, '')"
+                />
+                <span v-else class="app-icon-fallback" aria-hidden="true">
+                  <AppIcon name="apps" :size="20" />
+                </span>
+              </span>
+              <div class="detail-title">
+                <h2 :title="detail.name">{{ detail.name }}</h2>
+                <p>{{ detail.publisher ?? "未知发布者" }}</p>
               </div>
-            </td>
-            <td class="pub" :title="a.publisher ?? ''">{{ a.publisher ?? "未知发布者" }}</td>
-            <td class="ver" :title="a.version ?? ''">{{ a.version ?? "—" }}</td>
-            <td>{{ scopeLabel(a.scope) }}</td>
-            <td>{{ formatSize(a.estimatedSizeBytes) || "—" }}</td>
-            <td>{{ installDateLabel(a.installDate) || "—" }}</td>
-            <td class="op">
-              <button
-                class="btn"
-                :disabled="!canUninstall(a)"
-                :title="canUninstall(a) ? '调起官方卸载器' : '该程序未登记可用的卸载命令'"
-                @click="askUninstall(a)"
-              >
-                卸载
-              </button>
-            </td>
-          </tr>
-        </tbody>
-      </table>
+            </div>
+
+            <dl class="detail-grid">
+              <div>
+                <dt>版本</dt>
+                <dd>{{ detail.version ?? "—" }}</dd>
+              </div>
+              <div>
+                <dt>安装大小</dt>
+                <dd>{{ formatSize(detail.estimatedSizeBytes) || "—" }}</dd>
+              </div>
+              <div>
+                <dt>安装日期</dt>
+                <dd>{{ installDateLabel(detail.installDate) || "—" }}</dd>
+              </div>
+              <div>
+                <dt>安装范围</dt>
+                <dd>{{ scopeLabel(detail.scope) }}</dd>
+              </div>
+              <div class="wide">
+                <dt>安装位置</dt>
+                <dd class="path" :title="detail.installLocation ?? ''">
+                  {{ detail.installLocation || "—" }}
+                </dd>
+              </div>
+            </dl>
+
+            <p class="detail-note">
+              卸载将调用该程序<strong>自带的官方卸载器</strong>；卸载器自身删除的文件不经过隔离区，
+              无法由本应用还原。
+            </p>
+            <button
+              class="btn danger block"
+              :disabled="!canUninstall(detail)"
+              :title="canUninstall(detail) ? '调起官方卸载器' : '该程序未登记可用的卸载命令'"
+              @click="askUninstall(detail)"
+            >
+              卸载此程序
+            </button>
+          </template>
+          <div v-else class="detail-empty">
+            <span class="app-icon-fallback lg" aria-hidden="true">
+              <AppIcon name="apps" :size="22" />
+            </span>
+            <p>从左侧选择一个程序查看详情</p>
+          </div>
+        </aside>
+      </div>
 
       <p class="footnote">
         安全说明：本应用不替代系统"应用和功能"；不会强杀进程，不处理 UWP 应用与系统组件。
@@ -654,21 +699,23 @@ async function rescanAfterClean(): Promise<void> {
 
 <style scoped>
 .page {
-  padding: 20px 24px;
   max-width: 1080px;
   margin: 0 auto;
 }
 .head h1 {
   margin: 0;
-  font-size: 1.35rem;
+  font-size: 1.6rem;
+  font-weight: 720;
+  letter-spacing: -0.02em;
 }
 .sub {
-  margin: 4px 0 16px;
+  margin: 4px 0 18px;
   font-size: 0.85rem;
   color: var(--text-2, #5a6472);
+  line-height: 1.65;
 }
 .state {
-  padding: 32px 0;
+  padding: 44px 0;
   text-align: center;
   color: var(--text-2, #5a6472);
   display: flex;
@@ -687,145 +734,158 @@ async function rescanAfterClean(): Promise<void> {
 }
 .search {
   flex: 1;
-  padding: 8px 12px;
-  border: 1px solid var(--border, #e4e7ec);
-  border-radius: 8px;
+  padding: 9px 14px;
+  border: 1px solid var(--border-strong, #d7deea);
+  border-radius: 11px;
   font-size: 0.9rem;
-  background: var(--surface, #fff);
+  font-family: inherit;
+  background: rgba(255, 255, 255, 0.78);
   color: var(--text, #1f2430);
+  outline: none;
+  box-shadow:
+    inset 0 1px 2px rgba(16, 28, 52, 0.04),
+    0 1px 0 rgba(255, 255, 255, 0.8);
   transition:
     border-color var(--dur-fast) var(--ease-inout),
-    box-shadow var(--dur-fast) var(--ease-inout);
+    box-shadow var(--dur-fast) var(--ease-inout),
+    background var(--dur-fast) var(--ease-inout);
+}
+.search::placeholder {
+  color: var(--text-3);
 }
 .search:focus {
   outline: none;
-  border-color: var(--accent);
-  box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.12);
+  border-color: rgba(37, 99, 235, 0.6);
+  background: #fff;
+  box-shadow: 0 0 0 4px rgba(37, 99, 235, 0.13);
 }
 .count {
   font-size: 0.8rem;
   color: var(--text-2, #5a6472);
   white-space: nowrap;
-}
-.list {
-  width: 100%;
-  /* R30-3：fixed 布局——超长程序名/发布者由列宽+省略号截断，杜绝横向溢出。 */
-  table-layout: fixed;
-  border-collapse: collapse;
-  background: var(--surface, #fff);
-  border: 1px solid var(--border, #e4e7ec);
-  border-radius: 10px;
-  overflow: hidden;
-  font-size: 0.85rem;
-}
-/* R30-3/R30-4：百分比列宽（合计 100%）——任意窗口宽度下列区间严格不重叠；
-   像素列宽在窄窗会超约束把 auto 列挤成 0，导致列重叠。 */
-.col-icon {
-  width: 7%;
-}
-.col-name {
-  width: 32%;
-}
-.col-pub {
-  width: 15%;
-}
-.col-ver {
-  width: 12%;
-}
-.col-scope {
-  width: 6%;
-}
-.col-size {
-  width: 9%;
-}
-.col-date {
-  width: 10%;
-}
-.col-op {
-  width: 9%;
-}
-.list th,
-.list td {
-  padding: 9px 12px;
-  text-align: left;
-  border-bottom: 1px solid var(--border, #e4e7ec);
-}
-.list th {
-  background: #f6f8fb;
-  color: var(--text-2, #5a6472);
-  font-weight: 600;
-  font-size: 0.78rem;
-}
-.list td {
   font-variant-numeric: tabular-nums;
 }
-.list tbody tr {
+/* 左列表 + 右详情 */
+.board {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 330px;
+  gap: 14px;
+  align-items: start;
+}
+.app-list {
+  display: flex;
+  flex-direction: column;
+  background: var(--surface);
+  border: 1px solid var(--glass-line);
+  border-radius: var(--r-lg);
+  overflow: hidden auto;
+  max-height: calc(100vh - 268px);
+  backdrop-filter: var(--glass-blur);
+  -webkit-backdrop-filter: var(--glass-blur);
+  box-shadow:
+    var(--glass-sheen),
+    var(--shadow-1);
+}
+.app-row {
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  width: 100%;
+  padding: 9px 14px;
+  border: none;
+  border-bottom: 1px solid var(--border, #e4e7ec);
+  border-radius: 0;
+  background: transparent;
+  text-align: left;
+  font-family: inherit;
+  font-size: 0.85rem;
+  color: var(--text, #1f2430);
+  cursor: pointer;
   transition: background var(--dur-fast) var(--ease-inout);
 }
-.list tbody tr:hover {
-  background: var(--surface-2, #f8fafc);
-}
-.list tbody tr:last-child td {
+.app-row:last-child {
   border-bottom: none;
 }
-/* R30-4：软件图标（22px，与系统程序列表的观感对齐；缺失走同款灰底字形）。 */
+.app-row:hover {
+  background: rgba(255, 255, 255, 0.78);
+}
+.app-row.active {
+  background: rgba(37, 99, 235, 0.08);
+  box-shadow: inset 3px 0 0 var(--accent);
+}
+.app-row.active:hover {
+  background: rgba(37, 99, 235, 0.11);
+}
 .ico {
-  text-align: center;
-  vertical-align: middle;
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
 }
 .app-icon,
 .app-icon-fallback {
-  width: 22px;
-  height: 22px;
-  border-radius: 5px;
-  vertical-align: middle;
+  width: 24px;
+  height: 24px;
+  border-radius: 6px;
 }
 .app-icon {
   object-fit: contain;
-  /* 图标加载瞬间不撑动行高 */
   background: transparent;
 }
 .app-icon-fallback {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  background: var(--surface-2, #f1f4f9);
+  background: rgba(244, 247, 252, 0.9);
   color: var(--text-3, #8a97aa);
+  box-shadow: inset 0 0 0 1px var(--border);
 }
-
-/* R30-3：td 保持 table-cell（display:flex 直接放 td 会破坏固定列表格），
-   内层 .name-cell 做 flex——文本截断省略，徽章固定不被压缩/截掉。 */
-.name-cell {
+.app-icon-fallback.lg {
+  width: 44px;
+  height: 44px;
+  border-radius: 11px;
+}
+.ar-main {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.ar-name-row {
   display: flex;
   align-items: center;
-  gap: 5px;
+  gap: 6px;
   min-width: 0;
 }
-.name {
-  font-weight: 600;
-}
 .name-text {
+  font-weight: 600;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.pub,
-.ver {
+.ar-meta {
+  font-size: 0.74rem;
   color: var(--text-2, #5a6472);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+.ar-size {
+  flex: none;
+  font-size: 0.78rem;
+  font-weight: 600;
+  color: var(--text-2, #5a6472);
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
 .badge {
-  display: inline-block;
-  /* R30-3：名称列改用 flex gap 间距；徽章固定不缩 */
-  margin-left: 0;
   flex: none;
   padding: 0 6px;
   border-radius: 8px;
-  font-size: 0.68rem;
+  font-size: 0.66rem;
   font-weight: 600;
-  vertical-align: middle;
+  line-height: 1.6;
 }
 .badge.msi {
   background: var(--accent-soft);
@@ -835,48 +895,168 @@ async function rescanAfterClean(): Promise<void> {
   background: #f0f3f7;
   color: var(--text-2, #5a6472);
 }
-.op {
-  text-align: right;
+/* 详情卡 */
+.detail {
+  position: sticky;
+  top: 12px;
+  background: var(--surface);
+  border: 1px solid var(--glass-line);
+  border-radius: var(--r-lg);
+  padding: 16px;
+  backdrop-filter: var(--glass-blur);
+  -webkit-backdrop-filter: var(--glass-blur);
+  box-shadow:
+    var(--glass-sheen),
+    var(--shadow-1);
+  animation: ps-rise var(--dur-base) var(--ease-out) both;
+}
+.detail-head {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding-bottom: 13px;
+  border-bottom: 1px solid var(--border);
+}
+.detail-title {
+  min-width: 0;
+}
+.detail-title h2 {
+  margin: 0;
+  font-size: 1rem;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+  overflow: hidden;
+  text-overflow: ellipsis;
   white-space: nowrap;
 }
+.detail-title p {
+  margin: 2px 0 0;
+  font-size: 0.76rem;
+  color: var(--text-2, #5a6472);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.detail-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 11px 12px;
+  margin: 14px 0;
+}
+.detail-grid div {
+  min-width: 0;
+}
+.detail-grid .wide {
+  grid-column: 1 / -1;
+}
+.detail-grid dt {
+  font-size: 0.7rem;
+  color: var(--text-3, #8a97aa);
+  margin-bottom: 2px;
+}
+.detail-grid dd {
+  margin: 0;
+  font-size: 0.82rem;
+  font-weight: 600;
+  color: var(--text, #1f2430);
+  font-variant-numeric: tabular-nums;
+}
+.detail-grid dd.path {
+  font-family: Consolas, monospace;
+  font-weight: 500;
+  font-size: 0.75rem;
+  color: var(--text-2, #5a6472);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.detail-note {
+  margin: 0 0 12px;
+  font-size: 0.75rem;
+  line-height: 1.6;
+  color: var(--text-2, #5a6472);
+  padding: 9px 11px;
+  border-radius: var(--r-sm);
+  background: rgba(244, 247, 252, 0.66);
+  border: 1px solid var(--border);
+}
+.detail-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+  padding: 40px 12px;
+  text-align: center;
+  font-size: 0.82rem;
+  color: var(--text-2, #5a6472);
+}
+.detail-empty p {
+  margin: 0;
+}
+.btn.block {
+  display: block;
+  width: 100%;
+  padding: 9px 16px;
+  font-size: 0.86rem;
+}
 .btn {
-  padding: 5px 16px;
-  border: 1px solid var(--border, #e4e7ec);
-  border-radius: 8px;
-  background: var(--surface, #fff);
+  padding: 6px 16px;
+  border: 1px solid var(--border-strong, #d7deea);
+  border-radius: 9px;
+  background: rgba(255, 255, 255, 0.75);
   color: var(--text-2, #5a6472);
   font-size: 0.82rem;
+  font-weight: 600;
   cursor: pointer;
   transition:
-    transform var(--dur-fast) var(--ease-inout),
+    transform var(--dur-fast) var(--ease-out),
     border-color var(--dur-fast) var(--ease-inout),
     color var(--dur-fast) var(--ease-inout),
     background var(--dur-fast) var(--ease-inout),
     opacity var(--dur-fast) var(--ease-inout);
+}
+.btn:hover:not(:disabled) {
+  border-color: rgba(37, 99, 235, 0.4);
+  color: var(--accent);
+  background: #fff;
 }
 .btn:active {
   transform: scale(0.97);
 }
 .btn:disabled {
   cursor: not-allowed;
-  opacity: 0.55;
+  opacity: 0.5;
 }
 .btn.small {
-  padding: 3px 10px;
+  padding: 4px 11px;
   font-size: 0.76rem;
 }
 .btn.ghost {
-  background: var(--surface, #fff);
+  background: rgba(255, 255, 255, 0.72);
 }
 .btn.primary {
-  background: var(--accent);
-  border-color: var(--accent);
+  background: linear-gradient(180deg, #3b7bf5 0%, #2563eb 55%, #1d51d8 100%);
+  border-color: transparent;
   color: #fff;
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.3),
+    0 6px 16px -8px rgba(37, 99, 235, 0.55);
+}
+.btn.primary:hover:not(:disabled) {
+  color: #fff;
+  filter: brightness(1.05);
 }
 .btn.danger {
-  background: #c4382e;
-  border-color: #c4382e;
+  background: linear-gradient(180deg, #e2544a 0%, #d63a2f 55%, #b92a20 100%);
+  border-color: transparent;
   color: #fff;
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.28),
+    0 6px 16px -8px rgba(214, 58, 47, 0.55);
+}
+.btn.danger:hover:not(:disabled) {
+  color: #fff;
+  filter: brightness(1.05);
 }
 .footnote {
   margin-top: 12px;
@@ -886,24 +1066,32 @@ async function rescanAfterClean(): Promise<void> {
 
 /* 面板（确认/进度/结果） */
 .panel {
-  background: var(--surface, #fff);
-  border: 1px solid var(--border, #e4e7ec);
-  border-radius: 10px;
-  padding: 22px 24px;
+  background: var(--surface);
+  border: 1px solid var(--glass-line);
+  border-radius: var(--r-xl);
+  padding: 1.6rem;
+  backdrop-filter: var(--glass-blur-strong);
+  -webkit-backdrop-filter: var(--glass-blur-strong);
+  box-shadow:
+    var(--glass-sheen),
+    var(--shadow-2);
   animation: ps-rise var(--dur-base) var(--ease-out) both;
 }
 .panel h2 {
   margin: 0 0 14px;
-  font-size: 1.08rem;
+  font-size: 1.12rem;
+  font-weight: 720;
+  letter-spacing: -0.015em;
 }
 .target {
   display: flex;
   flex-direction: column;
   gap: 2px;
-  padding: 10px 12px;
-  background: #f6f8fb;
-  border-radius: 8px;
-  margin-bottom: 14px;
+  padding: 11px 14px;
+  background: rgba(244, 247, 252, 0.7);
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  margin-bottom: 16px;
 }
 .muted {
   color: var(--text-2, #5a6472);
@@ -930,7 +1118,7 @@ async function rescanAfterClean(): Promise<void> {
 .spin {
   width: 30px;
   height: 30px;
-  border: 3px solid #e4e7ec;
+  border: 3px solid rgba(19, 32, 54, 0.1);
   border-top-color: var(--accent);
   border-radius: 50%;
   animation: ps-spin 0.8s linear infinite;
@@ -946,7 +1134,7 @@ async function rescanAfterClean(): Promise<void> {
   font-size: 0.92rem;
   text-align: center;
 }
-.detail {
+.result-detail {
   margin: 0 0 12px;
   font-size: 0.9rem;
   line-height: 1.6;
@@ -959,29 +1147,31 @@ async function rescanAfterClean(): Promise<void> {
   gap: 8px;
 }
 .tag {
-  padding: 2px 10px;
-  border-radius: 10px;
+  padding: 3px 11px;
+  border-radius: var(--r-pill);
   font-size: 0.75rem;
+  font-weight: 600;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.55);
 }
 .tag.info {
   background: var(--accent-soft);
   color: var(--accent);
 }
 .tag.warn {
-  background: #fdf3e7;
-  color: #9a5b00;
+  background: rgba(253, 243, 231, 0.9);
+  color: #8a5200;
 }
 .result-title.ok {
-  color: #15803d;
+  color: var(--grade-green, #12a150);
 }
 .result-title.info {
   color: var(--accent);
 }
 .result-title.warn {
-  color: #9a5b00;
+  color: var(--grade-yellow, #b26a00);
 }
 .result-title.err {
-  color: #c4382e;
+  color: var(--grade-red, #c4382e);
 }
 
 /* R27-3 残留 */
@@ -990,7 +1180,9 @@ async function rescanAfterClean(): Promise<void> {
 }
 .res-head h2 {
   margin: 8px 0 4px;
-  font-size: 1.1rem;
+  font-size: 1.18rem;
+  font-weight: 720;
+  letter-spacing: -0.015em;
 }
 .res-head .small {
   margin: 0;
@@ -1009,19 +1201,30 @@ async function rescanAfterClean(): Promise<void> {
   font-weight: 600;
 }
 .res-card {
-  background: var(--surface, #fff);
-  border: 1px solid var(--border, #e4e7ec);
-  border-radius: 10px;
-  padding: 12px 14px;
+  background: var(--surface);
+  border: 1px solid var(--glass-line);
+  border-radius: var(--r-lg);
+  padding: 13px 16px;
   margin-bottom: 10px;
+  backdrop-filter: var(--glass-blur);
+  -webkit-backdrop-filter: var(--glass-blur);
+  box-shadow:
+    var(--glass-sheen),
+    var(--shadow-1);
   transition:
     border-color var(--dur-fast) var(--ease-inout),
     background var(--dur-fast) var(--ease-inout),
-    opacity var(--dur-fast) var(--ease-inout);
+    box-shadow var(--dur-base) var(--ease-out),
+    transform var(--dur-base) var(--ease-out),
+    opacity var(--dur-base) var(--ease-inout);
 }
 .res-card:hover {
-  border-color: var(--accent-soft-2, #dbe7ff);
-  background: var(--surface-2, #f8fafc);
+  border-color: rgba(37, 99, 235, 0.3);
+  background: rgba(255, 255, 255, 0.9);
+  transform: translateY(-1px);
+  box-shadow:
+    var(--glass-sheen),
+    var(--shadow-2);
 }
 .res-card.off {
   opacity: 0.55;
@@ -1071,8 +1274,8 @@ async function rescanAfterClean(): Promise<void> {
   display: flex;
   gap: 18px;
   font-size: 0.82rem;
-  padding-top: 6px;
-  border-top: 1px dashed var(--border, #e4e7ec);
+  padding-top: 8px;
+  border-top: 1px dashed var(--border-strong, #d7deea);
 }
 .res-choice label {
   display: flex;
@@ -1097,5 +1300,16 @@ async function rescanAfterClean(): Promise<void> {
   white-space: nowrap;
   max-width: 560px;
   margin: 0 auto;
+}
+@media (max-width: 900px) {
+  .board {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .app-list {
+    max-height: none;
+  }
+  .detail {
+    position: static;
+  }
 }
 </style>

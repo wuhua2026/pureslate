@@ -3,6 +3,7 @@ import { computed, onMounted, onUnmounted, ref, watch } from "vue";
 import { useRoute, useRouter } from "vue-router";
 import { app_meta, disk_usage } from "../api/commands";
 import { useScanStore } from "../stores/scan";
+import GradeIcon from "../components/GradeIcon.vue";
 
 const store = useScanStore();
 const router = useRouter();
@@ -109,11 +110,6 @@ const PHASE_CN: Record<string, string> = {
   hashing: "哈希比对中",
   aggregating: "结果聚合中",
 };
-const PHASE_ICON: Record<string, string> = {
-  walking: "📂",
-  hashing: "🔍",
-  aggregating: "🧮",
-};
 
 function formatBytes(b: number): string {
   if (b <= 0) return "0 B";
@@ -148,49 +144,76 @@ watch(
   <main class="scan">
     <header class="scan-head">
       <router-link to="/" class="back">← 首页</router-link>
-      <h1>{{ pageTitle }}</h1>
+      <div class="head-line">
+        <h1>{{ pageTitle }}</h1>
+        <span class="ro-chip">
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <path d="M12 3.5 19 6v5.2c0 4.6-3.1 7.6-7 9.3-3.9-1.7-7-4.7-7-9.3V6Z" />
+            <path d="m8.8 12 2.2 2.2 4.2-4.4" />
+          </svg>
+          只读扫描
+        </span>
+      </div>
       <p class="sub">
         <template v-if="cleanIntent">
           只清理系统临时目录（%TEMP%）与可重建缓存（缩略图/浏览器），不会动你的文档、照片和其它目录里的文件；有风险的项目会让你确认。
         </template>
-        <template v-else>只读扫描 · 不删除任何文件 · 全程可在确认后逐项处置</template>
+        <template v-else>不删除任何文件 · 扫描完成后按安全/谨慎/危险分级，处置逐项确认</template>
       </p>
     </header>
 
     <div v-if="store.error" class="error">扫描失败：{{ store.error }}</div>
 
-    <!-- v0.1.6：待命态——进页不自动扫描，用户选档后主动开始 -->
-    <section v-else-if="idle && !store.isDone" class="card idle-card anim-rise d1">
-      <div class="idle-icon" aria-hidden="true">
-        <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
-          <path d="M12 3.5 19 6v5.2c0 4.6-3.1 7.6-7 9.3-3.9-1.7-7-4.7-7-9.3V6Z" />
-          <path d="m8.8 12 2.2 2.2 4.2-4.4" />
-        </svg>
-      </div>
-      <div class="idle-body">
-        <h2>准备就绪</h2>
-        <p class="idle-desc">
-          体检为<strong>只读扫描</strong>，不会删除任何文件；扫描结束后按 绿/黄/红 分级列出结果，
-          清理什么、是否隔离或删除，全部由你逐项确认。
-        </p>
-        <ul class="idle-modes">
-          <li>
-            <strong>快速体检</strong>
-            <span>临时文件 · 缓存 · 隐私痕迹 · 启动项，几秒到几分钟</span>
-          </li>
-          <li>
-            <strong>深度体检</strong>
-            <span>在快速基础上加大文件与重复文件定位，大容量盘较慢</span>
-          </li>
-        </ul>
-        <div class="idle-actions">
-          <button class="btn-idle-main" @click="begin(false)">开始快速体检</button>
-          <button class="btn-idle-ghost" @click="begin(true)">深度体检</button>
+    <!-- 待命态：双档模式卡（先选档，再开始） -->
+    <section v-else-if="idle && !store.isDone" class="idle-stage anim-rise d1">
+      <div class="intro">
+        <div class="intro-icon" aria-hidden="true">
+          <svg width="34" height="34" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M12 3.5 19 6v5.2c0 4.6-3.1 7.6-7 9.3-3.9-1.7-7-4.7-7-9.3V6Z" />
+            <path d="m8.8 12 2.2 2.2 4.2-4.4" />
+          </svg>
         </div>
-        <p v-if="elevated === false" class="idle-warn">
-          当前未以管理员运行：深度体检的大文件/重复文件维度会明显变慢，快速体检不受影响。
-        </p>
+        <div class="intro-text">
+          <h2>准备就绪，先选一档</h2>
+          <p>
+            体检全程<strong>只读</strong>：不删除、不移动、不写入用户目录。扫描结束后按
+            安全/谨慎/危险分级列出结果，清理什么、是否隔离或删除，全部由你逐项确认。
+          </p>
+        </div>
       </div>
+
+      <div class="mode-grid">
+        <article class="mode-card is-primary">
+          <div class="mode-top">
+            <h3>快速体检</h3>
+            <span class="mode-tag">推荐</span>
+          </div>
+          <p class="mode-desc">临时文件 · 缓存 · 隐私痕迹 · 启动项</p>
+          <ul class="mode-list">
+            <li>几秒到几分钟完成</li>
+            <li>覆盖最常见、最安全的可清理项</li>
+            <li>不需要管理员权限</li>
+          </ul>
+          <button class="mode-btn primary" @click="begin(false)">开始快速体检</button>
+        </article>
+
+        <article class="mode-card">
+          <div class="mode-top">
+            <h3>深度体检</h3>
+          </div>
+          <p class="mode-desc">在快速基础上增加大文件与重复文件定位</p>
+          <ul class="mode-list">
+            <li>全卷遍历，大容量盘耗时较长</li>
+            <li>重复文件按哈希比对确认</li>
+            <li>未提权时遍历速度明显变慢</li>
+          </ul>
+          <button class="mode-btn" @click="begin(true)">深度体检</button>
+        </article>
+      </div>
+
+      <p v-if="elevated === false" class="idle-warn">
+        当前未以管理员运行：深度体检的大文件/重复文件维度会明显变慢，快速体检不受影响。
+      </p>
     </section>
 
     <p v-else-if="isDeep && elevated === false" class="slow-hint">
@@ -208,74 +231,95 @@ watch(
       </div>
     </section>
 
+    <!-- 运行态：左侧扫描舞台 + 右侧进度/统计/路径 -->
     <section class="card scan-card anim-rise d1" v-else>
       <p v-if="cleanIntent" class="clean-hint">正在扫描可安全清理的项目…</p>
-      <!-- v0.1.5 反馈 2：旋转扫描动效 + 阶段图标（R29：阶段切换 pop）-->
-      <div class="scan-visual">
-        <div class="radar" :class="{ paused: !store.running }">
-          <Transition name="phase-pop">
-            <div :key="store.phase" class="radar-core">{{ PHASE_ICON[store.phase] ?? "📂" }}</div>
-          </Transition>
+      <div class="scan-grid">
+        <div class="scan-visual">
+          <div class="radar" :class="{ paused: !store.running }">
+            <div class="radar-core">
+              <Transition name="phase-pop">
+                <span :key="store.phase" class="phase-glyph">
+                  <svg v-if="store.phase === 'hashing'" width="38" height="38" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+                    <circle cx="11" cy="11" r="6.4" />
+                    <path d="m16 16 4.2 4.2" />
+                  </svg>
+                  <svg v-else-if="store.phase === 'aggregating'" width="38" height="38" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M4 7.5 12 3l8 4.5-8 4.5Z" />
+                    <path d="M4 12.2 12 16.7l8-4.5" />
+                    <path d="M4 16.8 12 21.3l8-4.5" />
+                  </svg>
+                  <svg v-else width="38" height="38" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M3.5 7.2c0-1 .8-1.7 1.7-1.7h3.6l2 2.2h8c1 0 1.7.8 1.7 1.7v7.4c0 1-.8 1.7-1.7 1.7H5.2c-1 0-1.7-.8-1.7-1.7Z" />
+                  </svg>
+                </span>
+              </Transition>
+            </div>
+          </div>
+          <div class="phase-col">
+            <span class="pct">{{ store.percent }}<small>%</small></span>
+            <span class="phase">{{ PHASE_CN[store.phase] ?? store.phase }}</span>
+            <span v-if="volumeHint" class="vol">{{ volumeHint }}</span>
+          </div>
         </div>
-        <div class="phase-col">
-          <span class="phase">
-            {{ PHASE_CN[store.phase] ?? store.phase }}
-            <span v-if="volumeHint" class="vol">（{{ volumeHint }}）</span>
-          </span>
-          <span class="pct">{{ store.percent }}%</span>
-        </div>
-      </div>
-      <div class="bar">
-        <div
-          class="bar-fill"
-          :style="{ transform: `scaleX(${store.percent / 100})` }"
-          :class="{ paused: !store.running }"
-        >
-          <span class="bar-sheen" aria-hidden="true"></span>
-        </div>
-      </div>
 
-      <!-- 实时累计 -->
-      <div class="metrics">
-        <div class="metric">
-          <span class="m-label">实时累计</span>
-          <span class="m-val">{{ formatBytes(store.foundBytesTotal) }}</span>
-        </div>
-        <div class="metric split">
-          <span class="m-sub g">🟢 {{ formatBytes(store.found.green) }}</span>
-          <span class="m-sub y">🟡 {{ formatBytes(store.found.yellow) }}</span>
-          <span class="m-sub r">🔴 {{ formatBytes(store.found.red) }}</span>
-        </div>
-        <div class="metric">
-          <span class="m-label">已用时</span>
-          <span class="m-val">{{ fmtElapsed(store.elapsedMs) }}</span>
-        </div>
-      </div>
+        <div class="scan-body">
+          <div class="bar">
+            <div
+              class="bar-fill"
+              :style="{ transform: `scaleX(${store.percent / 100})` }"
+              :class="{ paused: !store.running }"
+            >
+              <span class="bar-sheen" aria-hidden="true"></span>
+            </div>
+          </div>
 
-      <!-- 当前路径（v0.1.5 反馈 2；R29：路径切换淡入淡出，快速连刷不堆积）-->
-      <div class="path-block">
-        <span class="m-label">当前扫描</span>
-        <span class="path-window">
-          <Transition name="path-fade" mode="out-in">
-            <span :key="store.currentPath" class="path" :title="store.currentPath">{{
-              store.currentPath || "初始化…"
-            }}</span>
-          </Transition>
-        </span>
-      </div>
+          <!-- 实时统计 -->
+          <div class="metrics">
+            <div class="metric">
+              <span class="m-label">实时累计</span>
+              <span class="m-val">{{ formatBytes(store.foundBytesTotal) }}</span>
+            </div>
+            <div class="metric">
+              <span class="m-label">已用时</span>
+              <span class="m-val">{{ fmtElapsed(store.elapsedMs) }}</span>
+            </div>
+            <div class="metric wide">
+              <span class="m-label">按分级</span>
+              <span class="grade-row">
+                <span class="m-sub g"><GradeIcon grade="green" :size="13" /> {{ formatBytes(store.found.green) }}</span>
+                <span class="m-sub y"><GradeIcon grade="yellow" :size="13" /> {{ formatBytes(store.found.yellow) }}</span>
+                <span class="m-sub r"><GradeIcon grade="red" :size="13" /> {{ formatBytes(store.found.red) }}</span>
+              </span>
+            </div>
+          </div>
 
-      <!-- 取消 -->
-      <div class="actions">
-        <button class="btn-cancel" :disabled="!store.running" @click="store.cancel()">
-          {{ cleanIntent ? "取消扫描" : "取消体检" }}
-        </button>
-        <p class="tip">
-          {{
-            cleanIntent
-              ? "可随时取消，已扫描部分不写入任何文件。完成自动进入清理结果。"
-              : "可随时取消，已扫描部分不写入任何文件。完成自动进入报告。"
-          }}
-        </p>
+          <!-- 当前路径（R29：路径切换淡入淡出，快速连刷不堆积）-->
+          <div class="path-block">
+            <span class="m-label">当前扫描</span>
+            <span class="path-window">
+              <Transition name="path-fade" mode="out-in">
+                <span :key="store.currentPath" class="path" :title="store.currentPath">{{
+                  store.currentPath || "初始化…"
+                }}</span>
+              </Transition>
+            </span>
+          </div>
+
+          <!-- 取消 -->
+          <div class="actions">
+            <button class="btn-cancel" :disabled="!store.running" @click="store.cancel()">
+              {{ cleanIntent ? "取消扫描" : "取消体检" }}
+            </button>
+            <p class="tip">
+              {{
+                cleanIntent
+                  ? "可随时取消，已扫描部分不写入任何文件。完成自动进入清理结果。"
+                  : "可随时取消，已扫描部分不写入任何文件。完成自动进入报告。"
+              }}
+            </p>
+          </div>
+        </div>
       </div>
     </section>
   </main>
@@ -286,123 +330,237 @@ watch(
   display: flex;
   flex-direction: column;
   gap: 1.25rem;
+  max-width: 1080px;
+  margin: 0 auto;
 }
 .back {
-  color: var(--accent);
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--text-2);
   font-weight: 600;
+  font-size: 0.82rem;
+  padding: 4px 10px 4px 8px;
+  margin-left: -8px;
+  border-radius: var(--r-pill);
+  transition:
+    color var(--dur-fast) var(--ease-inout),
+    background var(--dur-fast) var(--ease-inout);
 }
-.scan-head h1 {
-  margin: 0.5rem 0 0.25rem;
+.back:hover {
+  color: var(--accent);
+  background: rgba(37, 99, 235, 0.08);
+}
+.head-line {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 0.5rem 0 0.3rem;
+}
+.head-line h1 {
+  margin: 0;
+  font-size: 1.6rem;
+  font-weight: 720;
+  letter-spacing: -0.02em;
+}
+.ro-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 3px 9px 3px 7px;
+  border-radius: var(--r-pill);
+  font-size: 0.72rem;
+  font-weight: 650;
+  color: #1d51d8;
+  background: rgba(37, 99, 235, 0.09);
+  border: 1px solid rgba(37, 99, 235, 0.16);
+  white-space: nowrap;
 }
 .sub {
   margin: 0;
   color: var(--text-2);
   font-size: 0.9rem;
+  line-height: 1.65;
 }
 .error {
   color: var(--grade-red);
-  background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: 10px;
+  background: rgba(255, 244, 242, 0.85);
+  border: 1px solid rgba(214, 58, 47, 0.24);
+  border-radius: var(--r-md);
   padding: 1rem 1.25rem;
+  box-shadow: var(--shadow-1);
 }
 .card {
   background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: 10px;
-  padding: 1.5rem;
+  border: 1px solid var(--glass-line);
+  border-radius: var(--r-xl);
+  box-shadow:
+    var(--glass-sheen),
+    var(--shadow-2);
+  backdrop-filter: var(--glass-blur-strong);
+  -webkit-backdrop-filter: var(--glass-blur-strong);
+  padding: 1.6rem;
   display: flex;
   flex-direction: column;
   gap: 1.25rem;
 }
-/* 待命态 */
-.idle-card {
-  flex-direction: row;
-  align-items: flex-start;
-  gap: 1.4rem;
+/* 待命态：介绍 + 双档模式卡 */
+.idle-stage {
+  background: var(--surface);
+  border: 1px solid var(--glass-line);
+  border-radius: var(--r-xl);
+  box-shadow:
+    var(--glass-sheen),
+    var(--shadow-2);
+  backdrop-filter: var(--glass-blur-strong);
+  -webkit-backdrop-filter: var(--glass-blur-strong);
+  padding: 1.55rem;
+  display: flex;
+  flex-direction: column;
+  gap: 1.15rem;
 }
-.idle-icon {
-  width: 64px;
-  height: 64px;
-  border-radius: 16px;
-  background: var(--accent-soft, #eaf1ff);
+.intro {
+  display: flex;
+  align-items: flex-start;
+  gap: 14px;
+}
+.intro-icon {
+  width: 48px;
+  height: 48px;
+  border-radius: 14px;
+  background: linear-gradient(155deg, rgba(37, 99, 235, 0.16), rgba(37, 99, 235, 0.05));
   color: var(--accent);
   display: flex;
   align-items: center;
   justify-content: center;
-  flex-shrink: 0;
+  flex: none;
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.8),
+    inset 0 0 0 1px rgba(37, 99, 235, 0.1);
 }
-.idle-body {
-  flex: 1;
-  min-width: 0;
-}
-.idle-body h2 {
-  margin: 0 0 8px;
+.intro-text h2 {
+  margin: 0 0 4px;
   font-size: 1.1rem;
+  letter-spacing: -0.015em;
 }
-.idle-desc {
-  margin: 0 0 14px;
-  font-size: 0.87rem;
+.intro-text p {
+  margin: 0;
+  font-size: 0.86rem;
   line-height: 1.7;
   color: var(--text-2);
-  max-width: 44rem;
+  max-width: 46rem;
 }
-.idle-modes {
+.intro-text strong {
+  color: var(--text);
+}
+.mode-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+.mode-card {
+  background: rgba(255, 255, 255, 0.62);
+  border: 1px solid var(--glass-line);
+  border-radius: var(--r-lg);
+  padding: 1.15rem 1.2rem 1.2rem;
+  display: flex;
+  flex-direction: column;
+  gap: 9px;
+}
+.mode-card.is-primary {
+  background: linear-gradient(180deg, rgba(239, 245, 255, 0.95), rgba(255, 255, 255, 0.7));
+  border-color: rgba(37, 99, 235, 0.22);
+  box-shadow: 0 12px 26px -20px rgba(37, 99, 235, 0.6);
+}
+.mode-top {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.mode-top h3 {
+  margin: 0;
+  font-size: 1.02rem;
+  letter-spacing: -0.01em;
+}
+.mode-tag {
+  font-size: 0.66rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  color: #fff;
+  background: linear-gradient(180deg, #3b7bf5, #2563eb);
+  padding: 2px 7px;
+  border-radius: var(--r-pill);
+}
+.mode-desc {
+  margin: 0;
+  font-size: 0.82rem;
+  color: var(--text-2);
+  line-height: 1.6;
+}
+.mode-list {
   list-style: none;
-  margin: 0 0 18px;
+  margin: 0;
   padding: 0;
   display: flex;
   flex-direction: column;
-  gap: 8px;
-}
-.idle-modes li {
-  display: flex;
-  align-items: baseline;
-  gap: 10px;
-  font-size: 0.86rem;
-}
-.idle-modes strong {
-  min-width: 64px;
-  color: var(--text);
-}
-.idle-modes span {
+  gap: 5px;
+  font-size: 0.79rem;
   color: var(--text-2);
-  font-size: 0.8rem;
 }
-.idle-actions {
-  display: flex;
-  gap: 10px;
+.mode-list li {
+  position: relative;
+  padding-left: 16px;
+  line-height: 1.55;
 }
-.btn-idle-main {
-  background: var(--accent);
-  color: #fff;
-  border: none;
-  padding: 10px 22px;
-  border-radius: 10px;
-  font-size: 0.92rem;
-  font-weight: 700;
-  cursor: pointer;
-  box-shadow: 0 5px 14px rgba(37, 99, 235, 0.25);
+.mode-list li::before {
+  content: "";
+  position: absolute;
+  left: 2px;
+  top: 0.52em;
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: rgba(37, 99, 235, 0.5);
 }
-.btn-idle-main:hover {
-  background: #1d4ed8;
-}
-.btn-idle-ghost {
-  background: var(--surface);
-  color: var(--text);
+.mode-btn {
+  margin-top: auto;
+  padding: 10px 16px;
+  border-radius: 11px;
   border: 1px solid var(--border-strong, #d7deea);
-  padding: 10px 18px;
-  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.85);
+  color: var(--text);
   font-size: 0.88rem;
-  font-weight: 600;
+  font-weight: 650;
   cursor: pointer;
+  transition:
+    border-color var(--dur-fast) var(--ease-inout),
+    color var(--dur-fast) var(--ease-inout),
+    background var(--dur-fast) var(--ease-inout),
+    transform var(--dur-fast) var(--ease-out);
 }
-.btn-idle-ghost:hover {
-  border-color: var(--accent);
+.mode-btn:hover {
+  border-color: rgba(37, 99, 235, 0.45);
   color: var(--accent);
+  background: #fff;
+}
+.mode-btn:active {
+  transform: translateY(1px) scale(0.99);
+}
+.mode-btn.primary {
+  border: none;
+  background: linear-gradient(180deg, #3b7bf5 0%, #2563eb 55%, #1d51d8 100%);
+  color: #fff;
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.32),
+    inset 0 -1px 0 rgba(0, 0, 0, 0.12),
+    0 8px 18px -8px rgba(37, 99, 235, 0.55);
+}
+.mode-btn.primary:hover {
+  color: #fff;
+  filter: brightness(1.06);
 }
 .idle-warn {
-  margin: 12px 0 0;
+  margin: 0;
   font-size: 0.78rem;
   color: var(--grade-yellow);
 }
@@ -422,15 +580,18 @@ watch(
 .btn-done-ghost {
   padding: 0.7rem 1.4rem;
   border: 1px solid var(--border-strong, #d7deea);
-  border-radius: 10px;
-  background: var(--surface);
+  border-radius: 11px;
+  background: rgba(255, 255, 255, 0.75);
   color: var(--text-2);
   font-size: 0.9rem;
   font-weight: 600;
   cursor: pointer;
+  transition:
+    border-color var(--dur-fast) var(--ease-inout),
+    color var(--dur-fast) var(--ease-inout);
 }
 .btn-done-ghost:hover {
-  border-color: var(--accent);
+  border-color: rgba(37, 99, 235, 0.45);
   color: var(--accent);
 }
 .btn-done {
@@ -443,8 +604,9 @@ watch(
 }
 .done-text {
   margin: 0;
-  font-size: 1.2rem;
-  font-weight: 700;
+  font-size: 1.28rem;
+  font-weight: 720;
+  letter-spacing: -0.015em;
   color: var(--text);
 }
 .done-sub {
@@ -454,44 +616,97 @@ watch(
 }
 .btn-done {
   margin-top: 0.75rem;
-  padding: 0.7rem 2.2rem;
+  padding: 0.72rem 2.2rem;
   border: none;
-  border-radius: 10px;
-  background: var(--accent);
+  border-radius: 12px;
+  background: linear-gradient(180deg, #3b7bf5 0%, #2563eb 55%, #1d51d8 100%);
   color: #fff;
   font-size: 1rem;
-  font-weight: 600;
+  font-weight: 650;
   cursor: pointer;
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.32),
+    0 10px 22px -8px rgba(37, 99, 235, 0.6);
+  transition:
+    transform var(--dur-fast) var(--ease-out),
+    filter var(--dur-fast) var(--ease-inout);
 }
-/* v0.1.5 反馈 2：旋转扫描动效（纯 CSS，零依赖） */
+.btn-done:hover {
+  filter: brightness(1.05);
+}
+.btn-done:active {
+  transform: translateY(1px) scale(0.99);
+}
+/* 运行态：左侧扫描舞台 + 右侧数据 */
+.scan-grid {
+  display: grid;
+  grid-template-columns: 216px minmax(0, 1fr);
+  gap: 1.6rem;
+  align-items: center;
+}
 .scan-visual {
   display: flex;
+  flex-direction: column;
   align-items: center;
-  gap: 1.25rem;
+  gap: 0.85rem;
 }
 .radar {
   position: relative;
-  width: 72px;
-  height: 72px;
+  width: 176px;
+  height: 176px;
   flex: none;
   border-radius: 50%;
-  background: conic-gradient(from 0deg, var(--accent) 0deg, var(--accent) 40deg, transparent 40deg);
-  animation: radar-spin 1.4s linear infinite;
-}
-.radar.paused {
-  animation-play-state: paused;
-  opacity: 0.35;
-}
-.radar-core {
-  position: absolute;
-  inset: 8px;
-  border-radius: 50%;
-  background: var(--bg);
-  border: 1px solid var(--border);
+  background: rgba(255, 255, 255, 0.5);
+  box-shadow:
+    inset 0 0 0 1px rgba(19, 32, 54, 0.06),
+    inset 0 1px 0 rgba(255, 255, 255, 0.8);
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: 1.4rem;
+}
+.radar::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+  background: conic-gradient(
+    from 0deg,
+    rgba(37, 99, 235, 0) 0deg,
+    rgba(37, 99, 235, 0.1) 42deg,
+    rgba(37, 99, 235, 0.85) 72deg,
+    rgba(37, 99, 235, 0) 78deg
+  );
+  animation: radar-spin 1.5s linear infinite;
+}
+.radar.paused::before {
+  animation-play-state: paused;
+  opacity: 0.35;
+}
+.radar::after {
+  content: "";
+  position: absolute;
+  inset: 11px;
+  border-radius: 50%;
+  border: 1px dashed rgba(37, 99, 235, 0.18);
+}
+.radar-core {
+  position: relative;
+  z-index: 1;
+  width: 112px;
+  height: 112px;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.97);
+  border: 1px solid var(--glass-line);
+  color: var(--accent);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow:
+    inset 0 1px 0 #fff,
+    0 12px 28px -16px rgba(16, 28, 52, 0.55);
+}
+.phase-glyph {
+  display: inline-flex;
 }
 /* R29：阶段图标切换 pop（≤base 时长，只动 transform/opacity）*/
 .phase-pop-enter-active {
@@ -521,32 +736,50 @@ watch(
 .phase-col {
   display: flex;
   flex-direction: column;
-  gap: 0.3rem;
+  align-items: center;
+  gap: 0.15rem;
   font-weight: 600;
-}
-.phase .vol {
-  color: var(--accent);
-  font-size: 0.85rem;
+  text-align: center;
 }
 .pct {
-  font-size: 1.6rem;
-  font-weight: 700;
+  font-size: 2rem;
+  font-weight: 720;
+  letter-spacing: -0.03em;
+  line-height: 1.1;
   font-variant-numeric: tabular-nums;
+}
+.pct small {
+  font-size: 0.95rem;
+  font-weight: 650;
+  margin-left: 1px;
+  color: var(--text-2);
+}
+.phase {
+  font-size: 0.82rem;
+  font-weight: 600;
+  color: var(--text-2);
+}
+.vol {
+  font-size: 0.74rem;
+  color: var(--accent);
 }
 .bar {
   position: relative;
-  height: 14px;
-  border-radius: 7px;
-  background: var(--bg);
-  border: 1px solid var(--border);
+  height: 12px;
+  border-radius: var(--r-pill);
+  background: rgba(19, 32, 54, 0.07);
+  box-shadow:
+    inset 0 1px 2px rgba(16, 28, 52, 0.09),
+    inset 0 0 0 1px rgba(19, 32, 54, 0.03);
   overflow: hidden;
 }
 .bar-fill {
   position: relative;
   height: 100%;
   width: 100%;
-  border-radius: 7px;
-  background: var(--accent);
+  border-radius: var(--r-pill);
+  background: linear-gradient(90deg, #5b8cf5 0%, #2563eb 60%, #1d51d8 100%);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.4);
   /* R29：进度用 scaleX（只动 transform，SPEC §7），origin 左对齐 */
   transform-origin: left center;
   transition: transform var(--dur-base) var(--ease-out);
@@ -578,32 +811,49 @@ watch(
     transform: translateX(320%);
   }
 }
+.scan-body {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+  min-width: 0;
+}
 .metrics {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 1rem;
+  grid-template-columns: repeat(2, minmax(0, 1fr)) minmax(0, 1.45fr);
+  gap: 0.7rem;
 }
 .metric {
   display: flex;
   flex-direction: column;
-  gap: 0.3rem;
+  gap: 0.25rem;
+  padding: 0.55rem 0.75rem;
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.52);
+  border: 1px solid rgba(19, 32, 54, 0.06);
 }
-.metric.split {
-  flex-direction: row;
-  align-items: center;
-  gap: 0.6rem;
+.grade-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.2rem 0.7rem;
 }
 .m-label {
-  font-size: 0.8rem;
+  font-size: 0.76rem;
   color: var(--text-2);
 }
 .m-val {
-  font-size: 1.3rem;
-  font-weight: 700;
+  font-size: 1.18rem;
+  font-weight: 720;
+  letter-spacing: -0.02em;
   font-variant-numeric: tabular-nums;
 }
 .m-sub {
-  font-size: 0.85rem;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 0.82rem;
+  font-weight: 600;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
 }
 .g {
   color: var(--grade-green);
@@ -617,8 +867,12 @@ watch(
 .path-block {
   display: flex;
   flex-direction: column;
-  gap: 0.3rem;
+  gap: 0.35rem;
   min-width: 0;
+  padding: 0.6rem 0.8rem;
+  border-radius: 12px;
+  background: rgba(15, 23, 42, 0.035);
+  border: 1px solid rgba(19, 32, 54, 0.05);
 }
 .path-window {
   position: relative;
@@ -660,22 +914,30 @@ watch(
   gap: 1rem;
 }
 .btn-cancel {
-  background: var(--grade-yellow);
+  background: linear-gradient(180deg, #c98800 0%, #b26a00 100%);
   color: #fff;
   border: none;
-  padding: 0.6rem 1.25rem;
-  border-radius: 8px;
-  font-weight: 600;
+  padding: 0.62rem 1.3rem;
+  border-radius: 11px;
+  font-weight: 650;
   cursor: pointer;
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.3),
+    0 6px 16px -8px rgba(140, 84, 0, 0.65);
   transition:
-    transform var(--dur-fast) var(--ease-inout),
+    transform var(--dur-fast) var(--ease-out),
+    filter var(--dur-fast) var(--ease-inout),
     opacity var(--dur-fast) var(--ease-inout);
+}
+.btn-cancel:hover:not(:disabled) {
+  filter: brightness(1.05);
 }
 .btn-cancel:active {
   transform: scale(0.98);
 }
 .btn-cancel:disabled {
-  opacity: 0.5;
+  opacity: 0.45;
+  box-shadow: none;
   cursor: not-allowed;
 }
 .tip {
@@ -685,10 +947,50 @@ watch(
 }
 .slow-hint {
   color: var(--grade-yellow);
-  background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: 10px;
+  background: rgba(253, 247, 235, 0.82);
+  border: 1px solid rgba(202, 158, 74, 0.28);
+  border-radius: var(--r-md);
   padding: 1rem 1.25rem;
   margin: 0;
+  box-shadow: var(--shadow-1);
+  line-height: 1.65;
+}
+@media (max-width: 900px) {
+  .scan-grid {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 1.2rem;
+  }
+  .scan-visual {
+    flex-direction: row;
+    justify-content: flex-start;
+    gap: 1.2rem;
+  }
+  .radar {
+    width: 132px;
+    height: 132px;
+  }
+  .radar-core {
+    width: 84px;
+    height: 84px;
+  }
+  .phase-glyph svg {
+    width: 30px;
+    height: 30px;
+  }
+  .phase-col {
+    align-items: flex-start;
+    text-align: left;
+  }
+}
+@media (max-width: 760px) {
+  .mode-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .metrics {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .metric:last-child {
+    grid-column: 1 / -1;
+  }
 }
 </style>
