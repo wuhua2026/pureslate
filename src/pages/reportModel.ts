@@ -33,6 +33,7 @@ export interface ReportCategory {
   categoryId: string;
   label: string;
   grade: Grade;
+  disposition: Disposition; // 原始去向（供建议层判定，不改展示）
   dispositionLabel: string;
   totalBytes: number;
   itemCount: number;
@@ -60,7 +61,7 @@ export interface ReportOverview {
   confirmItems: number;
   /** 需人工确认的字节数（🟡+🔴，不进一键清理）。 */
   confirmBytes: number;
-  planA: ReportPlan; // 推荐清理：仅绿（一键清理口径）
+  planA: ReportPlan; // 稳妥清理：仅绿（一键清理口径）
   planB: ReportPlan; // 深度清理：绿+黄
   redCategoryCount: number; // 🔴 被灰禁类目数
 }
@@ -84,6 +85,7 @@ export function groupCategories(items: ScanItem[]): ReportCategory[] {
         categoryId: it.categoryId,
         label: it.label,
         grade: it.grade,
+        disposition: it.disposition,
         dispositionLabel: DISPOSITION_CN[it.disposition],
         totalBytes: it.sizeBytes,
         itemCount: 1,
@@ -140,7 +142,7 @@ export function buildReportOverview(rawItems: ScanItem[]): ReportOverview {
     quarantineBytes: yellow.bytes + red.bytes, // 进隔离区，可还原
     confirmItems: yellow.items + red.items, // 🟡/🔴 需人工确认（不进一键清理）
     confirmBytes: yellow.bytes + red.bytes,
-    planA: { id: "A", name: "推荐清理（只清安全项）", grades: ["green"], items: green.items, bytes: green.bytes, isDefault: true },
+    planA: { id: "A", name: "稳妥清理（只清安全项）", grades: ["green"], items: green.items, bytes: green.bytes, isDefault: true },
     planB: { id: "B", name: "深度清理（含需确认项）", grades: ["green", "yellow"], items: green.items + yellow.items, bytes: green.bytes + yellow.bytes, isDefault: false },
     redCategoryCount: redCategories(categories),
   };

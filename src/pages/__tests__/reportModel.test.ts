@@ -120,9 +120,9 @@ describe("报告模型（R13/R14）", () => {
     expect(ov.redCategoryCount).toBeGreaterThan(0);
   });
 
-  it("R31-6 方案命名：推荐清理（只清安全项）/ 深度清理（含需确认项），去掉评审语言", () => {
+  it("R31-6 方案命名：稳妥清理（只清安全项）/ 深度清理（含需确认项），与建议徽标区分", () => {
     const ov = buildReportOverview(result.items);
-    expect(ov.planA.name).toBe("推荐清理（只清安全项）");
+    expect(ov.planA.name).toBe("稳妥清理（只清安全项）");
     expect(ov.planB.name).toBe("深度清理（含需确认项）");
     expect(ov.planA.isDefault).toBe(true);
     expect(ov.planB.isDefault).toBe(false);

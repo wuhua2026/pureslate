@@ -12,6 +12,7 @@ import type { AppSettings, CrashDumpInfo, CrashDumpPreview, UpdateStatus } from 
 import GradeIcon from "../components/GradeIcon.vue";
 import { formatBytes } from "./filesModel";
 import { moduleLine, previewSummary } from "./crashModel";
+import { setSuggestionsEnabled, showSuggestions } from "./suggestModel";
 
 /** 设置页（P4-01 起步）：R22 更新（optIn 周查/镜像优先/手动检查）+ 专家模式。
  *  P4-03 扩展：R24 崩溃数据（opt-in 上传 + 本地转储预览）。 */
@@ -206,6 +207,41 @@ onMounted(() => {
             </span>
           </label>
           <p class="hint">开启不代表自动执行：每一项高风险操作仍需逐次确认。</p>
+        </div>
+      </section>
+
+      <!-- 清理建议（前端偏好，不入 IPC 契约） -->
+      <section class="card anim-rise d3">
+        <header class="card-head">
+          <span class="c-ico" aria-hidden="true">
+            <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M9 18h6" />
+              <path d="M10 21h4" />
+              <path d="M12 3a6 6 0 0 0-3.6 10.8c.6.5 1 1.2 1 2V17h5.2v-1.2c0-.8.4-1.5 1-2A6 6 0 0 0 12 3Z" />
+            </svg>
+          </span>
+          <div class="c-title">
+            <h2>清理建议</h2>
+            <p>解释与建议 · 默认开启</p>
+          </div>
+        </header>
+        <div class="body">
+          <label class="opt">
+            <input
+              class="sw"
+              type="checkbox"
+              :checked="showSuggestions"
+              @change="setSuggestionsEnabled(!showSuggestions)"
+            />
+            <span class="opt-text">
+              <strong>在报告中显示清理建议</strong>
+              <span>按分级给每个类目一句建议与依据</span>
+            </span>
+          </label>
+          <p class="hint">
+            建议只作解释：不改变勾选范围、方案 A/B 与危险项灰禁；
+            关闭后报告页恢复原样（不显示建议徽标与摘要）。
+          </p>
         </div>
       </section>
 

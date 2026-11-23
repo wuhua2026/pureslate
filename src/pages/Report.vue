@@ -13,6 +13,12 @@ import {
   type ReportCategory,
   type ReportPlan,
 } from "./reportModel";
+import {
+  buildSuggestions,
+  setSuggestionsEnabled,
+  showSuggestions,
+  summarizeSuggestions,
+} from "./suggestModel";
 import { useCountUp } from "../composables/useCountUp";
 
 // P1-08 真数据联调：报告直接读全局扫描会话（mock 开关在 store 层切换）。
@@ -57,6 +63,40 @@ function formatBytes(bytes: number): string {
 }
 
 const overview = computed(() => buildReportOverview(items.value));
+
+// ---- 清理建议 V0（纯前端、只影响文案与排序，不参与勾选/方案/灰禁） ----
+const suggestions = computed(() =>
+  showSuggestions.value
+    ? buildSuggestions({
+        categories: overview.value.categories,
+        items: store.items,
+        whitelistOk: store.result?.whitelistOk !== false,
+      })
+    : [],
+);
+const suggestionMap = computed(
+  () => new Map(suggestions.value.map((s) => [s.categoryId, s])),
+);
+const suggestionSummary = computed(() =>
+  summarizeSuggestions(suggestions.value, overview.value.categories),
+);
+
+/** 例外置顶：仅把「建议保留」的类目提到最前，其余顺序不变（勾选语义不受影响）。 */
+const displayCategories = computed(() => {
+  const cats = overview.value.categories;
+  if (!showSuggestions.value) return cats;
+  const keep = cats.filter((c) => suggestionMap.value.get(c.categoryId)?.state === "keep");
+  if (keep.length === 0) return cats;
+  return [...keep, ...cats.filter((c) => suggestionMap.value.get(c.categoryId)?.state !== "keep")];
+});
+
+function suggestionOf(cat: ReportCategory) {
+  return suggestionMap.value.get(cat.categoryId);
+}
+
+function hideSuggestions(): void {
+  setSuggestionsEnabled(false);
+}
 
 /** 某方案纳入的类目 id 集合（类目已按 R30 排除审阅型大文件）。 */
 function categoryIdsForPlan(plan: ReportPlan): Set<string> {
@@ -191,6 +231,13 @@ function oneClickClean(): void {
             共 <strong>{{ overview.planA.items }}</strong> 项安全项（系统临时文件 / 可重建缓存），
             删除后由系统或应用自动重建；不会动你的文档与照片。
           </p>
+          <p v-if="showSuggestions && suggestionSummary.clean.items > 0" class="simple-suggest">
+            <GradeIcon grade="green" :size="13" />
+            建议清理 <strong>{{ suggestionSummary.clean.items }}</strong> 项（可重建，删除后自动生成）
+            <span v-if="suggestionSummary.keep.items > 0" class="simple-suggest-note">
+              · {{ suggestionSummary.keep.items }} 项建议保留（建议仅作解释，不改变一键清理范围）
+            </span>
+          </p>
           <p v-if="overview.confirmItems > 0" class="simple-confirm">
             另有谨慎/危险 {{ overview.confirmItems }} 项需要你确认，不会进入一键清理。
           </p>
@@ -220,6 +267,13 @@ function oneClickClean(): void {
       <!-- ===== 完整报告（非 clean 模式默认；clean 模式展开后） ===== -->
       <template v-else>
         <button v-if="cleanIntent" class="collapse-link" @click="detailExpanded = false">← 返回一键清理</button>
+
+        <!-- 清理建议摘要（V0：只解释，不改变勾选/方案/灰禁） -->
+        <section v-if="showSuggestions && suggestions.length > 0" class="suggest-bar anim-rise d1">
+          <span class="suggest-bar-title">清理建议</span>
+          <span class="suggest-bar-text">{{ suggestionSummary.headline }}</span>
+          <button class="suggest-hide" @click="hideSuggestions">隐藏建议</button>
+        </section>
 
         <div class="report-layout">
           <div class="report-main">
@@ -254,7 +308,7 @@ function oneClickClean(): void {
         </div>
         <ul class="cat-list">
           <li
-            v-for="(cat, idx) in overview.categories"
+            v-for="(cat, idx) in displayCategories"
             :key="cat.categoryId"
             class="cat-row"
             :class="[
@@ -277,6 +331,14 @@ function oneClickClean(): void {
                 <span class="cat-label">{{ cat.label }}</span>
                 <span class="cat-size">{{ formatBytes(cat.totalBytes) }} · {{ cat.itemCount }}项</span>
                 <span class="cat-disp">→ {{ cat.dispositionLabel }}</span>
+                <span
+                  v-if="showSuggestions && suggestionOf(cat)"
+                  class="cat-suggest"
+                  :class="'sugg-' + suggestionOf(cat)?.state"
+                >{{ suggestionOf(cat)?.label }}</span>
+              </span>
+              <span v-if="showSuggestions && suggestionOf(cat) && suggestionOf(cat)?.state !== 'unsure'" class="cat-suggest-basis">
+                建议依据：{{ suggestionOf(cat)?.basis }}
               </span>
               <span v-if="isIncluded(cat) || cat.grade === 'yellow'" class="cat-reason">{{ cat.reason }}</span>
               <span v-else-if="cat.grade === 'red'" class="cat-reason reddish">危险项默认禁用，需专家模式 + 二次确认</span>
@@ -644,6 +706,89 @@ function oneClickClean(): void {
   margin: 0;
   font-size: 0.85rem;
   color: var(--grade-yellow);
+}
+/* 清理建议 V0：一键清理卡摘要（只解释，不改变按钮提交范围） */
+.simple-suggest {
+  margin: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  flex-wrap: wrap;
+  font-size: 0.86rem;
+  color: var(--text-2);
+}
+.simple-suggest strong {
+  color: var(--grade-green);
+  font-variant-numeric: tabular-nums;
+}
+.simple-suggest-note {
+  color: var(--text-3);
+}
+/* 完整报告顶部摘要条 */
+.suggest-bar {
+  display: flex;
+  align-items: center;
+  gap: 0.7rem;
+  flex-wrap: wrap;
+  padding: 0.68rem 1rem;
+  border: 1px solid rgba(37, 99, 235, 0.14);
+  border-radius: var(--r-md);
+  background: rgba(37, 99, 235, 0.05);
+  font-size: 0.84rem;
+}
+.suggest-bar-title {
+  font-weight: 700;
+  color: var(--accent);
+}
+.suggest-bar-text {
+  color: var(--text-2);
+}
+.suggest-hide {
+  margin-left: auto;
+  background: none;
+  border: none;
+  padding: 0;
+  color: var(--text-2);
+  font-size: 0.78rem;
+  cursor: pointer;
+}
+.suggest-hide:hover {
+  color: var(--accent);
+  text-decoration: underline;
+}
+/* 类目行建议徽标（固定词表 + 分级色） */
+.cat-suggest {
+  font-size: 0.72rem;
+  font-weight: 650;
+  line-height: 1.5;
+  padding: 1px 8px;
+  border-radius: var(--r-pill);
+  border: 1px solid transparent;
+  white-space: nowrap;
+}
+.sugg-clean {
+  color: var(--grade-green);
+  background: rgba(18, 161, 80, 0.1);
+  border-color: rgba(18, 161, 80, 0.22);
+}
+.sugg-caveat {
+  color: var(--grade-yellow);
+  background: rgba(217, 151, 28, 0.12);
+  border-color: rgba(217, 151, 28, 0.25);
+}
+.sugg-keep {
+  color: var(--text-2);
+  background: rgba(19, 32, 54, 0.06);
+  border-color: rgba(19, 32, 54, 0.14);
+}
+.sugg-unsure {
+  color: var(--grade-red);
+  background: rgba(214, 58, 47, 0.08);
+  border-color: rgba(214, 58, 47, 0.2);
+}
+.cat-suggest-basis {
+  font-size: 0.76rem;
+  color: var(--text-3, var(--text-2));
 }
 .simple-actions {
   display: flex;
