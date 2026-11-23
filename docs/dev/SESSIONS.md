@@ -13,7 +13,11 @@
 - **打包**：先删除 bundle 目录内 0.2.2/0.2.3 旧 exe（避免 `check-size.ps1` 取最大文件时混淆），再 `pnpm tauri build --bundles nsis`；`PureSlate_0.2.4_x64-setup.exe` **3,070,788 B ≈ 2.93 MiB**，sha256 `8d3401b2ee0857cd1cb674718b1d84355fbd16f1a4c52c68dfe481dfb66b3ebb`，较 v0.2.3 本地 3,011,017 B **+59,771 B / +1.99%**（图标与页面样式）；`tools/check-size.ps1` **PASS**（<20MB）。release profile 链接期出现一条 MSVC linker stdout 提示（`linker_messages`），非代码告警，clippy 门禁不受影响。
 - **文档**：CHANGELOG 新增 `### v0.2.4（发布）`；LESSONS ④ 趋势表加行；SPEC §7 主流程文案同步「方案 A=稳妥清理」并去掉「侧栏」表述（UI 已改顶部导航）。
 - **门禁时效**：性能（2026-09-29）、误删率（2026-10-04）、还原率（2026-10-04）**本轮未重跑，证据早于当前 HEAD**，不阻塞发布。
-- **下一步**：本地提交后停下；待作者放行再执行 annotated tag `v0.2.4` → `git push origin main` + `git push origin v0.2.4` → 核对 workflow run / 四资产哈希 / manifest 回推。
+- **发布**：作者放行后确认 `v0.2.4` tag 本地/远端均不存在 → 打 annotated tag `v0.2.4`（`9799235`）→ `git push origin main` + `git push origin v0.2.4`。Release run [45219605042](https://github.com/wuhua2026/pureslate/actions/runs/45219605042) **success**（job 8m15s，SignPath 步骤按预期 skipped）。Release <https://github.com/wuhua2026/pureslate/releases/tag/v0.2.4>。
+- **资产**：NSIS `PureSlate_0.2.4_x64-setup.exe` **3,071,282 B ≈ 2.93 MiB** sha256 `784bbd2a…`（本地构建 3,070,788 B，差异属重建时间戳）；portable zip 4,116,853 B ≈ 3.93 MiB sha256 `02784a00…`；rules pack 5,761 B sha256 `73c1b1e3…`；build-hashes 367 B sha256 `233d6d45…`。
+- **manifest**：bot 回推 `7c739486`（`[skip ci]`）；`appVersion`/`rulesVersion` = 0.2.4，`appSha256`/`rulesSha256` 与 Release digest 逐字一致；`rulesSig`（128 hex）+ `rulesKeyId="1"` 存在。
+- **网络插曲**：workflow 成功后 `git fetch` 两次 `github.com:443` 连接重置/不可达（gh api 正常），不影响已完成的发布；恢复后 fast-forward 到 bot 提交并推送证据回填。
+- **下一步**：R32 剩余项按 AUDIT §3 排期；性能/误删/还原三类门禁按 TASKS P5-01 统一补测。
 
 ## 2026-11-23 | 清理建议 V0：类目级三态建议（纯前端、零契约）
 
