@@ -313,7 +313,7 @@ journal 协议见 SAFETY §3。🟢 direct：`RemoveFile`（Windows API，绕过
 
 页面（vue-router）：`/`（Home 屏1）`/scan`（屏5）`/report`（屏2/7）`/files`（大文件）`/startup` `/privacy` `/apps`（R27 软件卸载）`/quarantine`（屏8）`/log`（屏4）`/settings`。
 
-**默认主流程（R31-6，两击）**：首页「一键清理」→ `/scan?auto=1&intent=clean`（快速维度自动扫描）→ 扫描完成自动进 `/report?intent=clean`（简化结果卡：可释放 X / N 项安全项 / 另有 🟡🔴 Z 项需确认）→「立即清理 N 项」只提交 🟢 安全项（不弹 token，🟡/🔴 永不进入）→ `/executing`。简化卡可「查看明细并自定义」展开完整报告（总览/类目/方案 A=推荐清理、B=深度清理）；深度体检与完整报告仍从首页/侧栏进入，行为不变。
+**默认主流程（R31-6，两击）**：首页「一键清理」→ `/scan?auto=1&intent=clean`（快速维度自动扫描）→ 扫描完成自动进 `/report?intent=clean`（简化结果卡：可释放 X / N 项安全项 / 另有 🟡🔴 Z 项需确认）→「立即清理 N 项」只提交 🟢 安全项（不弹 token，🟡/🔴 永不进入）→ `/executing`。简化卡可「查看明细并自定义」展开完整报告（总览/类目/方案 A=稳妥清理、B=深度清理）；深度体检与完整报告仍从首页/顶部导航进入，行为不变。
 
 设计 token（CSS variables，WCAG AA）：
 

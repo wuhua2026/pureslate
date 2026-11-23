@@ -4,6 +4,16 @@
 
 ## [Unreleased]
 
+### v0.2.4（发布）
+
+- 2026-11-24 发布准备：内容主线为 **UI 重构**（`9ff3d65`：顶部双层导航、11 页信息结构重排、自研图标体系 + `tools/gen-icons.py` 与矢量母版）与 **清理建议 V0**（`50d8c94`：`src/pages/suggestModel.ts` 类目级固定四态判定、方案 A 改名「稳妥清理」、设置页开关、115 条前端测试），设计见 `docs/dev/DESIGN-SUGGEST-2026-11-23.md`；Release 正文 `.github/release-notes/v0.2.4.md`。
+- **契约与安全**：IPC 契约零变更（`contract.rs` / `ipc.ts` 未动，`ReportCategory` 仅前端模型加性 `disposition`）；清理范围、方案 A/B 提交内容、🔴 灰禁 + 专家模式 + token、只读扫描标识、隔离区还原入口均未改动；建议纯展示、不参与勾选，可整体隐藏（设置页开关 + 报告页「隐藏建议」，仅 localStorage `pureslate.showSuggestions`）。
+- 版本同步：`src-tauri/tauri.conf.json` / `src-tauri/Cargo.toml` / `src-tauri/Cargo.lock`；`package.json` 沿用历史恒 `0.1.0` 不动；README 下载链接与文件名同步 `v0.2.4`；SPEC §7 主流程文案同步「方案 A=稳妥清理」。
+- 体积门禁：本地当前 HEAD 构建 NSIS `PureSlate_0.2.4_x64-setup.exe` **3,070,788 B ≈ 2.93 MiB**（sha256 `8d3401b2…`，较 v0.2.3 本地 3,011,017 B **+59,771 B / +1.99%**，主要来自图标与页面样式）；`tools/check-size.ps1` **PASS**（<20MB）。打包前已清理 bundle 目录内 0.2.2/0.2.3 旧产物，避免门禁取错文件；CI 重建后体积与哈希以 Release 资产为准。
+- **另外三类门禁的证据时效（如实标注）**：性能（`docs/verify/bench-scan.json`，2026-09-29）、误删率（`docs/verify/golden-misdelete.json`，2026-10-04）、还原率（`docs/verify/restore-1000.json`，2026-10-04）**本轮未重跑，证据早于当前 HEAD**；不作为 v0.2.4 达标依据，也不阻塞本次发布。重跑计划：按 TASKS P5-01 统一补测。
+- 验证：cargo fmt --check / clippy `-D warnings` 零告警；`cargo test` **300 lib passed + 9 ignored + 29 集成全绿**；`pnpm typecheck` / **115 vitest（13 文件）** / `pnpm build` 全绿；零新增 crate/npm。
+- 待放行：本地提交后停在此处，`tag v0.2.4` / `push` / `Release` 三步等作者确认后执行。
+
 ### v0.2.3（发布）
 
 - 2026-11-21 发布：tag `v0.2.3`（annotated，打在 `bc153c4`）；Release 正文 `.github/release-notes/v0.2.3.md`；内容主线为 R32 批次（规则包分离签名、重复文件维度约束、扫描/清理 single-flight、autoPurge 接线与保留期 7–30、rulesVersion 跟随应用版本、NSIS 跟随系统语言）。

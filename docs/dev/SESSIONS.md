@@ -5,6 +5,16 @@
 > 维护（AGENTS.md §9）：任务完成时 agent 自动追加/更新当前会话条目，随任务同一提交。格式：`## YYYY-MM-DD | 主题`。
 > 本初版由历史会话记忆回溯整理（截至 2026-09-29），细节以 git 历史与 TASKS.md 为准。
 
+## 2026-11-24 | v0.2.4 发布准备（版本 bump + 验证 + NSIS 打包，停在本地提交）
+
+- **范围**：把两笔未推送提交（`9ff3d65` UI 重构、`50d8c94` 清理建议 V0）打成 v0.2.4；按作者要求执行到本地提交为止，`tag / push / Release` 三步等放行。作者已确认清理建议的「建议保留」判定按现状保留（atime + mtime≤atime + 7 天可信窗 + 3 天内访问），不收紧、不砍态。
+- **版本同步**：`src-tauri/Cargo.toml` 0.2.3→0.2.4；`src-tauri/tauri.conf.json` 同值；`src-tauri/Cargo.lock` 的 `name = "pureslate"` 条目手动同步；`package.json` 维持 `0.1.0`；README 下载链接与文件名改 `v0.2.4`。新建 `.github/release-notes/v0.2.4.md`。
+- **验证（当前 HEAD）**：`cargo fmt --check` 通过、`clippy --all-targets -D warnings` 0 告警；`cargo test` **300 lib passed + 9 ignored + 29 集成（12+4+4+3+6）**全绿；`pnpm typecheck` 通过、vitest **115 passed（13 文件）**、`pnpm build` 成功；零新增 crate/npm。
+- **打包**：先删除 bundle 目录内 0.2.2/0.2.3 旧 exe（避免 `check-size.ps1` 取最大文件时混淆），再 `pnpm tauri build --bundles nsis`；`PureSlate_0.2.4_x64-setup.exe` **3,070,788 B ≈ 2.93 MiB**，sha256 `8d3401b2ee0857cd1cb674718b1d84355fbd16f1a4c52c68dfe481dfb66b3ebb`，较 v0.2.3 本地 3,011,017 B **+59,771 B / +1.99%**（图标与页面样式）；`tools/check-size.ps1` **PASS**（<20MB）。release profile 链接期出现一条 MSVC linker stdout 提示（`linker_messages`），非代码告警，clippy 门禁不受影响。
+- **文档**：CHANGELOG 新增 `### v0.2.4（发布）`；LESSONS ④ 趋势表加行；SPEC §7 主流程文案同步「方案 A=稳妥清理」并去掉「侧栏」表述（UI 已改顶部导航）。
+- **门禁时效**：性能（2026-09-29）、误删率（2026-10-04）、还原率（2026-10-04）**本轮未重跑，证据早于当前 HEAD**，不阻塞发布。
+- **下一步**：本地提交后停下；待作者放行再执行 annotated tag `v0.2.4` → `git push origin main` + `git push origin v0.2.4` → 核对 workflow run / 四资产哈希 / manifest 回推。
+
 ## 2026-11-23 | 清理建议 V0：类目级三态建议（纯前端、零契约）
 
 - **范围**：按 `docs/dev/DESIGN-SUGGEST-2026-11-23.md` 落地 V0，执行用户拍板的五条：① 方案 A 由「推荐清理」改名「稳妥清理」，与徽标「建议清理」区分；② 建议摘要同时出现在一键清理卡与完整报告；③ 🟢 可出「建议保留」，但必须有具体依据（可信的近期访问），默认罕见；④ `rebuildable`/`impacts` 规则属性本批不做；⑤ `verified` 不进公开 schema。

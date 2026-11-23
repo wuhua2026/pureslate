@@ -6,7 +6,7 @@
 
 ## 下载安装
 
-最新版本：**[v0.2.3](https://github.com/wuhua2026/pureslate/releases/tag/v0.2.3)**（从 [**GitHub Releases**](https://github.com/wuhua2026/pureslate/releases/latest) 始终获取最新版），下载 `PureSlate_0.2.3_x64-setup.exe`：
+最新版本：**[v0.2.4](https://github.com/wuhua2026/pureslate/releases/tag/v0.2.4)**（从 [**GitHub Releases**](https://github.com/wuhua2026/pureslate/releases/latest) 始终获取最新版），下载 `PureSlate_0.2.4_x64-setup.exe`：
 
 - 系统要求：Windows 10 / 11（x64）；
 - 安装包 sha256 见 Release 页附件与 `update-manifest.json`；
