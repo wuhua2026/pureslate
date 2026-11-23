@@ -1,10 +1,10 @@
 {
-  "rulesVersion": "0.2.3",
-  "rulesSha256": "6cb58f8c904b0ec98c338561582fbb8d7957c9709f2ebe785d923e7e3d4e7ba0",
-  "appUrl": "https://github.com/wuhua2026/pureslate/releases/download/v0.2.3/PureSlate_0.2.3_x64-setup.exe",
-  "appVersion": "0.2.3",
-  "rulesUrl": "https://raw.githubusercontent.com/wuhua2026/pureslate/main/rules/pureslate-rules-0.2.3.json",
-  "rulesSig": "38bd0c34619e774879b174c99142ac1a1b7d9d47d87789d7e4f41c869f838078372d8d722a1f29adf07f1b7f3463f3ecb43ea4a60c52e336c4cdae08d023ea8b",
-  "appSha256": "b4ea6ae6a52423bdc94eae65d7f6c36fa8ab14a28a1e8fe4fab8420fcafaee4f",
-  "rulesKeyId": "1"
+  "rulesKeyId": "1",
+  "rulesSig": "40a61c50cc5ddc814e86fe3bdce39fced9961786a1e39fe0f9f7ed00524378e18c26fb0f3cac977d7c5def26b7e7f3ae7591294ea20ab43a1eba60d8e4fe3bb3",
+  "appSha256": "784bbd2af9128062208327f4f0af7249f3dd8aa5979becf0b87db207e359bb70",
+  "rulesUrl": "https://raw.githubusercontent.com/wuhua2026/pureslate/main/rules/pureslate-rules-0.2.4.json",
+  "rulesSha256": "73c1b1e31de9af95a9e324074430eecfbb54f7721aeb0c4092d5eba059e007d9",
+  "appVersion": "0.2.4",
+  "appUrl": "https://github.com/wuhua2026/pureslate/releases/download/v0.2.4/PureSlate_0.2.4_x64-setup.exe",
+  "rulesVersion": "0.2.4"
 }
